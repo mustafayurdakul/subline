@@ -5,11 +5,11 @@ width`), so the algorithm is testable without a GUI toolkit.
 
 Preference order when the translation is longer than the source:
 1. with `prefer_grow` (the default for subtitles): keep the source font
-   size and wrap, letting the box grow into free space the caller reports
-   as `max_height`, so every line renders at the same size;
+   size and wrap, letting the box grow into the free space the caller
+   reports as `max_height`, so every line renders at the same size;
 2. shrink the font a little (down to `shrink_floor` of the source size) so
    it still fits the source box, wrapping as needed;
-3. keep the font size and let the box grow (without `prefer_grow`, this
+3. keep the font size and let the box grow (without `prefer_grow` this
    comes after the small shrink);
 4. shrink further, down to `min_px`;
 5. truncate with an ellipsis.
@@ -18,8 +18,8 @@ Preference order when the translation is longer than the source:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 Measure = Callable[[str, int], float]
 
@@ -85,7 +85,7 @@ def fit_text(
     paragraphs = text.split("\n")
     limit = max(height, max_height if max_height is not None else height)
     base_px = max(min_px, int(base_px))
-    floor_px = max(min_px, int(round(base_px * shrink_floor)))
+    floor_px = max(min_px, round(base_px * shrink_floor))
 
     def layout_at(px: int) -> tuple[list[str], float, float]:
         lines: list[str] = []

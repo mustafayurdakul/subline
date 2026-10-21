@@ -1,13 +1,14 @@
 """Command: pre-translate a game's script into its translation cache.
 
-  gametl-pretranslate script.txt --game "Fake Game"                 # Batches API, Opus 5.5, waits up to 10 min
-  gametl-pretranslate script.srt --game "Fake Game" --sync          # normal API, immediate
-  gametl-pretranslate --resume JOBFILE                              # collect a batch submitted earlier
+gametl-pretranslate script.txt --game "Fake Game"            # Batches API, Opus 5.5, waits up to 10 min
+gametl-pretranslate script.srt --game "Fake Game" --sync     # normal API, immediate
+gametl-pretranslate --resume JOBFILE                         # collect a batch submitted earlier
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -15,13 +16,11 @@ from gametl.app.config import ProfileStore, slug
 from gametl.app.controller import ensure_anthropic_credentials
 from gametl.translate.cache import TranslationCache
 from gametl.translate.claude import ClaudeTranslator
-from gametl.translate.pretranslate import (
-    BatchJob,
-    load_lines,
-    pretranslate_sync,
-    submit_batch,
-    wait_for_batch,
-)
+from gametl.translate.pretranslate import BatchJob, load_lines, pretranslate_sync, submit_batch, wait_for_batch
+
+
+def say(text: str) -> None:
+    print(text, flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,8 +34,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--target-lang", default="tr")
     p.add_argument("--model", default="claude-opus-5-5", help="quality model by default; batches cost half")
     p.add_argument("--effort", default="low")
-    p.add_argument("--glossary", help="JSON file {\"term\": \"translation\"}")
-    p.add_argument("--tone")
+    p.add_argument("--glossary", help='JSON file {"term": "translation"}')
+    p.add_argument("--tone", help="notes for the translator on tone and formality")
     p.add_argument("--chunk-size", type=int, default=20)
     p.add_argument("--sync", action="store_true", help="use the normal API now instead of a batch")
     p.add_argument("--wait", type=float, default=600.0, help="seconds to wait for the batch (0 = submit and exit)")
@@ -47,30 +46,23 @@ def main(argv: list[str] | None = None) -> int:
     if not args.resume and (not args.script or not args.game):
         p.error("a script file and --game are required (or --resume JOBFILE)")
     if not ensure_anthropic_credentials():
-        print("no Anthropic credentials: set ANTHROPIC_API_KEY in your user environment variables")
+        say("no Anthropic credentials: set ANTHROPIC_API_KEY in your user environment variables")
         return 2
 
     store = ProfileStore(args.data_dir)
-    say = lambda s: print(s, flush=True)  # noqa: E731
-
-    glossary = None
-    if args.glossary:
-        import json
-
-        glossary = json.loads(Path(args.glossary).read_text(encoding="utf-8"))
 
     if args.resume:
         job = BatchJob.load(Path(args.resume))
         game = Path(args.resume).stem.split(".")[0]
         cache = TranslationCache(store.cache_dir / f"{game}.{job.target_lang}.claude.json")
-        translator = ClaudeTranslator(model=args.model, source_lang=args.source_lang, target_lang=job.target_lang)
-        ended, added, failed = wait_for_batch(job, translator, cache, args.wait, progress=say)
+        ended, added, failed = wait_for_batch(job, cache, args.wait, progress=say)
         if not ended:
             say("batch still running; run --resume again later")
             return 3
         say(f"collected {added} lines ({failed} chunks failed); cache now {len(cache)} entries")
         return 0
 
+    glossary = json.loads(Path(args.glossary).read_text(encoding="utf-8")) if args.glossary else None
     lines = load_lines(args.script)
     cache_path = store.cache_dir / f"{slug(args.game)}.{args.target_lang}.claude.json"
     cache = TranslationCache(cache_path)
@@ -79,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         effort=args.effort,
         game=args.game,
         glossary=glossary,
-        style=args.tone,
+        tone=args.tone,
         source_lang=args.source_lang,
         target_lang=args.target_lang,
     )
@@ -99,11 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     job.save(job_path)
     say(f"batch {job.batch_id} submitted with {len(job.chunks)} chunks; job saved to {job_path}")
     if args.wait <= 0:
-        say(f"collect later with: gametl-pretranslate --resume \"{job_path}\"")
+        say(f'collect later with: gametl-pretranslate --resume "{job_path}"')
         return 0
-    ended, added, failed = wait_for_batch(job, translator, cache, args.wait, progress=say)
+    ended, added, failed = wait_for_batch(job, cache, args.wait, progress=say)
     if not ended:
-        say(f"still running after {args.wait:.0f}s; collect later with: gametl-pretranslate --resume \"{job_path}\"")
+        say(f'still running after {args.wait:.0f}s; collect later with: gametl-pretranslate --resume "{job_path}"')
         return 3
     say(f"collected {added} lines ({failed} chunks failed); cache now {len(cache)} entries")
     return 0

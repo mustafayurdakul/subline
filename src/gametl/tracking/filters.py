@@ -21,7 +21,7 @@ class LineFilter:
         return bool(self.zones or self.patterns)
 
     @staticmethod
-    def compile(zones: list[Box] | None = None, patterns: list[str] | None = None) -> "LineFilter":
+    def compile(zones: list[Box] | None = None, patterns: list[str] | None = None) -> LineFilter:
         return LineFilter(
             zones=list(zones or []),
             patterns=[re.compile(p, re.IGNORECASE) for p in (patterns or [])],

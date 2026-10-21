@@ -3,14 +3,13 @@ ignores and hotkeys; apply at once or save as a per-game profile."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -27,11 +27,32 @@ from PySide6.QtWidgets import (
 from ..capture.windows import list_windows
 from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 
-OCR_LANGS = ["en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it", "pt", "pl", "nl", "tr", "cyrillic", "arabic"]
+# fmt: off
+OCR_LANGS = [
+    "en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it", "pt", "pl", "nl", "tr", "cyrillic", "arabic",
+]
+# fmt: on
+TRANSLATORS = ["claude", "deepl", "offline", "uppercase", "echo", "verbose"]
+CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
+HOTKEY_LABELS = {
+    "toggle": "Start / stop overlay",
+    "pause": "Pause / resume",
+    "rescan": "Rescan screen",
+    "select": "Select area to translate",
+    "settings": "Open settings",
+}
 
 
 def _lines(widget: QPlainTextEdit) -> list[str]:
-    return [ln.strip() for ln in widget.toPlainText().splitlines() if ln.strip()]
+    return [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
+
+
+def _row(*widgets: QWidget) -> QHBoxLayout:
+    """A field followed by its buttons, the field taking the spare width."""
+    row = QHBoxLayout()
+    for index, widget in enumerate(widgets):
+        row.addWidget(widget, 1 if index == 0 else 0)
+    return row
 
 
 class ModelDownloadThread(QThread):
@@ -61,8 +82,9 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: Settings, store: ProfileStore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("gametl settings")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(560)
         self.store = store
+        self._download: ModelDownloadThread | None = None
         self._build()
         self.load_settings(settings)
 
@@ -79,10 +101,8 @@ class SettingsDialog(QDialog):
         self.profile_name.setPlaceholderText("profile name (default: game name)")
         save_btn = QPushButton("Save profile")
         save_btn.clicked.connect(self.save_profile)
-        profile_row = QHBoxLayout()
-        profile_row.addWidget(QLabel("Profile"))
-        profile_row.addWidget(self.profile_name, 1)
-        profile_row.addWidget(save_btn)
+        profile_row = _row(self.profile_name, save_btn)
+        profile_row.insertWidget(0, QLabel("Profile"))
 
         buttons = QDialogButtonBox()
         apply_btn = buttons.addButton("Apply and run", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -102,10 +122,7 @@ class SettingsDialog(QDialog):
         self.window_combo.setEditable(True)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.refresh_windows)
-        row = QHBoxLayout()
-        row.addWidget(self.window_combo, 1)
-        row.addWidget(refresh)
-        form.addRow("Game window", row)
+        form.addRow("Game window", _row(self.window_combo, refresh))
         self.game = QLineEdit()
         self.game.setPlaceholderText("name used in the prompt and cache; default: window title")
         form.addRow("Game name", self.game)
@@ -114,16 +131,15 @@ class SettingsDialog(QDialog):
         select_btn = QPushButton("Select on screen")
         select_btn.setToolTip("Drag a rectangle over the game (also the Select hotkey)")
         select_btn.clicked.connect(self.select_area_requested.emit)
-        roi_row = QHBoxLayout()
-        roi_row.addWidget(self.roi, 1)
-        roi_row.addWidget(select_btn)
-        form.addRow("Area to translate", roi_row)
+        form.addRow("Area to translate", _row(self.roi, select_btn))
         self.ignore_zones = QPlainTextEdit()
         self.ignore_zones.setPlaceholderText("one zone per line, x,y,w,h as fractions of the client area")
         self.ignore_zones.setFixedHeight(70)
         form.addRow("Ignore zones", self.ignore_zones)
         self.ignore_patterns = QPlainTextEdit()
-        self.ignore_patterns.setPlaceholderText("one regex per line, e.g. ^\\d+$")
+        self.ignore_patterns.setPlaceholderText(
+            "one regex per line (case-insensitive), e.g. ^[^a-z]+$ drops lines without letters"
+        )
         self.ignore_patterns.setFixedHeight(70)
         form.addRow("Ignore patterns", self.ignore_patterns)
         self.include_frame = QCheckBox("read the title bar and window frame too")
@@ -135,7 +151,8 @@ class SettingsDialog(QDialog):
 
     def _translation_tab(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
+        column = QVBoxLayout(page)
+        form = QFormLayout()
         self.lang = QComboBox()
         self.lang.setEditable(True)
         self.lang.addItems(OCR_LANGS)
@@ -146,25 +163,30 @@ class SettingsDialog(QDialog):
         self.target_lang = QLineEdit()
         form.addRow("Target language", self.target_lang)
         self.translator = QComboBox()
-        self.translator.addItems(["claude", "deepl", "offline", "uppercase", "echo", "verbose"])
+        self.translator.addItems(TRANSLATORS)
         self.translator.setToolTip("deepl needs a key in the DEEPL_AUTH_KEY environment variable (free tier available)")
         form.addRow("Translator", self.translator)
         self.draft = QComboBox()
         self.draft.addItems(["none", "offline", "deepl"])
-        self.draft.setToolTip("Show a fast draft, replaced when the translator answers: offline needs the model below, deepl needs DEEPL_AUTH_KEY.")
+        self.draft.setToolTip(
+            "Show a fast draft, replaced when the translator answers: "
+            "offline needs the downloaded model, deepl needs DEEPL_AUTH_KEY."
+        )
         self.download_btn = QPushButton("Download offline model")
         self.download_btn.clicked.connect(self.download_model)
-        draft_row = QHBoxLayout()
-        draft_row.addWidget(self.draft, 1)
-        draft_row.addWidget(self.download_btn)
-        form.addRow("Draft", draft_row)
+        form.addRow("Draft", _row(self.draft, self.download_btn))
         self.download_status = QLabel("")
         self.download_status.setWordWrap(True)
         form.addRow("", self.download_status)
-        self._download: ModelDownloadThread | None = None
+        self.use_cache_file = QCheckBox("remember translations per game on disk")
+        form.addRow("", self.use_cache_file)
+        column.addLayout(form)
+
+        claude = QGroupBox("Claude")
+        form = QFormLayout(claude)
         self.model = QComboBox()
         self.model.setEditable(True)
-        self.model.addItems(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"])
+        self.model.addItems(CLAUDE_MODELS)
         form.addRow("Model", self.model)
         self.effort = QComboBox()
         self.effort.addItems(["low", "medium", "high"])
@@ -177,65 +199,69 @@ class SettingsDialog(QDialog):
         self.glossary_path = QLineEdit()
         browse = QPushButton("Browse")
         browse.clicked.connect(self._browse_glossary)
-        row = QHBoxLayout()
-        row.addWidget(self.glossary_path, 1)
-        row.addWidget(browse)
-        form.addRow("Glossary (JSON)", row)
+        form.addRow("Glossary (JSON)", _row(self.glossary_path, browse))
         self.tone = QLineEdit()
         self.tone.setPlaceholderText("notes on tone and formality (optional)")
         form.addRow("Tone notes", self.tone)
-        self.use_cache_file = QCheckBox("remember translations per game on disk")
-        form.addRow("", self.use_cache_file)
+        column.addWidget(claude)
+        column.addStretch(1)
         return page
 
     def _appearance_tab(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
+        column = QVBoxLayout(page)
+        form = QFormLayout()
         self.render = QComboBox()
         self.render.addItems(["subtitle", "inplace"])
-        self.render.setToolTip("subtitle: with an area selected, one fixed style centred in it. inplace: per block at the OCR box.")
+        self.render.setToolTip(
+            "subtitle: with an area selected, one fixed style centred in it. inplace: per block at the OCR box."
+        )
         form.addRow("Render", self.render)
-        self.subtitle_font_px = QSpinBox()
-        self.subtitle_font_px.setRange(0, 200)
-        self.subtitle_font_px.setSpecialValueText("game's own size")
-        form.addRow("Subtitle font size (px)", self.subtitle_font_px)
-        self.subtitle_color = QLineEdit()
-        self.subtitle_color.setPlaceholderText("#FFFFFF")
-        form.addRow("Subtitle colour", self.subtitle_color)
-        self.subtitle_background = QComboBox()
-        self.subtitle_background.addItems(["pill", "none"])
-        form.addRow("Subtitle background", self.subtitle_background)
-        self.subtitle_position = QComboBox()
-        self.subtitle_position.addItems(["source", "bottom", "center"])
-        self.subtitle_position.setToolTip("source: where the game drew the line; bottom / center: of the selected area")
-        form.addRow("Subtitle position", self.subtitle_position)
-        self.subtitle_hide_source = QCheckBox("hide the original line when the subtitle is drawn elsewhere")
-        form.addRow("", self.subtitle_hide_source)
-        self.center_zone = QCheckBox("keep a selected area centred horizontally")
-        form.addRow("", self.center_zone)
-        self.style = QComboBox()
-        self.style.addItems(["auto", "patch", "pill", "outline"])
-        form.addRow("In-place style", self.style)
         self.font = QLineEdit()
         form.addRow("Font", self.font)
         self.fps = QDoubleSpinBox()
         self.fps.setRange(1.0, 60.0)
         self.fps.setDecimals(0)
         form.addRow("Capture rate (fps)", self.fps)
+        column.addLayout(form)
+
+        subtitle = QGroupBox("Subtitle mode (with an area selected)")
+        form = QFormLayout(subtitle)
+        self.subtitle_font_px = QSpinBox()
+        self.subtitle_font_px.setRange(0, 200)
+        self.subtitle_font_px.setSpecialValueText("game's own size")
+        form.addRow("Font size (px)", self.subtitle_font_px)
+        self.subtitle_color = QLineEdit()
+        self.subtitle_color.setPlaceholderText("#FFFFFF")
+        form.addRow("Text colour", self.subtitle_color)
+        self.subtitle_background = QComboBox()
+        self.subtitle_background.addItems(["pill", "none"])
+        form.addRow("Background", self.subtitle_background)
+        self.subtitle_position = QComboBox()
+        self.subtitle_position.addItems(["source", "bottom", "center"])
+        self.subtitle_position.setToolTip("source: where the game drew the line; bottom / center: of the selected area")
+        form.addRow("Position", self.subtitle_position)
+        self.subtitle_hide_source = QCheckBox("hide the original line when the subtitle is drawn elsewhere")
+        form.addRow("", self.subtitle_hide_source)
+        self.center_zone = QCheckBox("keep a selected area centred horizontally")
+        form.addRow("", self.center_zone)
+        column.addWidget(subtitle)
+
+        inplace = QGroupBox("In-place mode")
+        form = QFormLayout(inplace)
+        self.style = QComboBox()
+        self.style.addItems(["auto", "patch", "pill", "outline"])
+        self.style.setToolTip("auto: patch the original out in its own colours, or a pill where the background is busy")
+        form.addRow("Style", self.style)
+        column.addWidget(inplace)
+        column.addStretch(1)
         return page
 
     def _hotkeys_tab(self) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
         self.hotkey_edits: dict[str, QLineEdit] = {}
-        labels = {
-            "toggle": "Start / stop overlay",
-            "pause": "Pause / resume",
-            "rescan": "Rescan screen",
-            "select": "Select area to translate",
-            "settings": "Open settings",
-        }
-        for name, label in labels.items():
+        for name, label in HOTKEY_LABELS.items():
             edit = QLineEdit()
             edit.setPlaceholderText(DEFAULT_HOTKEYS[name])
             self.hotkey_edits[name] = edit
@@ -249,11 +275,13 @@ class SettingsDialog(QDialog):
         current = self.window_combo.currentText()
         self.window_combo.clear()
         for w in sorted(list_windows(), key=lambda w: w.title.casefold()):
-            self.window_combo.addItem(f"{w.title}", w.hwnd)
+            self.window_combo.addItem(w.title, w.hwnd)
         if current:
             self.window_combo.setEditText(current)
 
     def selected_hwnd(self) -> int | None:
+        """The handle of the listed window the combo shows, or None when the
+        text was typed by hand (then the title substring is matched instead)."""
         index = self.window_combo.currentIndex()
         if index >= 0 and self.window_combo.itemText(index) == self.window_combo.currentText():
             data = self.window_combo.itemData(index)
@@ -330,7 +358,7 @@ class SettingsDialog(QDialog):
         s.target_lang = self.target_lang.text().strip() or "tr"
         s.translator = self.translator.currentText()
         s.draft = "" if self.draft.currentText() == "none" else self.draft.currentText()
-        s.model = self.model.currentText().strip() or "claude-haiku-5-5"
+        s.model = self.model.currentText().strip() or CLAUDE_MODELS[0]
         s.effort = self.effort.currentText()
         s.thinking = self.thinking.currentText()
         s.structured = self.structured.isChecked()
@@ -339,7 +367,7 @@ class SettingsDialog(QDialog):
         s.use_cache_file = self.use_cache_file.isChecked()
         s.style = self.style.currentText()
         s.render = self.render.currentText()
-        s.subtitle_font_px = int(self.subtitle_font_px.value())
+        s.subtitle_font_px = self.subtitle_font_px.value()
         s.subtitle_color = self.subtitle_color.text().strip() or "#FFFFFF"
         s.subtitle_background = self.subtitle_background.currentText()
         s.subtitle_position = self.subtitle_position.currentText()

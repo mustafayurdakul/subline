@@ -4,7 +4,7 @@ judge whether a flat "patch" of the background colour would look right.
 For the patch overlay style the original text is painted over with the
 background colour and the translation drawn in the text colour. On a busy
 background (artwork, gradients, video) no single colour hides the original,
-so the caller should fall back to a translucent pill with outlined text.
+so the caller falls back to a translucent pill with outlined text.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ def _luminance(pixels: np.ndarray) -> np.ndarray:
 
 
 def _robust_spread(values: np.ndarray) -> float:
-    """Standard deviation estimate from the median absolute deviation: a
+    """Standard deviation estimated from the median absolute deviation: a
     minority of outliers (anti-aliased glyph fringe inside the ring) does not
     register, while artwork or a steep gradient does."""
     if len(values) < 2:
@@ -47,11 +47,11 @@ def analyze_colors(
     text_fraction: float = 0.2,
     busy_std: float = 28.0,
 ) -> ColorSample:
-    """Background: median of a `margin`-pixel ring just outside the box (the
-    box is tight around the glyphs, so the ring is background). Text: median
-    of the `text_fraction` of inner pixels that differ most from it. Busy:
-    the ring, or the inner pixels closest to the background, vary by more
-    than `busy_std` in luminance."""
+    """Background: the median of a `margin`-pixel ring just outside the box
+    (the box is tight around the glyphs, so the ring is background). Text:
+    the median of the `text_fraction` of inner pixels that differ most from
+    it. Busy: the ring, or the inner pixels nearest the background colour,
+    vary by more than `busy_std` in luminance."""
     h, w = image_bgr.shape[:2]
     x0, y0 = max(0, bbox[0]), max(0, bbox[1])
     x1, y1 = min(w, bbox[2]), min(h, bbox[3])
@@ -89,12 +89,6 @@ def analyze_colors(
         busy=busy,
         contrast=contrast,
     )
-
-
-def sample_colors(image_bgr: np.ndarray, bbox: Box, margin: int = 3, text_fraction: float = 0.2) -> tuple[BGR, BGR]:
-    """(background, text) as BGR tuples; see `analyze_colors`."""
-    sample = analyze_colors(image_bgr, bbox, margin, text_fraction)
-    return sample.bg, sample.fg
 
 
 def bgr_to_rgb(c: BGR) -> tuple[int, int, int]:

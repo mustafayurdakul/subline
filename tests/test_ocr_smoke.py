@@ -44,7 +44,7 @@ def test_shift_moves_boxes(engine: RapidOcrEngine) -> None:
     result = engine.recognize(render_line("Hello world"))
     moved = result.shifted(100, 50)
     assert len(moved.lines) == len(result.lines)
-    for a, b in zip(result.lines, moved.lines):
+    for a, b in zip(result.lines, moved.lines, strict=False):
         assert b.bbox[0] == a.bbox[0] + 100
         assert b.bbox[1] == a.bbox[1] + 50
         assert b.text == a.text

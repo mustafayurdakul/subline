@@ -16,9 +16,10 @@ import csv
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .base import TranslationRequest
 from .cache import TranslationCache
@@ -56,7 +57,7 @@ def load_lines(path: Path | str) -> list[str]:
 def _load_srt(text: str) -> list[str]:
     entries: list[str] = []
     block: list[str] = []
-    for line in text.splitlines() + [""]:
+    for line in [*text.splitlines(), ""]:
         stripped = line.strip()
         if not stripped:
             if block:
@@ -115,7 +116,7 @@ def pretranslate_sync(
     added = 0
     for i, chunk in enumerate(chunked(todo, chunk_size)):
         results = translator.translate(TranslationRequest(chunk, translator.source_lang, target_lang))
-        for source, translated in zip(chunk, results):
+        for source, translated in zip(chunk, results, strict=True):
             if translated:
                 cache.put(source, target_lang, translated)
                 added += 1
@@ -135,10 +136,11 @@ class BatchJob:
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"batch_id": self.batch_id, "target_lang": self.target_lang, "chunks": self.chunks}, ensure_ascii=False, indent=1), encoding="utf-8")
+        data = {"batch_id": self.batch_id, "target_lang": self.target_lang, "chunks": self.chunks}
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "BatchJob":
+    def load(cls, path: Path) -> BatchJob:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(data["batch_id"], data["target_lang"], data["chunks"])
 
@@ -176,7 +178,7 @@ def submit_batch(
 ) -> BatchJob | None:
     """Create a batch for the lines not in the cache. None when nothing to do."""
     if translator.structured:
-        raise ValueError("batch pre-translation uses plain-JSON reply mode; create the translator with structured=False")
+        raise ValueError("batch pre-translation needs the plain-JSON reply mode (structured=False)")
     todo = [ln for ln in lines if cache.get(ln, target_lang) is None]
     if not todo:
         return None
@@ -191,13 +193,12 @@ def submit_batch(
 
 def collect_batch(
     job: BatchJob,
-    translator: ClaudeTranslator,
     cache: TranslationCache,
     client: Any = None,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[bool, int, int]:
-    """Fetch a batch's results into the cache. Returns (ended, succeeded
-    lines, failed chunks). When not ended, nothing is collected yet."""
+    """Fetch a batch's results into the cache. Returns (ended, lines added,
+    failed chunks). When the batch has not ended, nothing is collected yet."""
     say = progress or (lambda _s: None)
     if client is None:
         import anthropic
@@ -206,7 +207,10 @@ def collect_batch(
     batch = client.messages.batches.retrieve(job.batch_id)
     if batch.processing_status != "ended":
         counts = batch.request_counts
-        say(f"batch {job.batch_id}: {batch.processing_status}, processing {counts.processing}, succeeded {counts.succeeded}")
+        say(
+            f"batch {job.batch_id}: {batch.processing_status}, "
+            f"processing {counts.processing}, succeeded {counts.succeeded}"
+        )
         return False, 0, 0
     added = failed = 0
     for result in client.messages.batches.results(job.batch_id):
@@ -236,7 +240,6 @@ def collect_batch(
 
 def wait_for_batch(
     job: BatchJob,
-    translator: ClaudeTranslator,
     cache: TranslationCache,
     timeout: float,
     poll: float = 20.0,
@@ -245,7 +248,7 @@ def wait_for_batch(
 ) -> tuple[bool, int, int]:
     deadline = time.monotonic() + timeout
     while True:
-        ended, added, failed = collect_batch(job, translator, cache, client, progress)
+        ended, added, failed = collect_batch(job, cache, client, progress)
         if ended or time.monotonic() >= deadline:
             return ended, added, failed
         time.sleep(poll)

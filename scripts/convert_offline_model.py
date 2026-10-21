@@ -1,9 +1,11 @@
 """Convert an OPUS-MT model from Hugging Face into the app's offline format.
 
 The conversion needs PyTorch and transformers, which the app itself does
-not ship. Run it once in a throwaway environment on top of the project:
+not ship. Run it once in a throwaway environment on top of the project
+(one command line):
 
-  uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr
+  uv run --with torch --with transformers --with huggingface_hub
+      python scripts/convert_offline_model.py --source en --target tr
 
 Default model per pair: Helsinki-NLP/opus-mt-tc-big-<src>-<tgt> (good
 quality, ~230M parameters); pass --model to use another Marian model. The
@@ -17,7 +19,6 @@ import argparse
 import json
 import shutil
 import sys
-from pathlib import Path
 
 
 def main() -> int:
@@ -43,7 +44,10 @@ def main() -> int:
         import ctranslate2
         from huggingface_hub import hf_hub_download
     except ImportError as exc:
-        print(f"missing {exc.name}; run with: uv run --with torch --with transformers --with huggingface_hub python {sys.argv[0]} ...")
+        print(
+            f"missing {exc.name}; run with: "
+            f"uv run --with torch --with transformers --with huggingface_hub python {sys.argv[0]} ..."
+        )
         return 2
 
     if dest.exists():
@@ -52,7 +56,9 @@ def main() -> int:
     model_out = dest / "model"
     print(f"converting {model_id} -> {model_out} ({args.quantization})", flush=True)
     converter = ctranslate2.converters.TransformersConverter(model_id)
-    converter.convert(str(model_out), quantization=None if args.quantization == "none" else args.quantization, force=True)
+    converter.convert(
+        str(model_out), quantization=None if args.quantization == "none" else args.quantization, force=True
+    )
 
     for name in ("source.spm", "target.spm"):
         path = hf_hub_download(model_id, name)
@@ -60,7 +66,10 @@ def main() -> int:
         print(f"copied {name}")
 
     (dest / "gametl.json").write_text(
-        json.dumps({"source": args.source, "target": args.target, "model": model_id, "quantization": args.quantization}, indent=2),
+        json.dumps(
+            {"source": args.source, "target": args.target, "model": model_id, "quantization": args.quantization},
+            indent=2,
+        ),
         encoding="utf-8",
     )
     print(f"offline model ready: {dest}")

@@ -1,15 +1,15 @@
 """Claude translation backend (Anthropic Python SDK).
 
 One request per batch: the system prompt (fixed per session, cache-marked)
-carries the rules, the game name and the glossary; the user message is a JSON
-document with the target language, recent context and the numbered items;
-the reply is a JSON object parsed into `TranslationBatch`.
+carries the rules, the game name, tone notes and the glossary; the user
+message is a JSON document with the target language, recent context and
+the items; the reply is JSON parsed into `TranslationBatch`.
 
-Two reply modes. Default: the prompt asks for JSON and the text is parsed
-here (malformed output raises TranslationError and the batch is retried
-after a cooldown). Optional `structured=True` uses server-side structured
-output, which guarantees the shape but measured about 0.5 s slower per call
-on Haiku 5.5 (benchmark in PLAN.md section 11).
+Two reply modes. Default: the prompt asks for a JSON list and the text is
+parsed here (malformed output raises TranslationError and the batch is
+retried after a cooldown). Optional `structured=True` uses server-side
+structured output, which guarantees the shape but measured about 0.5 s
+slower per call on Haiku 5.5 (PLAN.md section 11).
 
 Model notes (Claude Haiku 5.5, the default): thinking is sent as disabled
 (allowed at effort low to high) since it measured no quality gain here;
@@ -37,15 +37,23 @@ class TranslationBatch(BaseModel):
     items: list[TranslatedItem]
 
 
-_SYSTEM_RULES = """Translate text captured by OCR from a video game screen{source_clause} into {target}.
-Keep the meaning, tone and register of game dialogue; items may also be UI labels or HUD text.
-Keep each translation about as long as its source (it must fit the same space), keep its line breaks (N lines in, N out), and keep numbers, units, symbols, placeholders and proper names unless the glossary says otherwise.
-Items may contain OCR errors (l/1, O/0, spacing): translate the intended text.
-"context" holds recent lines with their translations, oldest first; use it only for consistency.
-Reply with JSON only, no notes."""
+_SYSTEM_RULES = "\n".join(
+    [
+        "Translate text captured by OCR from a video game screen{source_clause} into {target}.",
+        "Keep the meaning, tone and register of game dialogue; items may also be UI labels or HUD text.",
+        "Keep each translation about as long as its source (it must fit the same space), keep its line breaks "
+        "(N lines in, N out), and keep numbers, units, symbols, placeholders and proper names unless the glossary "
+        "says otherwise.",
+        "Items may contain OCR errors (l/1, O/0, spacing): translate the intended text.",
+        '"context" holds recent lines with their translations, oldest first; use it only for consistency.',
+        "Reply with JSON only, no notes.",
+    ]
+)
 
-_PLAIN_FORMAT = '\nReply exactly as {"items": ["<translation of item 0>", "<translation of item 1>", ...]}: one string per item, same order and count.'
-
+_PLAIN_FORMAT = (
+    '\nReply exactly as {"items": ["<translation of item 0>", "<translation of item 1>", ...]}: '
+    "one string per item, same order and count."
+)
 
 # USD per million tokens: (input, output, cache read, cache write), prompts <= 100K tokens.
 PRICES_PER_MTOK: dict[str, tuple[float, float, float, float]] = {
@@ -70,9 +78,9 @@ def supports_disabled_thinking(model: str) -> bool:
     high or below; Claude Opus 5.5 and Claude Sonnet 5.5 return 400 for it
     (thinking stays adaptive there, effort is the only lever)."""
     model = model.lower()
-    if model.startswith("claude-opus-5-5") or model.startswith("claude-sonnet-5-5"):
+    if model.startswith(("claude-opus-5-5", "claude-sonnet-5-5")):
         return False
-    return model.startswith("claude-haiku-5-5") or model.startswith("claude-opus-5")
+    return model.startswith(("claude-haiku-5-5", "claude-opus-5"))
 
 
 class ClaudeTranslator:
@@ -85,7 +93,7 @@ class ClaudeTranslator:
         thinking: str = "disabled",  # "disabled" | "adaptive"
         game: str | None = None,
         glossary: dict[str, str] | None = None,
-        style: str | None = None,
+        tone: str | None = None,  # notes on tone and formality
         source_lang: str | None = None,
         target_lang: str = "tr",
         max_tokens: int = 2048,
@@ -99,7 +107,7 @@ class ClaudeTranslator:
         self.structured = structured
         self.game = game
         self.glossary = dict(glossary or {})
-        self.style = style
+        self.tone = tone
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.max_tokens = max_tokens
@@ -124,15 +132,12 @@ class ClaudeTranslator:
             return cached
         source = language_name(source_lang)
         target = language_name(target_lang) or target_lang
-        text = _SYSTEM_RULES.format(
-            target=target,
-            source_clause=f" from {source}" if source else "",
-        )
+        text = _SYSTEM_RULES.format(target=target, source_clause=f" from {source}" if source else "")
         extras: list[str] = []
         if self.game:
             extras.append(f"Game: {self.game}.")
-        if self.style:
-            extras.append(f"Style notes: {self.style}")
+        if self.tone:
+            extras.append(f"Style notes: {self.tone}")
         if self.glossary:
             lines = "\n".join(f"- {k} -> {v}" for k, v in sorted(self.glossary.items()))
             extras.append("Glossary (always use these renderings):\n" + lines)
@@ -145,13 +150,13 @@ class ClaudeTranslator:
         return blocks
 
     def user_payload(self, request: TranslationRequest) -> str:
-        """Plain mode sends items as a positional list (fewer tokens in and
-        out); structured mode keeps numbered objects to match the schema."""
+        """Plain mode sends the items as a positional list (fewer tokens in
+        and out); structured mode keeps numbered objects to match the schema."""
         payload: dict[str, Any] = {
             "target_language": language_name(request.target_lang) or request.target_lang,
         }
         if request.context:
-            payload["context"] = [[s, t] for s, t in request.context]
+            payload["context"] = [[source, target] for source, target in request.context]
         if self.structured:
             payload["items"] = [{"id": i, "text": t} for i, t in enumerate(request.texts)]
         else:
@@ -166,8 +171,7 @@ class ClaudeTranslator:
         text = text.strip()
         if text.startswith("```"):
             text = text.strip("`")
-            if text.startswith("json"):
-                text = text[4:]
+            text = text.removeprefix("json")
         start, end = text.find("{"), text.rfind("}")
         if start < 0 or end < 0:
             raise TranslationError("no JSON object in response text")

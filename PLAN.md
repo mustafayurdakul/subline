@@ -851,3 +851,36 @@ when it overlaps the source line, it is widened to one shape covering
 both; when the subtitle sits elsewhere, a matching dark band hides the
 source line unless "hide the original line" is turned off
 (`subtitle_hide_source`, `--show-source`).
+
+## 21. Polish pass (2026-10-22)
+
+A review of the whole codebase with no functional change intended:
+
+- **Lint and format**: ruff is now a dev dependency with its configuration
+  in `pyproject.toml` (line length 120, pep8-naming with Qt overrides
+  exempt). `ruff check` and `ruff format --check` pass on `src`, `tests`
+  and `scripts`; compact lookup tables (language codes, key names) are
+  fenced off from the formatter.
+- **Readability**: `TextBlock` carries explicit `draft`, `busy` and
+  `contrast` fields instead of an untyped `extra` dict; the translation
+  service returns a `BatchResult` dataclass and folds drafts and finals in
+  two small methods; the controller's `start()` is split into service and
+  pipeline-config builders, with one `capture_area()` helper replacing the
+  repeated client-area logic; the pipeline loop handles one frame in
+  `_process()`; the overlay shares one layout cache between the in-place
+  and subtitle painters and names its colours; the command-line overlay
+  of options on a profile is table-driven.
+- **Cleanup**: removed the unused `latest()` on the capture, `sample_colors`
+  and `fit_font` (tests use `analyze_colors` and `layout_for`), the unused
+  `translator` parameter on batch collection, the re-export of
+  `normalize_text` from the tracker, and `scripts/env.ps1` with its
+  long-path caveat (the project lives at a short path). `ClaudeTranslator`
+  takes `tone=` like the settings do (was `style=`). Package docstrings no
+  longer carry milestone markers; the OCR package no longer claims a
+  Windows OCR backend that was never written.
+- **Settings window**: the Translation tab groups the Claude-only fields,
+  the Appearance tab groups the subtitle-mode and in-place fields; the
+  ignore-pattern placeholder shows the no-letters pattern.
+- **README**: rewritten around how the app is used today (area selection,
+  subtitle mode, which translator to pick, the ignore pattern for phantom
+  numbers), with development notes at the end.

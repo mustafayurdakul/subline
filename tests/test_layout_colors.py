@@ -3,10 +3,10 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from gametl.layout.colors import analyze_colors, bgr_to_rgb, sample_colors
+from gametl.layout.colors import analyze_colors, bgr_to_rgb
 
 
-def test_sample_colors_white_text_on_blue() -> None:
+def test_white_text_on_blue() -> None:
     blue = (200, 50, 20)  # BGR
     image = np.empty((120, 400, 3), dtype=np.uint8)
     image[:] = blue
@@ -14,9 +14,9 @@ def test_sample_colors_white_text_on_blue() -> None:
     ys, xs = np.where(image[:, :, 1] > 200)  # the white glyph pixels
     bbox = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
 
-    bg, fg = sample_colors(image, bbox)
-    assert all(abs(a - b) <= 2 for a, b in zip(bg, blue)), bg
-    assert all(v >= 250 for v in fg), fg
+    sample = analyze_colors(image, bbox)
+    assert all(abs(a - b) <= 2 for a, b in zip(sample.bg, blue, strict=True)), sample.bg
+    assert all(v >= 250 for v in sample.fg), sample.fg
 
 
 def _text_image(background: np.ndarray) -> tuple[np.ndarray, tuple[int, int, int, int]]:
@@ -53,9 +53,10 @@ def test_gradient_background_is_busy_only_when_steep() -> None:
     assert analyze_colors(image, bbox).busy is True
 
 
-def test_sample_colors_degenerate_box() -> None:
+def test_degenerate_box_gets_defaults() -> None:
     image = np.zeros((10, 10, 3), dtype=np.uint8)
-    assert sample_colors(image, (5, 5, 5, 5)) == ((0, 0, 0), (255, 255, 255))
+    sample = analyze_colors(image, (5, 5, 5, 5))
+    assert (sample.bg, sample.fg, sample.busy) == ((0, 0, 0), (255, 255, 255), False)
 
 
 def test_bgr_to_rgb() -> None:

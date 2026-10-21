@@ -1,4 +1,7 @@
-"""Line to block grouping, cross-frame matching, stability gate, hysteresis.
+"""From OCR lines to tracked text blocks.
 
-M1+.
+`blocks` groups lines into blocks (a subtitle, a dialogue box, a label) and
+follows them from frame to frame with stable ids, a stability count and a
+few frames of grace when OCR misses one. `filters` drops lines the user
+never wants translated.
 """

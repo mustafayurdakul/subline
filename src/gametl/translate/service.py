@@ -1,15 +1,15 @@
 """Asynchronous translation front for the pipeline.
 
 The pipeline thread never waits on a translator. Each frame it asks
-`lookup_best()` for every stable block that has no final translation yet
-and hands the misses to `submit()`, which sends them as one batch on a
-worker thread. `drain()` folds finished batches into the cache and the
-context window; failed items get a cooldown so a broken network does not
-spam requests.
+`lookup_best()` for every stable block without a final translation and
+hands the misses to `submit()`, which sends them as one batch on a worker
+thread. `drain()` folds finished batches into the cache and the context
+window; failed items get a cooldown so a broken network does not spam
+requests.
 
-Two tiers: the final translator (Claude) whose results are cached and kept,
-and an optional draft translator (offline model) whose results are shown at
-once and replaced when the final answer arrives.
+Two tiers: the final translator, whose results are cached and kept, and an
+optional draft translator (offline model or DeepL) whose results are shown
+at once and replaced when the final answer arrives.
 """
 
 from __future__ import annotations
@@ -17,13 +17,21 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Callable
+from dataclasses import dataclass
 
 from .base import TranslationRequest, Translator
 from .cache import TranslationCache, numeric_template
 
-Result = tuple[str, list[str], list[str | None], Exception | None, float]  # kind, texts, results, error, ms
+
+@dataclass(slots=True)
+class BatchResult:
+    kind: str  # "final" | "draft"
+    texts: list[str]
+    results: list[str | None]  # one per text; None = not translated
+    error: Exception | None
+    elapsed_ms: float
 
 
 class TranslationService:
@@ -48,7 +56,8 @@ class TranslationService:
         self.retry_cooldown = retry_cooldown
         self.on_status = on_status
 
-        self._pool = ThreadPoolExecutor(max_workers=workers + (1 if draft_translator else 0), thread_name_prefix="translate")
+        workers += 1 if draft_translator else 0
+        self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="translate")
         self._lock = threading.Lock()
         self._inflight: set[str] = set()
         self._inflight_templates: set[str] = set()  # numeric templates of in-flight texts
@@ -56,15 +65,15 @@ class TranslationService:
         self._drafts: dict[str, str] = {}  # key -> draft translation (memory only)
         self._draft_inflight: set[str] = set()
         self._context: deque[tuple[str, str]] = deque(maxlen=context_lines)
-        self._futures: list[Future] = []
+        self._futures: list[Future[BatchResult]] = []
         self.stats = {"requests": 0, "items": 0, "translated": 0, "errors": 0, "cache_hits": 0, "drafts": 0}
-        self.latencies_ms: list[float] = []
-        self.draft_latencies_ms: list[float] = []
+        self.latencies_ms: deque[float] = deque(maxlen=5000)
+        self.draft_latencies_ms: deque[float] = deque(maxlen=5000)
 
     # -- pipeline side ---------------------------------------------------------
 
     def lookup(self, text: str) -> str | None:
-        """Final translation from the cache, or None."""
+        """The final translation from the cache, or None."""
         key = self.cache.key(text)
         with self._lock:
             if key in self._inflight:
@@ -98,11 +107,7 @@ class TranslationService:
                 if not key or key in seen:
                     continue
                 seen.add(key)
-                if (
-                    self.draft_translator is not None
-                    and key not in self._drafts
-                    and key not in self._draft_inflight
-                ):
+                if self.draft_translator is not None and key not in self._drafts and key not in self._draft_inflight:
                     self._draft_inflight.add(key)
                     draft_batch.append(text)
                 if key in self._inflight or self._failed_until.get(key, 0.0) > now:
@@ -116,63 +121,69 @@ class TranslationService:
                 if numbers:
                     self._inflight_templates.add(template)
                 batch.append(text)
-            started = False
             if draft_batch:
                 self._futures.append(self._pool.submit(self._run, "draft", draft_batch, []))
-                started = True
             if batch:
-                context = list(self._context)
                 self.stats["requests"] += 1
                 self.stats["items"] += len(batch)
-                self._futures.append(self._pool.submit(self._run, "final", batch, context))
-                started = True
-        return started
+                self._futures.append(self._pool.submit(self._run, "final", batch, list(self._context)))
+        return bool(draft_batch or batch)
 
     def drain(self) -> int:
-        """Fold finished batches into the cache. Returns final items translated."""
+        """Fold finished batches into the cache. Returns the number of final
+        translations that arrived."""
         with self._lock:
             done = [f for f in self._futures if f.done()]
             self._futures = [f for f in self._futures if not f.done()]
         translated = 0
         for future in done:
-            kind, texts, results, error, elapsed_ms = future.result()
-            now = time.monotonic()
-            if kind == "draft":
-                with self._lock:
-                    for text, result in zip(texts, results):
-                        key = self.cache.key(text)
-                        self._draft_inflight.discard(key)
-                        if result:
-                            self._drafts[key] = result
-                            self.stats["drafts"] += 1
-                    if error is None:
-                        self.draft_latencies_ms.append(elapsed_ms)
-                if error is not None and self.on_status:
-                    self.on_status(f"draft translation failed ({len(texts)} items): {error}")
-                continue
-
-            if error is None:
-                self.latencies_ms.append(elapsed_ms)
-                if self.on_status:
-                    self.on_status(f"translated {len(texts)} item(s) in {elapsed_ms:.0f} ms")
-            with self._lock:
-                for text, result in zip(texts, results):
-                    key = self.cache.key(text)
-                    self._inflight.discard(key)
-                    self._inflight_templates.discard(numeric_template(key)[0])
-                    if result:
-                        self.cache.put(text, self.target_lang, result)
-                        self._context.append((text, result))
-                        self._drafts.pop(key, None)
-                        translated += 1
-                    else:
-                        self._failed_until[key] = now + self.retry_cooldown
-            if error is not None:
-                self.stats["errors"] += 1
-                if self.on_status:
-                    self.on_status(f"translation failed ({len(texts)} items): {error}")
+            batch = future.result()
+            if batch.kind == "draft":
+                self._absorb_draft(batch)
+            else:
+                translated += self._absorb_final(batch)
         self.stats["translated"] += translated
         return translated
+
+    def _absorb_draft(self, batch: BatchResult) -> None:
+        with self._lock:
+            for text, result in zip(batch.texts, batch.results, strict=True):
+                key = self.cache.key(text)
+                self._draft_inflight.discard(key)
+                if result:
+                    self._drafts[key] = result
+                    self.stats["drafts"] += 1
+            if batch.error is None:
+                self.draft_latencies_ms.append(batch.elapsed_ms)
+        if batch.error is not None:
+            self._report(f"draft translation failed ({len(batch.texts)} items): {batch.error}")
+
+    def _absorb_final(self, batch: BatchResult) -> int:
+        translated = 0
+        retry_at = time.monotonic() + self.retry_cooldown
+        with self._lock:
+            for text, result in zip(batch.texts, batch.results, strict=True):
+                key = self.cache.key(text)
+                self._inflight.discard(key)
+                self._inflight_templates.discard(numeric_template(key)[0])
+                if result:
+                    self.cache.put(text, self.target_lang, result)
+                    self._context.append((text, result))
+                    self._drafts.pop(key, None)
+                    translated += 1
+                else:
+                    self._failed_until[key] = retry_at
+        if batch.error is None:
+            self.latencies_ms.append(batch.elapsed_ms)
+            self._report(f"translated {len(batch.texts)} item(s) in {batch.elapsed_ms:.0f} ms")
+        else:
+            self.stats["errors"] += 1
+            self._report(f"translation failed ({len(batch.texts)} items): {batch.error}")
+        return translated
+
+    def _report(self, text: str) -> None:
+        if self.on_status:
+            self.on_status(text)
 
     @property
     def pending(self) -> int:
@@ -185,7 +196,7 @@ class TranslationService:
 
     # -- worker side -----------------------------------------------------------
 
-    def _run(self, kind: str, texts: list[str], context: list[tuple[str, str]]) -> Result:
+    def _run(self, kind: str, texts: list[str], context: list[tuple[str, str]]) -> BatchResult:
         translator = self.draft_translator if kind == "draft" else self.translator
         assert translator is not None
         request = TranslationRequest(
@@ -194,9 +205,10 @@ class TranslationService:
         t0 = time.perf_counter()
         try:
             results = translator.translate(request)
-        except Exception as exc:  # any backend failure: cool down the whole batch
-            return kind, texts, [None] * len(texts), exc, (time.perf_counter() - t0) * 1000
+        except Exception as exc:  # any backend failure cools down the whole batch
+            return BatchResult(kind, texts, [None] * len(texts), exc, (time.perf_counter() - t0) * 1000)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         if len(results) != len(texts):
-            return kind, texts, [None] * len(texts), RuntimeError("translator returned a wrong number of items"), elapsed_ms
-        return kind, texts, results, None, elapsed_ms
+            error = RuntimeError(f"translator returned {len(results)} items for {len(texts)} texts")
+            return BatchResult(kind, texts, [None] * len(texts), error, elapsed_ms)
+        return BatchResult(kind, texts, list(results), None, elapsed_ms)

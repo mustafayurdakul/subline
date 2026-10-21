@@ -76,7 +76,7 @@ class Settings:
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Settings":
+    def from_dict(cls, data: dict) -> Settings:
         known = {f.name for f in dataclasses.fields(cls)}
         kwargs = {k: v for k, v in (data or {}).items() if k in known}
         settings = cls(**kwargs)
@@ -85,7 +85,7 @@ class Settings:
         settings.ignore_patterns = list(settings.ignore_patterns or [])
         return settings
 
-    def copy(self) -> "Settings":
+    def copy(self) -> Settings:
         return Settings.from_dict(self.to_dict())
 
     @property

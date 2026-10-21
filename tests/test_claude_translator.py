@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from gametl.translate.base import TranslationError, TranslationRequest
-from gametl.translate.claude import ClaudeTranslator, TranslationBatch, TranslatedItem
+from gametl.translate.claude import ClaudeTranslator, TranslatedItem, TranslationBatch
 
 
 class StubMessages:
@@ -115,7 +115,9 @@ def test_plain_mode_sends_positional_items_and_reads_string_lists() -> None:
     )
     client = StubClient(response)
     translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr")
-    out = translator.translate(TranslationRequest(["Stay close.", "I told you not to open that door."], target_lang="tr"))
+    out = translator.translate(
+        TranslationRequest(["Stay close.", "I told you not to open that door."], target_lang="tr")
+    )
     assert out == ["Yakın dur.", "O kapıyı açma dedim."]
     (call,) = client.messages.created
     payload = json.loads(call["messages"][0]["content"])

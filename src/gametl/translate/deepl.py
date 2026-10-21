@@ -18,6 +18,7 @@ FREE_URL = "https://api-free.deepl.com/v2/translate"
 PRO_URL = "https://api.deepl.com/v2/translate"
 
 # Our language codes (ISO or rapidocr names) -> DeepL codes.
+# fmt: off
 _CODES = {
     "en": "EN", "tr": "TR", "de": "DE", "fr": "FR", "es": "ES", "it": "IT", "pt": "PT", "pl": "PL",
     "nl": "NL", "ru": "RU", "uk": "UK", "cyrillic": "RU", "ar": "AR", "arabic": "AR", "ja": "JA",
@@ -25,6 +26,7 @@ _CODES = {
     "id": "ID", "cs": "CS", "da": "DA", "fi": "FI", "hu": "HU", "nb": "NB", "no": "NB", "ro": "RO",
     "sk": "SK", "sl": "SL", "sv": "SV", "bg": "BG", "et": "ET", "lt": "LT", "lv": "LV", "vi": "VI",
 }
+# fmt: on
 
 
 def deepl_code(lang: str | None) -> str | None:

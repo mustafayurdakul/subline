@@ -120,10 +120,10 @@ def test_batch_submit_save_and_collect(tmp_path: Path) -> None:
     loaded = BatchJob.load(path)
     assert loaded.chunks == job.chunks
 
-    ended, added, failed = collect_batch(loaded, translator, cache, client=client)
+    ended, added, failed = collect_batch(loaded, cache, client=client)
     assert ended is False and added == 0
     batches.status = "ended"
-    ended, added, failed = collect_batch(loaded, translator, cache, client=client)
+    ended, added, failed = collect_batch(loaded, cache, client=client)
     assert (ended, added, failed) == (True, 3, 0)
     assert cache.get("Run!", "tr") == "TR Run!"
     assert submit_batch(["Run!"], translator, cache, "tr", client=client) is None  # all cached

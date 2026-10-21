@@ -9,11 +9,11 @@ import pytest
 
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication
 
-from gametl.app.config import ProfileStore, Settings  # noqa: E402
-from gametl.app.main import build_parser, settings_from_args  # noqa: E402
-from gametl.app.settings_dialog import SettingsDialog  # noqa: E402
+from gametl.app.config import ProfileStore, Settings
+from gametl.app.main import build_parser, settings_from_args
+from gametl.app.settings_dialog import SettingsDialog
 
 
 @pytest.fixture(scope="module")

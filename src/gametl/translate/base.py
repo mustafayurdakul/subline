@@ -1,9 +1,9 @@
 """Translator interface.
 
 A translator turns a batch of source strings into target strings, in order.
-Backends: dummy (M1), Claude (M2), offline NMT (M5). Callers batch several
-blocks per call; a backend may be slow, so callers never invoke it on the UI
-thread (see `service.py`).
+Backends: Claude, DeepL, offline CTranslate2 models, and dummies for testing.
+A backend may be slow, so the pipeline never calls one directly: it goes
+through `service.py`, which runs batches on worker threads.
 """
 
 from __future__ import annotations
@@ -33,36 +33,16 @@ class Translator(Protocol):
         ...
 
 
+# rapidocr language codes and common ISO codes -> English names
+# fmt: off
 LANGUAGE_NAMES: dict[str, str] = {
-    # OCR language codes (rapidocr) and common ISO codes -> English names
-    "en": "English",
-    "tr": "Turkish",
-    "de": "German",
-    "fr": "French",
-    "es": "Spanish",
-    "it": "Italian",
-    "pt": "Portuguese",
-    "pl": "Polish",
-    "nl": "Dutch",
-    "ru": "Russian",
-    "uk": "Ukrainian",
-    "cyrillic": "Russian",
-    "ar": "Arabic",
-    "arabic": "Arabic",
-    "ja": "Japanese",
-    "japan": "Japanese",
-    "ko": "Korean",
-    "korean": "Korean",
-    "zh": "Chinese",
-    "ch": "Chinese",
-    "chinese_cht": "Traditional Chinese",
-    "th": "Thai",
-    "el": "Greek",
-    "vi": "Vietnamese",
-    "id": "Indonesian",
-    "hi": "Hindi",
-    "devanagari": "Hindi",
+    "en": "English", "tr": "Turkish", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian",
+    "pt": "Portuguese", "pl": "Polish", "nl": "Dutch", "ru": "Russian", "uk": "Ukrainian", "cyrillic": "Russian",
+    "ar": "Arabic", "arabic": "Arabic", "ja": "Japanese", "japan": "Japanese", "ko": "Korean", "korean": "Korean",
+    "zh": "Chinese", "ch": "Chinese", "chinese_cht": "Traditional Chinese", "th": "Thai", "el": "Greek",
+    "vi": "Vietnamese", "id": "Indonesian", "hi": "Hindi", "devanagari": "Hindi",
 }
+# fmt: on
 
 
 def language_name(code_or_name: str | None) -> str | None:

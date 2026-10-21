@@ -61,9 +61,7 @@ def enable_per_monitor_dpi_awareness() -> bool:
     """Make this process Per-Monitor-V2 DPI aware so all coordinates are
     physical pixels. Must run before any window is created. Returns False if
     the awareness was already set (by a manifest or an earlier call)."""
-    return bool(
-        _user32.SetProcessDpiAwarenessContext(_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-    )
+    return bool(_user32.SetProcessDpiAwarenessContext(_DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
 
 
 @dataclass(slots=True, frozen=True)
@@ -101,9 +99,7 @@ def is_cloaked(hwnd: int) -> bool:
     """Windows 10/11 keep some 'visible' windows cloaked (suspended store apps,
     windows on other virtual desktops). They cannot be captured usefully."""
     cloaked = wintypes.DWORD(0)
-    hr = _dwmapi.DwmGetWindowAttribute(
-        hwnd, _DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked)
-    )
+    hr = _dwmapi.DwmGetWindowAttribute(hwnd, _DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked))
     return hr == 0 and cloaked.value != 0
 
 
@@ -111,9 +107,7 @@ def window_rect(hwnd: int) -> Rect:
     """Visible bounds of the window (excludes the invisible resize border that
     GetWindowRect includes on Windows 10+)."""
     rect = wintypes.RECT()
-    hr = _dwmapi.DwmGetWindowAttribute(
-        hwnd, _DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect)
-    )
+    hr = _dwmapi.DwmGetWindowAttribute(hwnd, _DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect))
     if hr != 0:
         _user32.GetWindowRect(hwnd, ctypes.byref(rect))
     return (rect.left, rect.top, rect.right, rect.bottom)

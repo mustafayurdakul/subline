@@ -9,11 +9,10 @@ import pytest
 
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-from PySide6.QtGui import QFontMetrics  # noqa: E402
-from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget
 
-from gametl.capture.windows import enable_per_monitor_dpi_awareness, window_rect  # noqa: E402
-from gametl.overlay.window import (  # noqa: E402
+from gametl.capture.windows import enable_per_monitor_dpi_awareness, window_rect
+from gametl.overlay.window import (
     WS_EX_LAYERED,
     WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW,
@@ -21,6 +20,7 @@ from gametl.overlay.window import (  # noqa: E402
     WS_EX_TRANSPARENT,
     OverlayWindow,
     RenderBlock,
+    source_font_px,
     subtitle_rect,
 )
 
@@ -88,15 +88,15 @@ def test_overlay_native_styles_and_following(qapp: QApplication, target: QWidget
         qapp.processEvents()
 
 
-def test_fit_font_fits_width(qapp: QApplication, target: QWidget) -> None:
+def test_in_place_layout_fits_the_width(qapp: QApplication, target: QWidget) -> None:
     overlay = OverlayWindow(int(target.winId()))
-    lines = ["A fairly long translated subtitle line", "second"]
-    font = overlay.fit_font(lines, width=300, height=60)
-    fm = QFontMetrics(font)
-    assert max(fm.horizontalAdvance(ln) for ln in lines) <= 300
-    assert font.pixelSize() >= 6
-    big = overlay.fit_font(["Hi"], width=1000, height=50)
-    assert big.pixelSize() == int(50 * 0.8)
+    block = RenderBlock((0, 0, 300, 60), ["A fairly long translated subtitle line", "second"], source_lines=2)
+    layout = overlay.layout_for(block)
+    assert all(overlay.measure(line, layout.font_px) <= 300 for line in layout.lines)
+    assert layout.font_px >= 6
+    assert overlay.layout_for(block) is layout  # cached
+    short = overlay.layout_for(RenderBlock((0, 0, 1000, 50), ["Hi"]))
+    assert short.font_px == source_font_px(50, 1) == int(50 * 0.8)
 
 
 def test_set_blocks_and_paint_all_styles(qapp: QApplication, target: QWidget) -> None:
@@ -111,11 +111,13 @@ def test_set_blocks_and_paint_all_styles(qapp: QApplication, target: QWidget) ->
             RenderBlock((60, 260, 160, 280), [long_text], style="subtitle", zone=(0, 240, 400, 300), font_px=18),
             # One word: the wrapper never measures, so the font must still get registered (crashed before).
             RenderBlock((60, 260, 160, 280), ["Run!"], style="subtitle", zone=(0, 240, 400, 300), font_px=24),
-            RenderBlock((60, 260, 160, 280), ["Yes."], style="subtitle", zone=(0, 240, 400, 300), font_px=24, position="bottom"),
+            RenderBlock(
+                (60, 260, 160, 280), ["Yes."], style="subtitle", zone=(0, 240, 400, 300), font_px=24, position="bottom"
+            ),
         ]
     )
     overlay.grab()
-    assert getattr(overlay, "_paint_errors", 0) == 0
+    assert overlay.paint_errors == 0
     qapp.processEvents()
     image = overlay.grab().toImage()
     assert image.width() > 0

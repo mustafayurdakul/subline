@@ -36,7 +36,7 @@ def substitute_numbers(translation: str, old: list[str], new: list[str]) -> str 
     found = _DIGITS.findall(translation)
     if sorted(found) != sorted(old):
         return None
-    mapping = dict(zip(old, new))
+    mapping = dict(zip(old, new, strict=True))
     return _DIGITS.sub(lambda m: mapping[m.group(0)], translation)
 
 

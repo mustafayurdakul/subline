@@ -13,6 +13,7 @@ Options given on the command line override the profile (or the defaults).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 
@@ -27,15 +28,20 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--profile", help="load this saved profile first")
     mode.add_argument("--save-profile", metavar="NAME", help="save the resulting settings as a profile and continue")
     mode.add_argument("--data-dir", help="where profiles and caches live (default %%APPDATA%%\\gametl)")
-    mode.add_argument("--download-model", action="store_true",
-                      help="download the offline model for the language pair and exit")
+    mode.add_argument(
+        "--download-model", action="store_true", help="download the offline model for the language pair and exit"
+    )
 
     target = p.add_argument_group("target")
     target.add_argument("--window", help="title substring of the game window")
     target.add_argument("--hwnd", help="window handle (decimal or 0x hex)")
     target.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the window to appear")
-    target.add_argument("--roi", help="the only area to read and translate: x,y,w,h as fractions or pixels of the client area")
-    target.add_argument("--include-frame", action="store_true", default=None, help="also read the title bar / window frame")
+    target.add_argument(
+        "--roi", help="the only area to read and translate: x,y,w,h as fractions or pixels of the client area"
+    )
+    target.add_argument(
+        "--include-frame", action="store_true", default=None, help="also read the title bar / window frame"
+    )
 
     lang = p.add_argument_group("languages")
     lang.add_argument("--lang", help="OCR model language (en, ch, japan, korean, de, ...); default en")
@@ -44,26 +50,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     tr = p.add_argument_group("translation")
     tr.add_argument("--translator", choices=["claude", "deepl", "offline", "uppercase", "echo", "verbose"])
-    tr.add_argument("--draft", choices=["none", "offline", "deepl"], help="fast draft shown until the translator answers")
+    tr.add_argument(
+        "--draft", choices=["none", "offline", "deepl"], help="fast draft shown until the translator answers"
+    )
     tr.add_argument("--model", help="default claude-haiku-5-5")
     tr.add_argument("--effort", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"])
     tr.add_argument("--structured", action="store_true", default=None, help="server-side structured output")
     tr.add_argument("--game", help="game name for the prompt and the cache file; default: window title")
-    tr.add_argument("--glossary", help="JSON file {\"term\": \"translation\"}")
+    tr.add_argument("--glossary", help='JSON file {"term": "translation"}')
     tr.add_argument("--tone", help="notes for the translator on tone and formality")
     tr.add_argument("--no-cache-file", action="store_true", default=None, help="keep the cache in memory only")
 
     look = p.add_argument_group("appearance and ignores")
-    look.add_argument("--render", choices=["subtitle", "inplace"],
-                      help="with an area: one fixed subtitle style centred in it (default), or per-block at the OCR box")
-    look.add_argument("--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size")
+    look.add_argument(
+        "--render",
+        choices=["subtitle", "inplace"],
+        help="with an area: one fixed subtitle style centred in it (default), or per-block at the OCR box",
+    )
+    look.add_argument(
+        "--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size"
+    )
     look.add_argument("--subtitle-color", metavar="#RRGGBB", help="subtitle text colour (default #FFFFFF)")
     look.add_argument("--subtitle-background", choices=["pill", "none"])
     look.add_argument("--subtitle-position", choices=["source", "bottom", "center"])
-    look.add_argument("--show-source", action="store_true", default=None,
-                      help="do not cover the original line when the subtitle is drawn elsewhere")
-    look.add_argument("--no-center-zone", action="store_true", default=None, help="do not mirror a selected area about the centre")
+    look.add_argument(
+        "--show-source",
+        action="store_true",
+        default=None,
+        help="do not cover the original line when the subtitle is drawn elsewhere",
+    )
+    look.add_argument(
+        "--no-center-zone", action="store_true", default=None, help="do not mirror a selected area about the centre"
+    )
     look.add_argument("--style", choices=["auto", "patch", "pill", "outline"], help="in-place style")
     look.add_argument("--font")
     look.add_argument("--ignore", action="append", metavar="x,y,w,h", help="zone never to translate; repeatable")
@@ -71,63 +90,90 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = p.add_argument_group("pipeline")
     run.add_argument("--fps", type=float, help="capture cap; default 10")
-    run.add_argument("--full-scan-every", type=int, help="with --roi: also sweep the rest every N frames (default 0 = never)")
+    run.add_argument(
+        "--full-scan-every", type=int, help="with --roi: also sweep the rest every N frames (default 0 = never)"
+    )
     run.add_argument("--stable-frames", type=int)
     run.add_argument("--max-missing", type=int)
-    run.add_argument("--no-hide-unfocused", action="store_true", default=None, help="keep the overlay up when the game is not in front")
-    run.add_argument("--capturable", action="store_true", default=None, help="do not exclude the overlay from screen capture")
+    run.add_argument(
+        "--no-hide-unfocused",
+        action="store_true",
+        default=None,
+        help="keep the overlay up when the game is not in front",
+    )
+    run.add_argument(
+        "--capturable", action="store_true", default=None, help="do not exclude the overlay from screen capture"
+    )
     run.add_argument("--run-for", type=float, default=0.0, help="quit after N seconds (0 = until the window closes)")
     run.add_argument("--screenshot", help="with --run-for: save a screenshot of the game area before quitting")
-    run.add_argument("--debug", action="store_true", default=None, help="outline every tracked block and print per-frame stats")
+    run.add_argument(
+        "--debug", action="store_true", default=None, help="outline every tracked block and print per-frame stats"
+    )
     run.add_argument("--dump-dir", help="debug: save every captured frame with OCR lines and blocks drawn")
     return p
 
 
+# Command-line option -> Settings field, copied when the option was given.
+_VALUE_OPTIONS = {
+    "window": "window_match",
+    "roi": "roi",
+    "lang": "lang",
+    "source_lang": "source_lang",
+    "target_lang": "target_lang",
+    "translator": "translator",
+    "model": "model",
+    "effort": "effort",
+    "thinking": "thinking",
+    "game": "game",
+    "glossary": "glossary_path",
+    "tone": "tone",
+    "style": "style",
+    "font": "font",
+    "fps": "fps",
+    "full_scan_every": "full_scan_every",
+    "stable_frames": "stable_frames",
+    "max_missing": "max_missing",
+    "render": "render",
+    "subtitle_font": "subtitle_font_px",
+    "subtitle_color": "subtitle_color",
+    "subtitle_background": "subtitle_background",
+    "subtitle_position": "subtitle_position",
+    "dump_dir": "dump_dir",
+}
+# Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
+_FLAG_OPTIONS = {
+    "no_center_zone": ("center_zone", False),
+    "show_source": ("subtitle_hide_source", False),
+    "include_frame": ("include_frame", True),
+    "structured": ("structured", True),
+    "no_cache_file": ("use_cache_file", False),
+    "no_hide_unfocused": ("hide_when_unfocused", False),
+    "capturable": ("exclude_from_capture", False),
+    "debug": ("debug", True),
+}
+
+
 def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
-    """Overlay explicit command-line options on `base`."""
+    """Overlay the command-line options that were given on `base`."""
     s = base.copy()
-    direct = {
-        "window": "window_match", "roi": "roi", "lang": "lang", "source_lang": "source_lang",
-        "target_lang": "target_lang", "translator": "translator", "model": "model", "effort": "effort",
-        "thinking": "thinking", "game": "game", "glossary": "glossary_path", "tone": "tone",
-        "style": "style", "font": "font", "fps": "fps", "full_scan_every": "full_scan_every",
-        "stable_frames": "stable_frames", "max_missing": "max_missing",
-        "render": "render", "subtitle_font": "subtitle_font_px", "subtitle_color": "subtitle_color",
-        "subtitle_background": "subtitle_background", "subtitle_position": "subtitle_position",
-    }
-    for arg, attr in direct.items():
-        value = getattr(args, arg, None)
+    for option, attr in _VALUE_OPTIONS.items():
+        value = getattr(args, option, None)
         if value is not None:
+            setattr(s, attr, value)
+    for flag, (attr, value) in _FLAG_OPTIONS.items():
+        if getattr(args, flag, None) is not None:
             setattr(s, attr, value)
     if args.draft is not None:
         s.draft = "" if args.draft == "none" else args.draft
-    if args.no_center_zone is not None:
-        s.center_zone = False
-    if args.show_source is not None:
-        s.subtitle_hide_source = False
-    if args.include_frame is not None:
-        s.include_frame = True
-    if args.structured is not None:
-        s.structured = True
-    if args.no_cache_file is not None:
-        s.use_cache_file = False
-    if args.no_hide_unfocused is not None:
-        s.hide_when_unfocused = False
-    if args.capturable is not None:
-        s.exclude_from_capture = False
     if args.ignore:
         s.ignore_zones = list(args.ignore)
     if args.ignore_pattern:
         s.ignore_patterns = list(args.ignore_pattern)
-    if args.debug is not None:
-        s.debug = True
-    if args.dump_dir:
-        s.dump_dir = args.dump_dir
     return s
 
 
 def utf8_console() -> None:
-    """Status lines may contain the target language; never die on a cp1252
+    """Status lines may contain the target language: never die on a cp1252
     console. A windowed build has no console at all: write to a log file in
     the data folder instead. Either way, a native crash (access violation
     in a DLL) dumps the Python stacks of all threads to the same place."""
@@ -140,20 +186,16 @@ def utf8_console() -> None:
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "gametl.log"
         mode = "w" if log_path.exists() and log_path.stat().st_size > 5_000_000 else "a"
-        log = open(log_path, mode, encoding="utf-8", buffering=1)
+        log = open(log_path, mode, encoding="utf-8", buffering=1)  # noqa: SIM115 (stays open for the process)
         sys.stdout = sys.stdout or log
         sys.stderr = sys.stderr or log
         faulthandler.enable(file=log, all_threads=True)
         return
     for stream in (sys.stdout, sys.stderr):
-        try:
+        with contextlib.suppress(AttributeError, ValueError):
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
-        except (AttributeError, ValueError):
-            pass
-    try:
+    with contextlib.suppress(AttributeError, OSError, ValueError):
         faulthandler.enable(all_threads=True)
-    except (AttributeError, OSError, ValueError):
-        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -198,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         from gametl.translate.offline import ensure_model
 
         try:
-            model_dir, sp = ensure_model(settings.effective_source_lang, settings.target_lang, store.models_dir, print)
+            model_dir, _ = ensure_model(settings.effective_source_lang, settings.target_lang, store.models_dir, print)
         except Exception as exc:
             print(f"download failed: {exc}")
             return 2

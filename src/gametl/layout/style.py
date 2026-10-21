@@ -52,12 +52,11 @@ class StyleMemory:
         """Font pixel size for a block: the band's median line height when
         enough has been seen there, else the block's own."""
         samples = self._samples(bbox)
-        own = (bbox[3] - bbox[1]) / max(1, n_lines)
         if len(samples) >= self.min_samples:
             # History only: the current box's own height is the jitter being removed.
             line_height = median(s.line_height for s in samples)
         else:
-            line_height = own
+            line_height = (bbox[3] - bbox[1]) / max(1, n_lines)
         return max(6, int(line_height * factor))
 
     def colors(self, bbox: Box) -> tuple[BGR, BGR] | None:

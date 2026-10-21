@@ -1,9 +1,9 @@
 """Drag-to-select an area of the game window.
 
-A dimmed layer over the window; the user drags a rectangle, which is
-reported in frame pixels (relative to the window's top-left), or presses
-Escape to cancel. The selection is then stored as fractions of the client
-area so it survives window moves and resizes.
+A dimmed layer over the window: the user drags a rectangle, reported in
+frame pixels (relative to the window's top-left), or presses Escape to
+cancel. The caller stores the selection as fractions of the client area so
+it survives window moves and resizes.
 """
 
 from __future__ import annotations
@@ -15,10 +15,13 @@ from PySide6.QtWidgets import QWidget
 Box = tuple[int, int, int, int]
 
 MIN_SIZE = 8  # px; smaller drags count as a cancel
+DIM_COLOR = QColor(0, 0, 0, 110)
+ACCENT_COLOR = QColor(80, 220, 120)
+WHITE = QColor(255, 255, 255)
 
 
 def rect_to_zone_spec(rect: Box, area: Box, decimals: int = 4) -> str:
-    """Frame-pixel rectangle -> 'x,y,w,h' as fractions of `area`, clamped."""
+    """Frame-pixel rectangle -> 'x,y,w,h' as fractions of `area`, clamped to it."""
     ax0, ay0, ax1, ay1 = area
     aw, ah = max(1, ax1 - ax0), max(1, ay1 - ay0)
     x0 = min(max(rect[0], ax0), ax1)
@@ -82,25 +85,26 @@ class AreaSelector(QWidget):
 
     # -- events ----------------------------------------------------------------
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._origin = event.position().toPoint()
             self._current = self._origin
             self.update()
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         if self._origin is not None:
             self._current = event.position().toPoint()
             self.update()
 
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self._origin is None:
             return
         self._current = event.position().toPoint()
         rect = self.selection()
-        self._finish(rect if rect and rect.width() >= MIN_SIZE and rect.height() >= MIN_SIZE else None)
+        big_enough = rect is not None and rect.width() >= MIN_SIZE and rect.height() >= MIN_SIZE
+        self._finish(rect if big_enough else None)
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self._finish(None)
         else:
@@ -118,24 +122,27 @@ class AreaSelector(QWidget):
 
     # -- painting ----------------------------------------------------------------
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 110))
+        p.fillRect(self.rect(), DIM_COLOR)
         if self.mirror_x:
-            p.setPen(QPen(QColor(80, 220, 120, 160), 1, Qt.PenStyle.DashLine))
+            guide = QColor(ACCENT_COLOR)
+            guide.setAlpha(160)
+            p.setPen(QPen(guide, 1, Qt.PenStyle.DashLine))
             p.drawLine(self.center_x, 0, self.center_x, self.height())
-        sel = self.selection()
-        if sel is not None and not sel.isEmpty():
+        selection = self.selection()
+        if selection is not None and not selection.isEmpty():
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-            p.fillRect(sel, Qt.GlobalColor.transparent)
+            p.fillRect(selection, Qt.GlobalColor.transparent)
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-            p.setPen(QPen(QColor(80, 220, 120), 2))
+            p.setPen(QPen(ACCENT_COLOR, 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(sel)
+            p.drawRect(selection)
             p.setFont(QFont("Segoe UI", 10))
-            p.setPen(QColor(255, 255, 255))
-            p.drawText(sel.left(), max(14, sel.top() - 6), f"{sel.width()} x {sel.height()}")
+            p.setPen(WHITE)
+            p.drawText(selection.left(), max(14, selection.top() - 6), f"{selection.width()} x {selection.height()}")
         p.setFont(QFont("Segoe UI", 14))
-        p.setPen(QColor(255, 255, 255))
-        p.drawText(self.rect().adjusted(0, 24, 0, 0), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self.hint)
+        p.setPen(WHITE)
+        hint_area = self.rect().adjusted(0, 24, 0, 0)
+        p.drawText(hint_area, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self.hint)
         p.end()

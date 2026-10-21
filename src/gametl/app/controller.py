@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
@@ -23,13 +24,14 @@ from .config import ProfileStore, Settings, slug
 from .pipeline import PipelineConfig, PipelineThread
 
 Box = tuple[int, int, int, int]
+RGB = tuple[int, int, int]
 
 
-# -- helpers -----------------------------------------------------------------
+# -- zones and colours -------------------------------------------------------------
 
 
 def parse_zone(spec: str | None, width: int, height: int) -> Box | None:
-    """'x,y,w,h' as fractions (all <= 1) or pixels -> (x0, y0, x1, y1)."""
+    """'x,y,w,h' as fractions (all <= 1) or pixels -> (x0, y0, x1, y1), clamped."""
     if not spec:
         return None
     try:
@@ -41,7 +43,11 @@ def parse_zone(spec: str | None, width: int, height: int) -> Box | None:
     return max(0, int(x)), max(0, int(y)), min(width, int(x + w)), min(height, int(y + h))
 
 
-def parse_color(text: str, default: tuple[int, int, int] = (255, 255, 255)) -> tuple[int, int, int]:
+def offset_zone(zone: Box, dx: int, dy: int) -> Box:
+    return zone[0] + dx, zone[1] + dy, zone[2] + dx, zone[3] + dy
+
+
+def parse_color(text: str, default: RGB = (255, 255, 255)) -> RGB:
     """'#RRGGBB' or 'r,g,b' -> RGB tuple; anything else gives the default."""
     text = (text or "").strip()
     try:
@@ -56,7 +62,7 @@ def parse_color(text: str, default: tuple[int, int, int] = (255, 255, 255)) -> t
 
 
 def client_area_in_frame(hwnd: int) -> tuple[Box, Box | None]:
-    """(frame box, client area within the frame or None when degenerate)."""
+    """(frame box, client area within the frame, or None when degenerate)."""
     rect = window_rect(hwnd)
     frame_w, frame_h = rect[2] - rect[0], rect[3] - rect[1]
     c = client_rect_on_screen(hwnd)
@@ -69,6 +75,16 @@ def client_area_in_frame(hwnd: int) -> tuple[Box, Box | None]:
     if area[2] <= area[0] or area[3] <= area[1]:
         area = None
     return (0, 0, frame_w, frame_h), area
+
+
+def capture_area(hwnd: int, include_frame: bool) -> tuple[Box, Box | None]:
+    """(frame box, the client area within it, or None when the whole frame
+    is read because `include_frame` is set or the client area is unknown)."""
+    frame, client = client_area_in_frame(hwnd)
+    return frame, (None if include_frame else client)
+
+
+# -- credentials and screenshots -----------------------------------------------------
 
 
 def load_user_env(name: str) -> str | None:
@@ -98,12 +114,15 @@ def ensure_anthropic_credentials() -> bool:
 
 
 def grab_screen_region(rect: Box, path: str) -> None:
-    """Screenshot of a screen rectangle including layered windows (ours)."""
+    """Screenshot of a screen rectangle, layered windows (ours) included."""
     from PIL import ImageGrab
 
     image = ImageGrab.grab(bbox=rect, include_layered_windows=True, all_screens=True)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     image.save(path)
+
+
+# -- translators ---------------------------------------------------------------------
 
 
 def build_offline_translator(settings: Settings, store: ProfileStore) -> Translator:
@@ -128,7 +147,7 @@ def build_draft_translator(settings: Settings, store: ProfileStore) -> Translato
     return None
 
 
-def build_translator(settings: Settings, game: str, store: ProfileStore | None = None) -> Translator:
+def build_translator(settings: Settings, game: str, store: ProfileStore) -> Translator:
     if settings.translator == "uppercase":
         return UppercaseTranslator()
     if settings.translator == "verbose":
@@ -136,7 +155,7 @@ def build_translator(settings: Settings, game: str, store: ProfileStore | None =
     if settings.translator == "echo":
         return EchoTranslator()
     if settings.translator == "offline":
-        return build_offline_translator(settings, store or ProfileStore())
+        return build_offline_translator(settings, store)
     if settings.translator == "deepl":
         return build_deepl_translator()
     from ..translate.claude import ClaudeTranslator
@@ -152,10 +171,15 @@ def build_translator(settings: Settings, game: str, store: ProfileStore | None =
         structured=settings.structured,
         game=game,
         glossary=glossary,
-        style=settings.tone or None,
+        tone=settings.tone or None,
         source_lang=settings.effective_source_lang,
         target_lang=settings.target_lang,
     )
+
+
+def _spread(values: Iterable[float]) -> str:
+    ordered = sorted(values)
+    return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
 
 
 class OverlayController(QObject):
@@ -181,6 +205,7 @@ class OverlayController(QObject):
         self.cache_path: Path | None = None
         self._engines: dict[str, RapidOcrEngine] = {}
         self._selector: AreaSelector | None = None
+        self._selection_hwnd: int | None = None
 
     # -- state -------------------------------------------------------------
 
@@ -234,37 +259,44 @@ class OverlayController(QObject):
             return False
         try:
             self.translator = build_translator(settings, game, self.store)
-            if settings.draft == "offline" and settings.translator != "offline":
-                self._say("loading offline draft model...")
             draft = build_draft_translator(settings, self.store)
-            for t in (self.translator, draft):
-                kind = getattr(t, "kind", None)
-                if kind:
-                    self._say(f"offline model: {kind} ({getattr(t, 'model_dir', '')})")
         except (OSError, ValueError, RuntimeError) as exc:
             self._say(f"translator setup failed: {exc}")
             return False
+        for translator in (self.translator, draft):
+            if getattr(translator, "kind", None):
+                self._say(f"offline model: {translator.kind} ({translator.model_dir})")  # type: ignore[union-attr]
 
-        frame, area = client_area_in_frame(self.hwnd)
-        if settings.include_frame:
-            area = None
-        ax0, ay0, ax1, ay1 = area or frame
-        roi = parse_zone(settings.roi, ax1 - ax0, ay1 - ay0)
-        if roi is not None:
-            roi = (roi[0] + ax0, roi[1] + ay0, roi[2] + ax0, roi[3] + ay0)
-        zones: list[Box] = []
-        for spec in settings.ignore_zones:
-            z = parse_zone(spec, ax1 - ax0, ay1 - ay0)
-            if z is not None:
-                zones.append((z[0] + ax0, z[1] + ay0, z[2] + ax0, z[3] + ay0))
-        patterns = [p for p in settings.ignore_patterns if p.strip()]
-        line_filter = LineFilter.compile(zones, patterns) if (zones or patterns) else None
+        frame, client = capture_area(self.hwnd, settings.include_frame)
+        self.service = self._build_service(settings, game, draft)
+        engine = self.engine(settings.lang, frame[2], frame[3])
+        self.overlay = OverlayWindow(
+            self.hwnd,
+            hide_when_unfocused=settings.hide_when_unfocused,
+            exclude_from_capture=settings.exclude_from_capture,
+            font_family=settings.font,
+        )
+        self.worker = PipelineThread(self.hwnd, engine, self.service, self._pipeline_config(settings, frame, client))
+        self.worker.blocks_ready.connect(self.overlay.set_blocks)
+        self.worker.status.connect(self._say)
+        self.overlay.target_lost.connect(self._on_target_lost)
 
+        self.overlay.start()
+        self.worker.start()
+        self.running_changed.emit(True)
+        self._say(
+            f"running on {self.title!r}: {settings.effective_source_lang} -> {settings.target_lang} "
+            f"via {self.translator.name}"
+        )
+        return True
+
+    def _build_service(self, settings: Settings, game: str, draft: Translator | None) -> TranslationService:
+        assert self.translator is not None
         self.cache_path = None
         if settings.use_cache_file:
             self.cache_path = self.store.cache_dir / f"{slug(game)}.{settings.target_lang}.{self.translator.name}.json"
         self.cache = TranslationCache(self.cache_path)
-        self.service = TranslationService(
+        return TranslationService(
             self.translator,
             self.cache,
             target_lang=settings.target_lang,
@@ -273,23 +305,25 @@ class OverlayController(QObject):
             draft_translator=draft,
         )
 
-        engine = self.engine(settings.lang, frame[2], frame[3])
-
-        self.overlay = OverlayWindow(
-            self.hwnd,
-            hide_when_unfocused=settings.hide_when_unfocused,
-            exclude_from_capture=settings.exclude_from_capture,
-            font_family=settings.font,
-        )
-        config = PipelineConfig(
-            area=area,
-            roi=roi,
+    @staticmethod
+    def _pipeline_config(settings: Settings, frame: Box, client: Box | None) -> PipelineConfig:
+        """Zones in the settings are fractions of the read area (the client
+        area, or the whole frame); the pipeline wants frame pixels."""
+        ax0, ay0, ax1, ay1 = client or frame
+        width, height = ax1 - ax0, ay1 - ay0
+        roi = parse_zone(settings.roi, width, height)
+        zones = (parse_zone(spec, width, height) for spec in settings.ignore_zones)
+        ignore_zones = [offset_zone(zone, ax0, ay0) for zone in zones if zone is not None]
+        patterns = [p for p in settings.ignore_patterns if p.strip()]
+        return PipelineConfig(
+            area=client,
+            roi=offset_zone(roi, ax0, ay0) if roi is not None else None,
             fps=settings.fps,
             full_scan_every=settings.full_scan_every,
             stable_frames=settings.stable_frames,
             max_missing=settings.max_missing,
             style=settings.style,
-            line_filter=line_filter,
+            line_filter=LineFilter.compile(ignore_zones, patterns) if (ignore_zones or patterns) else None,
             render=settings.render,
             subtitle_font_px=settings.subtitle_font_px,
             subtitle_color=parse_color(settings.subtitle_color),
@@ -299,16 +333,6 @@ class OverlayController(QObject):
             debug=settings.debug,
             dump_dir=settings.dump_dir or None,
         )
-        self.worker = PipelineThread(self.hwnd, engine, self.service, config)
-        self.worker.blocks_ready.connect(self.overlay.set_blocks)
-        self.worker.status.connect(self._say)
-        self.overlay.target_lost.connect(self._on_target_lost)
-
-        self.overlay.start()
-        self.worker.start()
-        self.running_changed.emit(True)
-        self._say(f"running on {self.title!r}: {settings.effective_source_lang} -> {settings.target_lang} via {self.translator.name}")
-        return True
 
     def _on_target_lost(self) -> None:
         self._say("game window closed")
@@ -358,19 +382,17 @@ class OverlayController(QObject):
         names."""
         if self._selector is not None:
             return True
+        active = settings or self.settings or Settings()
         hwnd = self.hwnd
         if hwnd is None or not self.running:
-            resolved = self.resolve_window(settings or self.settings or Settings())
+            resolved = self.resolve_window(active)
             if resolved is None:
                 self._say("select area: no game window found; start the game or set its title first")
                 return False
             hwnd = resolved[0]
-        self._area_hwnd = hwnd
-        active = settings or self.settings or Settings()
-        frame, area = client_area_in_frame(hwnd)
-        if active.include_frame:
-            area = None
-        ax0, _, ax1, _ = area or frame
+        self._selection_hwnd = hwnd
+        frame, client = capture_area(hwnd, active.include_frame)
+        ax0, _, ax1, _ = client or frame
         self._selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_zone, center_x=(ax0 + ax1) // 2)
         self._selector.selected.connect(self._apply_selected_area)
         self._selector.cancelled.connect(self._selection_cancelled)
@@ -384,11 +406,11 @@ class OverlayController(QObject):
 
     def _apply_selected_area(self, rect: tuple) -> None:
         self._selector = None
-        hwnd = getattr(self, "_area_hwnd", None) or self.hwnd
-        frame, area = client_area_in_frame(hwnd)
-        if self.settings is not None and self.settings.include_frame:
-            area = None
-        spec = rect_to_zone_spec(tuple(rect), area or frame)
+        hwnd = self._selection_hwnd or self.hwnd
+        assert hwnd is not None
+        include_frame = self.settings is not None and self.settings.include_frame
+        frame, client = capture_area(hwnd, include_frame)
+        spec = rect_to_zone_spec(tuple(rect), client or frame)
         self._say(f"area selected: {spec}; translating only that area")
         if self.settings is not None:
             self.settings.roi = spec
@@ -410,23 +432,18 @@ class OverlayController(QObject):
     def stats_text(self) -> str:
         parts = []
         if self.worker and self.worker.ocr_ms:
-            s = sorted(self.worker.ocr_ms)
-            parts.append(f"frames {self.worker.frames}, ocr median {s[len(s) // 2]:.0f}ms max {s[-1]:.0f}ms")
+            parts.append(f"frames {self.worker.frames}, ocr {_spread(self.worker.ocr_ms)}")
         if self.service:
             st = self.service.stats
+            cache_note = f"; cache {len(self.cache)} entries" if self.cache is not None else ""
             parts.append(
                 f"translation: {st['requests']} requests, {st['items']} items sent, {st['translated']} translated, "
-                f"{st['cache_hits']} cache hits, {st['errors']} errors"
-                + (f"; cache {len(self.cache)} entries" if self.cache is not None else "")
+                f"{st['cache_hits']} cache hits, {st['errors']} errors{cache_note}"
             )
             if self.service.latencies_ms:
-                lat = sorted(self.service.latencies_ms)
-                parts.append(f"request latency: median {lat[len(lat) // 2]:.0f}ms min {lat[0]:.0f}ms max {lat[-1]:.0f}ms")
+                parts.append(f"request latency: {_spread(self.service.latencies_ms)}")
             if self.service.draft_latencies_ms:
-                lat = sorted(self.service.draft_latencies_ms)
-                parts.append(
-                    f"draft: {st['drafts']} items, latency median {lat[len(lat) // 2]:.0f}ms max {lat[-1]:.0f}ms"
-                )
+                parts.append(f"draft: {st['drafts']} items, latency {_spread(self.service.draft_latencies_ms)}")
         totals = getattr(self.translator, "usage_totals", None)
         calls = getattr(self.translator, "calls", 0)
         if totals and calls and self.settings:

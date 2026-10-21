@@ -1,10 +1,11 @@
 # gametl
 
-Real-time in-game text translation overlay for Windows. Captures a game window,
-reads on-screen text with local OCR, translates it with Claude, and draws the
-translation over the original at the same position.
+Real-time in-game text translation overlay for Windows. Captures a game
+window, reads the text on screen with local OCR, translates it (DeepL,
+Claude, or an offline model), and draws the translation over the game as a
+subtitle in the area you select.
 
-Design: see [PLAN.md](PLAN.md). Status: M6 (packaged build).
+Design notes and the history of decisions: [PLAN.md](PLAN.md).
 
 ## Packaged build (no Python needed)
 
@@ -18,66 +19,37 @@ and `gametl-cli.exe` (the same app with a console, for command-line use and
 `gametl-cli pretranslate ...`). Copy the folder anywhere and run
 `gametl.exe`. The OCR models (about 20 MB) download on first run into
 `%APPDATA%\gametl\models`, as does the offline model when you press
-"Download offline model" in the settings window. The API key is read from
-the `ANTHROPIC_API_KEY` user environment variable as before.
+"Download offline model" in the settings window. API keys are read from the
+`DEEPL_AUTH_KEY` and `ANTHROPIC_API_KEY` user environment variables.
 
-## Setup for development
+## Using it
 
-Requires Python 3.12 (3.15 is too new for the compiled dependencies). With
-[uv](https://docs.astral.sh/uv/):
-
-```
-uv python install 3.12
-uv sync
-```
-
-This creates `.venv` with Python 3.12 and every dependency, and installs the
-`gametl` package in editable mode.
-
-Long-path caveat: if the project folder path is long (this is the case while
-it lives in the folder the app created for the session), a venv inside it hits
-the Windows 260-character path limit and some imports fail. Either keep the
-project at a short path such as `C:\code\gametl`, or put the venv elsewhere by
-dot-sourcing `scripts\env.ps1` before every `uv` command:
-
-```
-. .\scripts\env.ps1
-uv sync
-```
-
-## Run the app
-
-Translation uses Claude through the Anthropic API. Put your key in the
-`ANTHROPIC_API_KEY` environment variable (Windows: Settings > System > About >
-Advanced system settings > Environment Variables; the app also reads it from
-the user environment if it was set after the terminal opened).
-
-```
-uv run gametl
-```
-
-With no options this puts an icon in the tray and opens the settings window:
-pick the game window from the list (Refresh after launching the game), set
-languages and translator, then "Apply and run". "Save profile" stores the
-settings under `%APPDATA%\gametl\profiles` so the game can be started from
-the tray's Profiles menu next time. The tray menu also has Start/Stop, Pause,
-Rescan and the data folder.
+Run `gametl.exe` (or `uv run gametl` from a checkout). With no options this
+puts an icon in the tray and opens the settings window: pick the game window
+from the list (Refresh after launching the game), set the languages and the
+translator, then "Apply and run". "Save profile" stores the settings under
+`%APPDATA%\gametl\profiles` so the game can be started from the tray's
+Profiles menu next time. The tray menu also has Start/Stop, Pause, Rescan,
+area selection and the data folder.
 
 Most games show far more text than you want translated (HUD, menus, item
 names). Press **Ctrl+Shift+A** with the game in front and drag a rectangle
 over the subtitle area: from then on only that area is read and translated,
 and the choice is saved in the profile as fractions of the window, so it
 survives resizing. The rectangle is kept centred horizontally while you drag
-(a guide line shows the centre), so one edge and the height are enough.
+(a guide line marks the centre), so one edge and the height are enough.
 "Select area to translate" and "Clear area" are also in the tray menu and
 next to the area field in settings.
 
 With an area selected, translations are rendered as subtitles: one fixed
-font size (the game's own by default, or a number in Appearance), one
-colour with an outline on a translucent pill, centred in the area and
-placed on the line the game drew, wrapping when Turkish runs long. The
-original line is hidden under its background colour. Switch Render to
-`inplace` in Appearance to put each translation on its own OCR box instead.
+font size (the game's own by default, or a number in Appearance), one colour
+with an outline, on a near-opaque pill centred in the area and placed on the
+line the game drew. The pill covers the original line; when the subtitle is
+placed at the bottom or middle of the area instead, a matching dark band
+hides the original (switch that off with "hide the original line"). Long
+translations wrap at the same size. Switch Render to `inplace` in Appearance
+to put each translation on its own OCR box instead, patched out in the
+game's own colours.
 
 Default global hotkeys (changeable in the Hotkeys tab):
 
@@ -89,7 +61,47 @@ Default global hotkeys (changeable in the Hotkeys tab):
 | Ctrl+Shift+R | rescan: forget tracked blocks and read the screen afresh |
 | Ctrl+Shift+S | open settings |
 
-From the command line, with the game in borderless or windowed mode:
+### Which translator
+
+- **DeepL** (recommended for Turkish and other European languages): put a
+  key in the `DEEPL_AUTH_KEY` environment variable (free tier: 500k
+  characters a month) and choose Translator `deepl`. Measured for English to
+  Turkish: median 0.2 s per line with natural wording.
+- **Claude** (the default, needs `ANTHROPIC_API_KEY`): about 0.9 s per line
+  with Haiku 5.5. Choose it when you need a glossary, tone notes, context
+  between lines, or a language DeepL lacks. `claude-opus-5-5` is the quality
+  option.
+- **Offline**: no network at all. Draft `offline` shows an offline
+  translation within a fraction of a second and swaps in the main
+  translator's when it arrives; Translator `offline` runs with no API. Two
+  model sources, both under `%APPDATA%\gametl\models`: the OPUS-MT model
+  for the pair, converted once with
+  `uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr`
+  (about 230 MB; the conversion needs PyTorch, the app does not), or the
+  smaller and weaker Argos package from `gametl --download-model` or the
+  settings button. The converted model is preferred when both exist.
+
+Translations are cached per game under `%APPDATA%\gametl\cache`, so repeated
+lines show instantly and cost nothing. If the game's script can be extracted
+(a text file with one line per entry, an .srt, a JSON file or a CSV),
+translate it once up front so every line is instant in play:
+
+```
+uv run gametl-pretranslate script.txt --game "Fake Game"
+```
+
+By default this uses Opus 5.5 through the Batches API at half price and
+waits up to ten minutes; `--wait 0` submits and exits, and `--resume JOBFILE`
+collects later; `--sync` uses the normal API at once. The `--game` name must
+match the one the overlay runs with, since it names the cache file.
+
+OCR sometimes reads a number or a symbol out of background detail. Ignore
+patterns (Game tab, one regular expression per line, case-insensitive) drop
+such lines: `^[^a-z]+$` drops every line without a letter.
+
+## Command line
+
+With the game in borderless or windowed mode:
 
 ```
 uv run gametl --window "Part of the window title"
@@ -97,146 +109,84 @@ uv run gametl --window "Part of the window title"
 
 `--profile NAME` loads a saved profile first and explicit options override
 it; `--save-profile NAME` stores the resulting options; `--tray --window ...`
-starts at once with the tray icon.
-
-The overlay follows the window, reads its English text, and patches each block
-with the Turkish translation in the sampled background and text colours.
-Translations are cached per game under `%APPDATA%\gametl\cache`, so repeated
-lines show instantly and cost nothing.
-
-Translation options:
+starts at once with the tray icon. `gametl --help` lists every option; the
+useful ones:
 
 - `--target-lang de` / `--source-lang ja` change the pair (`--lang` picks the
-  OCR model; the source language defaults to it).
-- `--model claude-opus-5-5` for the quality setting; `--effort low|medium|high`;
-  `--thinking adaptive` lets the model think (off by default: measured no
-  gain); `--structured` uses server-side structured output (guaranteed JSON,
-  about 0.5 s slower per call).
+  OCR model: `en`, `japan`, `ch`, `korean`, `de`, ...; the source language
+  defaults to it).
+- `--translator deepl|claude|offline`, `--draft offline|deepl`,
+  `--model claude-opus-5-5`, `--effort low|medium|high`, `--thinking adaptive`
+  (off by default: measured no gain), `--structured` (server-side structured
+  output, guaranteed JSON, about 0.5 s slower per call).
 - `--game "Name"` names the game in the prompt and the cache file;
   `--glossary terms.json` fixes renderings of names and terms;
   `--tone "..."` adds notes on tone and formality.
+- `--roi 0,0.75,1,0.25` reads and translates only that area (fractions of the
+  client area); `--render inplace`, `--subtitle-font 30`,
+  `--subtitle-color "#FFEE00"`, `--subtitle-position bottom`.
+- `--ignore 0,0,0.5,0.1` (repeatable) never translates text in that zone;
+  `--ignore-pattern "^[^a-z]+$"` (repeatable) drops OCR lines matching a
+  pattern.
 - `--translator uppercase` runs the whole pipeline without any API calls;
   `--translator verbose` doubles every line to exercise wrapping.
-
-Faster than the API round trip:
-
-- **Offline draft.** `--draft offline` (or Draft: offline in the settings
-  window) shows an offline translation within a fraction of a second and
-  swaps in Claude's when it arrives; `--translator offline` runs with no API
-  at all. Two model sources, both under `%APPDATA%\gametl\models`:
-  - the OPUS-MT model for the pair, converted once with
-    `uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr`
-    (about 230 MB; the conversion needs PyTorch, the app does not). Good
-    quality: in English to Turkish it is close to Claude on short lines.
-  - the Argos Translate package from `gametl --download-model` or the
-    settings button, smaller and easier but clearly weaker. The converted
-    model is preferred when both are installed.
-- **DeepL.** With a key in the `DEEPL_AUTH_KEY` environment variable (free
-  tier: 500k characters a month), `--translator deepl` or `--draft deepl`
-  gives fast, strong translations for European languages including Turkish.
-  Measured for English to Turkish: median 0.2 s per line against Haiku's
-  0.9 s, with equal or better wording, so for that pair the recommended
-  setup is Translator: deepl with Draft: none. Claude remains the choice
-  when you need a glossary, tone notes or a language DeepL lacks.
-- **Pre-translate the script.** If the game's text can be extracted (a text
-  file with one line per entry, an .srt, a JSON file or a CSV), translate it
-  once up front so every line is instant in play:
-
-  ```
-  uv run gametl-pretranslate script.txt --game "Fake Game"
-  ```
-
-  By default this uses Opus 5.5 through the Batches API at half price and
-  waits up to ten minutes; `--wait 0` submits and exits, and
-  `--resume JOBFILE` collects later. `--sync` uses the normal API at once.
-  The `--game` name must match the one the overlay runs with, since it names
-  the cache file.
-
-Appearance and ignores:
-
-- Translations longer than the original shrink a little, then wrap and grow
-  the box into free space (toward the side with more room), then shrink
-  further, then truncate with an ellipsis.
-- `--style auto` (default) patches the original out with its background
-  colour, but switches to a translucent pill with outlined text where the
-  background is busy or the contrast is low; `--style patch|pill|outline`
-  forces one.
-- `--ignore 0,0,0.5,0.1` (repeatable) never translates text in that zone of
-  the client area; `--ignore-pattern "^\d+$"` (repeatable) drops OCR lines
-  matching a pattern.
-
-Useful options:
-
-- `--roi 0,0.75,1,0.25` reads and translates only that area (fractions of the
-  client area); `--full-scan-every 10` additionally sweeps the rest every
-  tenth frame (off by default).
-- `--lang japan` (or `ch`, `korean`, `de`, ...) selects the OCR model.
 - `--debug` outlines every tracked block and prints per-frame stats;
-  `--dump-dir out/dump` also saves each frame with OCR lines and blocks drawn.
-- `--no-hide-unfocused` keeps the overlay up when the game is not in front.
-- `--run-for 8 --screenshot out/overlay.png` runs for 8 s and saves what the
-  screen looked like, overlay included (add `--capturable`).
+  `--dump-dir out/dump` also saves each frame with OCR lines and blocks drawn;
+  `--run-for 8 --screenshot out/overlay.png --capturable` runs for 8 s and
+  saves what the screen looked like, overlay included.
 
-Try it without a game:
-
-```
-uv run python scripts/fake_game.py
-```
-
-```
-uv run gametl --window "Fake Game" --debug
-```
-
-## M0 spike: capture + OCR
-
-List capturable windows:
-
-```
-uv run python scripts/spike_capture_ocr.py --list-windows
-```
-
-Capture a window for a few seconds, OCR every frame, print text, boxes and
-timings, and save the last annotated frame to `out/`:
-
-```
-uv run python scripts/spike_capture_ocr.py --window "Notepad" --seconds 5
-```
-
-Run OCR on a screenshot instead of a live window:
-
-```
-uv run python scripts/spike_capture_ocr.py --image path\to\screenshot.png
-```
-
-No game at hand? `scripts/fake_game.py` opens a stand-in window with a HUD and
-a large subtitle that changes every few seconds (`--typewriter` reveals it
-character by character). In a second terminal:
+Try it without a game: `scripts/fake_game.py` opens a stand-in window with a
+HUD and a large subtitle that changes every few seconds (`--typewriter`
+reveals it character by character, `--busy` draws artwork behind it).
 
 ```
 uv run python scripts/fake_game.py
 ```
+
+```
+uv run gametl --window "Fake Game" --translator verbose --roi 0,0.75,1,0.25
+```
+
+## Development
+
+Requires Python 3.12 (3.15 is too new for the compiled dependencies). With
+[uv](https://docs.astral.sh/uv/):
+
+```
+uv python install 3.12
+uv sync
+```
+
+This creates `.venv` with Python 3.12 and every dependency, and installs the
+`gametl` package in editable mode. Tests, lint and formatting:
+
+```
+uv run pytest
+uv run ruff check src tests scripts
+uv run ruff format src tests scripts
+```
+
+`scripts/spike_capture_ocr.py` is a diagnostic that captures a window and
+prints what OCR sees, with timings, without the overlay:
 
 ```
 uv run python scripts/spike_capture_ocr.py --window "Fake Game" --roi 0,0.75,1,0.25
 ```
 
-Tests:
+`scripts/bench_translate.py` measures Claude request latency per
+configuration (makes real API calls).
 
-```
-uv run pytest
-```
-
-## Layout
+Layout:
 
 ```
 src/gametl/
   capture/    window-targeted screen capture (Windows Graphics Capture)
-  ocr/        text detection + recognition (RapidOCR, Windows OCR)
-  tracking/   line -> block grouping, cross-frame matching, stability gate
-  translate/  Translator interface, Claude backend, cache, batching
-  layout/     fitting translated text into the source box, colour sampling
-  overlay/    transparent click-through window that follows the game
-  app/        tray icon, settings, hotkeys, per-game profiles
-scripts/      spikes and tools
+  ocr/        text detection and recognition (RapidOCR on ONNX Runtime)
+  tracking/   lines -> blocks, cross-frame matching, stability gate, ignore filters
+  translate/  Translator interface, Claude / DeepL / offline backends, cache, service
+  layout/     fitting text into the source box, colour sampling, consistent styling
+  overlay/    transparent click-through window, area selector
+  app/        controller, pipeline thread, tray icon, settings window, hotkeys, profiles
+scripts/      fake game, diagnostics, build, model conversion
 tests/
 ```

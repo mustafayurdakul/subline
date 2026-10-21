@@ -1,14 +1,15 @@
-"""RapidOCR backend (PP-OCR detection + recognition on ONNX Runtime).
+"""RapidOCR backend: PP-OCR detection and recognition on ONNX Runtime.
 
-Model files download on first use into the rapidocr package directory.
+Models download on first use into `model_root_dir` (the app passes its data
+folder; the default is inside the rapidocr package).
 
-Language/model notes (rapidocr 3.10 catalogue):
-- PP-OCRv6 (default) ships one multilingual det + rec model per size
-  (tiny / small / medium) covering Chinese, Traditional Chinese, English,
-  Japanese (not tiny) and most Latin-script European languages.
-- PP-OCRv5 has per-script mobile recognisers: korean, cyrillic, eslav,
-  arabic, devanagari, th, el, latin, en, ch, plus a ch server model. Use
-  version="PP-OCRv5" with size="mobile" for Korean or Cyrillic sources.
+Model notes (rapidocr 3.10 catalogue):
+- PP-OCRv6, the default, ships one multilingual detector and recogniser per
+  size (tiny / small / medium) covering Chinese, Traditional Chinese,
+  English, Japanese (not tiny) and most Latin-script European languages.
+- PP-OCRv5 has per-script mobile recognisers (korean, cyrillic, arabic,
+  devanagari, th, el, latin, ...). Use version="PP-OCRv5" with size="mobile"
+  for Korean or Cyrillic sources.
 """
 
 from __future__ import annotations
@@ -34,10 +35,10 @@ class RapidOcrEngine:
         det_limit_side_len: int = 960,
         det_limit_type: str = "max",
         threads: int | None = None,
-        log_level: str = "error",  # "warning" logs every frame with no text
-        model_root_dir: str | None = None,  # where models download to; default: inside the package
+        log_level: str = "error",  # "warning" would log every frame without text
+        model_root_dir: str | None = None,
     ) -> None:
-        # Imported lazily: rapidocr pulls in onnxruntime + opencv at import time.
+        # Imported here: rapidocr pulls in onnxruntime and OpenCV at import time.
         from rapidocr import RapidOCR
         from rapidocr.utils.typings import ModelType, OCRVersion
 
@@ -48,12 +49,12 @@ class RapidOcrEngine:
             "Rec.model_type": ModelType(size),
             "Det.lang_type": lang,
             "Rec.lang_type": lang,
-            # Standard PaddleOCR sizing: cap the long side, never upscale.
-            # (rapidocr's default upscales short sides under 736 px, which makes
-            # a wide subtitle strip several times more expensive.)
+            # Standard PaddleOCR sizing: cap the long side, never upscale. The
+            # rapidocr default upscales short sides under 736 px, which makes a
+            # wide subtitle strip several times more expensive.
             "Det.limit_side_len": det_limit_side_len,
             "Det.limit_type": det_limit_type,
-            # Text-direction classifier is for scanned documents; game text is upright.
+            # The text-direction classifier is for scanned documents; game text is upright.
             "Global.use_cls": use_cls,
             "Global.text_score": text_score,
             "Global.log_level": log_level,
@@ -70,15 +71,15 @@ class RapidOcrEngine:
         self._ocr = RapidOCR(params=params)
 
     def warm_up(self, width: int = 1280, height: int = 720) -> float:
-        """Load the models and run one frame-sized image so the first real call
-        pays no allocation cost; returns milliseconds. The image carries a word
-        so both detector and recogniser execute."""
+        """Load the models and run one frame-sized image so the first real
+        call pays no allocation cost. The image carries a word so both the
+        detector and the recogniser execute. Returns milliseconds."""
         import cv2
 
-        img = np.full((height, width, 3), 20, dtype=np.uint8)
-        cv2.putText(img, "warm up", (width // 3, height // 2), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 3)
+        image = np.full((height, width, 3), 20, dtype=np.uint8)
+        cv2.putText(image, "warm up", (width // 3, height // 2), cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 3)
         t0 = time.perf_counter()
-        self._ocr(img)
+        self._ocr(image)
         return (time.perf_counter() - t0) * 1000.0
 
     def recognize(self, image_bgr: np.ndarray) -> OcrResult:
@@ -88,16 +89,16 @@ class RapidOcrEngine:
 
         lines: list[TextLine] = []
         boxes = getattr(out, "boxes", None)
-        txts = getattr(out, "txts", None)
-        scores = getattr(out, "scores", None)
-        if boxes is not None and txts:
-            for box, txt, score in zip(boxes, txts, scores):
+        texts = getattr(out, "txts", None) or ()
+        scores = getattr(out, "scores", None) or ()
+        if boxes is not None:
+            for box, text, score in zip(boxes, texts, scores, strict=False):
                 quad = np.asarray(box, dtype=np.float32).reshape(4, 2)
-                lines.append(TextLine(text=str(txt), quad=quad, confidence=float(score)))
+                lines.append(TextLine(text=str(text), quad=quad, confidence=float(score)))
 
         timings = {"total": total_ms}
-        elapse = getattr(out, "elapse_list", None) or []
-        for key, value in zip(("det", "cls", "rec"), elapse):
-            if isinstance(value, (int, float)):
-                timings[key] = float(value) * 1000.0
+        stage_seconds = getattr(out, "elapse_list", None) or []
+        for stage, seconds in zip(("det", "cls", "rec"), stage_seconds, strict=False):
+            if isinstance(seconds, (int, float)):
+                timings[stage] = float(seconds) * 1000.0
         return OcrResult(lines=lines, timings_ms=timings)

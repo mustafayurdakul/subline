@@ -3,7 +3,7 @@ hotkeys; status in the tooltip."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QUrl, Qt
+from PySide6.QtCore import QObject, Qt, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 

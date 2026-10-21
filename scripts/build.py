@@ -39,7 +39,9 @@ def folder_size(path: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
-    parser.add_argument("--distpath", default="dist", help="output folder (default dist; use another when dist/gametl is in use)")
+    parser.add_argument(
+        "--distpath", default="dist", help="output folder (default dist; use another when dist/gametl is in use)"
+    )
     args = parser.parse_args()
 
     if args.clean:
@@ -48,8 +50,14 @@ def main() -> int:
 
     make_ico(ROOT / "build" / "gametl.ico")
     cmd = [
-        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-        "--distpath", str(ROOT / args.distpath), str(ROOT / "gametl.spec"),
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--distpath",
+        str(ROOT / args.distpath),
+        str(ROOT / "gametl.spec"),
     ]
     print(" ".join(cmd), flush=True)
     result = subprocess.run(cmd, cwd=ROOT)

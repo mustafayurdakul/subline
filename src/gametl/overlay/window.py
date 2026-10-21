@@ -1,19 +1,25 @@
 """The overlay: a transparent, click-through, always-on-top window glued to
-the game window, drawing translated blocks at frame-pixel positions.
+the game window, drawing translations at frame-pixel positions.
 
-Coordinates: the app runs with Qt's high-DPI scaling disabled and the process
-set to Per-Monitor-V2 DPI awareness, so widget coordinates are physical
-pixels and a capture-frame pixel (x, y) lands at overlay pixel (x, y).
+Coordinates: the app runs with Qt's high-DPI scaling disabled and the
+process set to Per-Monitor-V2 DPI awareness, so widget coordinates are
+physical pixels and capture-frame pixel (x, y) lands at overlay pixel (x, y).
 
-Styles: "patch" paints the sampled background colour over the original and
-draws the translation in the sampled text colour; "pill" draws a translucent
-dark rounded box with white outlined text (for busy backgrounds); "outline"
-draws outlined text only.
+Styles:
+- "subtitle": one fixed font size and colour, outlined, centred in the
+  selected zone on a near-opaque pill that also covers the source line;
+- "patch": the sampled background colour painted over the original and the
+  translation drawn in the sampled text colour, in place;
+- "pill": a dark rounded box with white outlined text, in place (for busy
+  backgrounds);
+- "outline": outlined text only, in place.
 """
 
 from __future__ import annotations
 
 import ctypes
+import traceback
+from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass, field
 
@@ -42,7 +48,12 @@ _user32.SetWindowLongW.restype = ctypes.c_long
 _user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
 _user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
 
+PILL_COLOR = QColor(0, 0, 0, 230)  # dark enough that the original text does not ghost through
+OUTLINE_COLOR = QColor(0, 0, 0, 220)
+DEBUG_COLOR = QColor(0, 255, 0)
+WHITE = QColor(255, 255, 255)
 _OUTLINE_OFFSETS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+_LAYOUT_CACHE_SIZE = 512
 
 
 @dataclass(slots=True)
@@ -61,8 +72,7 @@ class RenderBlock:
     room_below: int = 0  # free pixels the box may grow into
     room_above: int = 0
     outline: bool = False  # debug: draw the box outline only
-    # subtitle style: draw the text centred in `zone` on a pill; the pill (or a
-    # matching band) hides the source line
+    # subtitle style: text centred in `zone`; the pill (or a matching band) hides the source line
     zone: Box | None = None
     position: str = "source"  # "source" | "bottom" | "center"
     pill: bool = True
@@ -72,7 +82,7 @@ class RenderBlock:
 def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: str, margin: int = 12) -> QRect:
     """Where a subtitle of `text_w` x `text_h` goes inside `zone`: centred
     horizontally; vertically on the source line, at the bottom, or in the
-    middle, always kept inside the zone."""
+    middle; always kept inside the zone."""
     zx0, zy0, zx1, zy1 = zone
     x = (zx0 + zx1) // 2 - text_w // 2
     if position == "bottom":
@@ -83,6 +93,27 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
         y = anchor_y - text_h // 2
     y = max(zy0 + margin, min(y, zy1 - margin - text_h))
     return QRect(x, y, text_w, text_h)
+
+
+def source_font_px(box_height: int, source_lines: int) -> int:
+    """Font size that matches the source text: 80 % of its line height."""
+    return max(6, int(box_height / max(1, source_lines) * 0.8))
+
+
+def _padded(box: Box, pad_x: int, pad_y: int) -> QRect:
+    x0, y0, x1, y1 = box
+    return QRect(x0 - pad_x, y0 - pad_y, (x1 - x0) + 2 * pad_x, (y1 - y0) + 2 * pad_y)
+
+
+def _split_growth(extra: int, room_above: int, room_below: int) -> tuple[int, int]:
+    """Split `extra` pixels of growth into (up, down), taking the side with
+    more room first: subtitles near the bottom edge grow upward, a HUD line
+    at the top grows downward."""
+    if room_above > room_below:
+        up = min(extra, room_above)
+        return up, min(extra - up, room_below)
+    down = min(extra, room_below)
+    return min(extra - down, room_above), down
 
 
 class OverlayWindow(QWidget):
@@ -115,12 +146,13 @@ class OverlayWindow(QWidget):
         self.font_family = font_family
         self.padding = padding
         self.excluded_from_capture = False
+        self.paint_errors = 0
 
         self._blocks: list[RenderBlock] = []
         self._target_rect: Box | None = None
         self._fonts: dict[int, QFont] = {}
         self._metrics: dict[int, QFontMetrics] = {}
-        self._layout_cache: dict[tuple, TextLayout] = {}
+        self._layouts: dict[tuple, TextLayout] = {}
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._follow)
@@ -135,9 +167,9 @@ class OverlayWindow(QWidget):
         self._timer.start(self._poll_ms)
 
     def _apply_native_styles(self) -> None:
-        """Belt and braces: make sure the Win32 extended styles say
-        click-through, no activation, no taskbar entry, even if a Qt version
-        maps the window flags differently."""
+        """Make sure the Win32 extended styles say click-through, no
+        activation and no taskbar entry, whatever a Qt version maps the
+        window flags to."""
         hwnd = wintypes.HWND(int(self.winId()))
         ex = _user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
         wanted = ex | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
@@ -176,23 +208,22 @@ class OverlayWindow(QWidget):
         self._blocks = list(blocks)
         self.update()
 
-    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+    def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         try:
             for block in self._blocks:
                 self._paint_block(painter, block)
-        except Exception:  # a paint bug must never leave the painter open: Qt then faults later
-            import traceback
-
-            self._paint_errors = getattr(self, "_paint_errors", 0) + 1
-            if self._paint_errors <= 3:
+        except Exception:
+            # A paint bug must never leave the painter open: Qt faults later if it does.
+            self.paint_errors += 1
+            if self.paint_errors <= 3:
                 traceback.print_exc()
         finally:
             painter.end()
 
-    # -- text fitting ------------------------------------------------------------
+    # -- fonts and layout ----------------------------------------------------------
 
     def font_at(self, px: int) -> QFont:
         font = self._fonts.get(px)
@@ -203,142 +234,151 @@ class OverlayWindow(QWidget):
             self._metrics[px] = QFontMetrics(font)
         return font
 
-    def measure(self, text: str, px: int) -> float:
+    def metrics_at(self, px: int) -> QFontMetrics:
         self.font_at(px)
-        return float(self._metrics[px].horizontalAdvance(text))
+        return self._metrics[px]
 
-    def layout_for(self, block: RenderBlock) -> TextLayout:
-        x0, y0, x1, y1 = block.bbox
-        width, height = x1 - x0, y1 - y0
-        key = (
-            tuple(block.lines), width, height, block.source_lines, block.font_px,
-            block.prefer_grow, block.room_below, block.room_above,
-        )
-        cached = self._layout_cache.get(key)
-        if cached is not None:
-            return cached
-        base_px = block.font_px or max(6, int(height / max(1, block.source_lines) * 0.8))
-        layout = fit_text(
-            "\n".join(block.lines),
-            width,
-            height,
-            self.measure,
-            base_px,
-            max_height=height + block.room_below + block.room_above,
-            prefer_grow=block.prefer_grow,
-        )
-        if len(self._layout_cache) > 512:
-            self._layout_cache.clear()
-        self._layout_cache[key] = layout
+    def measure(self, text: str, px: int) -> float:
+        return float(self.metrics_at(px).horizontalAdvance(text))
+
+    def _cached_layout(self, key: tuple, build: Callable[[], TextLayout]) -> TextLayout:
+        layout = self._layouts.get(key)
+        if layout is None:
+            if len(self._layouts) >= _LAYOUT_CACHE_SIZE:
+                self._layouts.clear()
+            layout = self._layouts[key] = build()
         return layout
 
-    def fit_font(self, lines: list[str], width: int, height: int) -> QFont:
-        """Font for `lines` in a box, no wrapping or growth (kept for tests
-        and single-line callers)."""
-        layout = fit_text("\n".join(lines), width, height, self.measure, max(6, int(height / max(1, len(lines)) * 0.8)))
-        return self.font_at(layout.font_px)
+    def layout_for(self, block: RenderBlock) -> TextLayout:
+        """In-place layout: wrapped and sized for the block's box plus the
+        free room around it."""
+        x0, y0, x1, y1 = block.bbox
+        width, height = x1 - x0, y1 - y0
+        base_px = block.font_px or source_font_px(height, block.source_lines)
+        key = (
+            "inplace",
+            tuple(block.lines),
+            width,
+            height,
+            base_px,
+            block.prefer_grow,
+            block.room_below,
+            block.room_above,
+        )
+        return self._cached_layout(
+            key,
+            lambda: fit_text(
+                "\n".join(block.lines),
+                width,
+                height,
+                self.measure,
+                base_px,
+                max_height=height + block.room_below + block.room_above,
+                prefer_grow=block.prefer_grow,
+            ),
+        )
 
     # -- painting ----------------------------------------------------------------
 
     def _paint_block(self, p: QPainter, block: RenderBlock) -> None:
-        x0, y0, x1, y1 = block.bbox
         pad = self.padding
-        pad_x = max(pad, int(0.2 * (y1 - y0)))
+        pad_x = max(pad, int(0.2 * (block.bbox[3] - block.bbox[1])))
         if block.outline:
-            p.setPen(QPen(QColor(0, 255, 0), 1))
+            p.setPen(QPen(DEBUG_COLOR, 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(QRect(x0 - pad_x, y0 - pad, (x1 - x0) + 2 * pad_x, (y1 - y0) + 2 * pad))
+            p.drawRect(_padded(block.bbox, pad_x, pad))
+        elif not block.lines:
             return
-        if not block.lines:
-            return
-        if block.style == "subtitle" and block.zone is not None:
+        elif block.style == "subtitle" and block.zone is not None:
             self._paint_subtitle(p, block, pad, pad_x)
-            return
-
-        layout = self.layout_for(block)
-        height = y1 - y0
-        extra = max(0, layout.height - height)
-        # Grow toward the side with more room first: subtitles near the bottom
-        # edge grow upward, a HUD line at the top grows downward.
-        if block.room_above > block.room_below:
-            up = min(extra, block.room_above)
-            down = min(extra - up, block.room_below)
         else:
-            down = min(extra, block.room_below)
-            up = min(extra - down, block.room_above)
-        ry0, ry1 = y0 - up, y1 + down
-        rect = QRect(x0 - pad_x, ry0 - pad, (x1 - x0) + 2 * pad_x, (ry1 - ry0) + 2 * pad)
+            self._paint_in_place(p, block, pad, pad_x)
+
+    def _paint_in_place(self, p: QPainter, block: RenderBlock, pad: int, pad_x: int) -> None:
+        """Patch, pill or outline style on the block's own box, grown into
+        the free room when the translation needs more lines."""
+        layout = self.layout_for(block)
+        x0, y0, x1, y1 = block.bbox
+        up, down = _split_growth(max(0, layout.height - (y1 - y0)), block.room_above, block.room_below)
+        top, bottom = y0 - up, y1 + down
+        rect = _padded((x0, top, x1, bottom), pad_x, pad)
 
         if block.style == "patch":
             p.fillRect(rect, QColor(*block.bg))
-            fg = QColor(*block.fg)
-            outlined = False
+            fg, outlined = QColor(*block.fg), False
         elif block.style == "pill":
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(0, 0, 0, 215))  # opaque enough that the original does not ghost through
+            p.setBrush(PILL_COLOR)
             p.drawRoundedRect(rect, 6, 6)
-            fg = QColor(255, 255, 255)
-            outlined = True
+            fg, outlined = WHITE, True
         else:  # outline
-            fg = QColor(*block.fg) if block.fg != block.bg else QColor(255, 255, 255)
+            fg = QColor(*block.fg) if block.fg != block.bg else WHITE
             outlined = True
 
         p.setFont(self.font_at(layout.font_px))
         h_align = Qt.AlignmentFlag.AlignHCenter if block.align == "center" else Qt.AlignmentFlag.AlignLeft
-        flags = Qt.AlignmentFlag.AlignVCenter | h_align
         total = len(layout.lines) * layout.line_height
-        ty = ry0 + max(0.0, ((ry1 - ry0) - total) / 2)
-        self._draw_lines(p, layout.lines, QRect(x0, int(ty), x1 - x0, int(total) + 1), layout.line_height, flags, fg, outlined)
-
-    def _draw_lines(self, p: QPainter, lines: list[str], area: QRect, line_h: float, flags, fg: QColor, outlined: bool) -> None:
-        ty = float(area.top())
-        for line in lines:
-            r = QRect(area.left(), int(ty), area.width(), int(line_h) + 1)
-            if outlined:
-                p.setPen(QColor(0, 0, 0, 220))
-                for dx, dy in _OUTLINE_OFFSETS:
-                    p.drawText(r.translated(dx, dy), flags, line)
-            p.setPen(fg)
-            p.drawText(r, flags, line)
-            ty += line_h
+        text_top = top + max(0.0, ((bottom - top) - total) / 2)
+        area = QRect(x0, int(text_top), x1 - x0, int(total) + 1)
+        self._draw_lines(
+            p, layout.lines, area, layout.line_height, Qt.AlignmentFlag.AlignVCenter | h_align, fg, outlined
+        )
 
     def _paint_subtitle(self, p: QPainter, block: RenderBlock, pad: int, pad_x: int) -> None:
-        """Subtitle mode: the translation in one fixed style, centred in the
-        zone, on a near-opaque pill. The pill is widened to cover the source
-        line when the two overlap; when the text is placed elsewhere, a
-        matching band hides the source line (if `hide_source`)."""
-        x0, y0, x1, y1 = block.bbox
+        """One fixed style, centred in the zone on a near-opaque pill. When
+        the pill overlaps the source line, one shape covers both; when the
+        text is placed elsewhere, a matching band hides the source line (if
+        `hide_source`)."""
+        _x0, y0, _x1, y1 = block.bbox
         zx0, zy0, zx1, zy1 = block.zone  # type: ignore[misc]
-        source = QRect(x0 - pad_x, y0 - pad, (x1 - x0) + 2 * pad_x, (y1 - y0) + 2 * pad)
-
-        font_px = block.font_px or max(6, int((y1 - y0) / max(1, block.source_lines) * 0.8))
+        source = _padded(block.bbox, pad_x, pad)
+        font_px = block.font_px or source_font_px(y1 - y0, block.source_lines)
         margin = max(12, font_px // 2)
         width = max(50, (zx1 - zx0) - 2 * margin)
         key = ("subtitle", tuple(block.lines), width, font_px, zy1 - zy0)
-        layout = self._layout_cache.get(key)
-        if layout is None:
-            layout = fit_text(
-                "\n".join(block.lines), width, int(font_px * 1.15), self.measure, font_px,
-                max_height=(zy1 - zy0) - 2 * margin, prefer_grow=True,
-            )
-            if len(self._layout_cache) > 512:
-                self._layout_cache.clear()
-            self._layout_cache[key] = layout
-        font = self.font_at(layout.font_px)  # registers the metrics too (a one-word line never measured)
-        metrics = self._metrics[layout.font_px]
-        text_w = min(width, max(metrics.horizontalAdvance(ln) for ln in layout.lines))
+        layout = self._cached_layout(
+            key,
+            lambda: fit_text(
+                "\n".join(block.lines),
+                width,
+                int(font_px * 1.15),
+                self.measure,
+                font_px,
+                max_height=(zy1 - zy0) - 2 * margin,
+                prefer_grow=True,
+            ),
+        )
+        # metrics_at registers the font even when the wrapper never measured (a one-word line).
+        metrics = self.metrics_at(layout.font_px)
+        text_w = min(width, max(metrics.horizontalAdvance(line) for line in layout.lines))
         rect = subtitle_rect(block.zone, (y0 + y1) // 2, text_w, layout.height, block.position, margin)  # type: ignore[arg-type]
-        pill_rect = rect.adjusted(-font_px // 2, -font_px // 5, font_px // 2, font_px // 5)
+        pill = rect.adjusted(-font_px // 2, -font_px // 5, font_px // 2, font_px // 5)
 
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(0, 0, 0, 230))
-        if block.pill and pill_rect.intersects(source):
-            p.drawRoundedRect(pill_rect.united(source), 8, 8)  # one shape covers both
+        p.setBrush(PILL_COLOR)
+        if block.pill and pill.intersects(source):
+            p.drawRoundedRect(pill.united(source), 8, 8)
         else:
             if block.hide_source:
                 p.drawRoundedRect(source, 6, 6)
             if block.pill:
-                p.drawRoundedRect(pill_rect, 8, 8)
-        p.setFont(font)
-        flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter
-        self._draw_lines(p, layout.lines, rect, layout.line_height, flags, QColor(*block.fg), outlined=True)
+                p.drawRoundedRect(pill, 8, 8)
+        p.setFont(self.font_at(layout.font_px))
+        self._draw_lines(
+            p, layout.lines, rect, layout.line_height, Qt.AlignmentFlag.AlignCenter, QColor(*block.fg), True
+        )
+
+    @staticmethod
+    def _draw_lines(
+        p: QPainter, lines: list[str], area: QRect, line_h: float, flags: Qt.AlignmentFlag, fg: QColor, outlined: bool
+    ) -> None:
+        top = float(area.top())
+        for line in lines:
+            rect = QRect(area.left(), int(top), area.width(), int(line_h) + 1)
+            if outlined:
+                p.setPen(OUTLINE_COLOR)
+                for dx, dy in _OUTLINE_OFFSETS:
+                    p.drawText(rect.translated(dx, dy), flags, line)
+            p.setPen(fg)
+            p.drawText(rect, flags, line)
+            top += line_h

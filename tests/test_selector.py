@@ -6,11 +6,11 @@ import pytest
 
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-from PySide6.QtCore import QPoint, Qt  # noqa: E402
-from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
-from gametl.overlay.selector import AreaSelector, rect_to_zone_spec  # noqa: E402
+from gametl.overlay.selector import AreaSelector, rect_to_zone_spec
 
 
 @pytest.fixture(scope="module")

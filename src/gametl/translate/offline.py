@@ -19,9 +19,10 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .base import TranslationRequest
 
@@ -164,7 +165,8 @@ class OfflineTranslator:
 
         self.sp_source = spm.SentencePieceProcessor(model_file=str(sp_source))
         self.sp_target = (
-            self.sp_source if sp_target is None or Path(sp_target) == Path(sp_source)
+            self.sp_source
+            if sp_target is None or Path(sp_target) == Path(sp_source)
             else spm.SentencePieceProcessor(model_file=str(sp_target))
         )
         kwargs: dict[str, Any] = {"device": "cpu", "compute_type": compute_type}
@@ -176,7 +178,7 @@ class OfflineTranslator:
         self.model_dir = Path(model_dir)
 
     @classmethod
-    def from_models_dir(cls, models_dir: Path | str, source: str, target: str, **kwargs: Any) -> "OfflineTranslator":
+    def from_models_dir(cls, models_dir: Path | str, source: str, target: str, **kwargs: Any) -> OfflineTranslator:
         found = find_model(models_dir, source, target)
         if not found:
             raise RuntimeError(
@@ -188,7 +190,7 @@ class OfflineTranslator:
     @classmethod
     def _from_components(
         cls, ct2: Any, sp: Any, beam_size: int = 2, sp_target: Any = None, kind: str = "argos"
-    ) -> "OfflineTranslator":
+    ) -> OfflineTranslator:
         """For tests: inject stand-ins for the CTranslate2 and SentencePiece objects."""
         self = cls.__new__(cls)
         self.ct2, self.sp_source, self.beam_size, self.kind = ct2, sp, beam_size, kind

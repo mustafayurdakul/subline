@@ -51,7 +51,7 @@ class FakeGame(QWidget):
             line = line[:shown]
         return line
 
-    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt override)
+    def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()

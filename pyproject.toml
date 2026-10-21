@@ -5,24 +5,23 @@ description = "Real-time in-game text translation overlay for Windows"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # M0: capture + OCR
+    # capture and OCR
     "windows-capture",
     "rapidocr>=3.0",
     "onnxruntime>=1.19",
     "opencv-python-headless>=4.9",
     "numpy",
     "pillow>=10",
-    # M1: overlay
+    # overlay and settings window
     "pyside6>=6.8",
-    # M2: translation
+    # translation backends: Claude, DeepL (requests), offline CTranslate2 models
     "anthropic",
-    # M5: offline draft translation (CTranslate2 models from Argos packages)
+    "requests>=2.31",
     "ctranslate2>=4.0",
     "sentencepiece>=0.2",
-    "requests>=2.31",
 ]
 
-# GPU OCR (any vendor, via DirectML) is opt-in and conflicts with the CPU
+# GPU OCR (any vendor, through DirectML) is opt-in and conflicts with the CPU
 # onnxruntime package: `uv pip uninstall onnxruntime && uv pip install onnxruntime-directml`.
 
 [project.scripts]
@@ -30,7 +29,7 @@ gametl = "gametl.app.main:main"
 gametl-pretranslate = "gametl.app.pretranslate:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.9"]
 build = ["pyinstaller>=6.10"]
 
 [build-system]
@@ -42,3 +41,19 @@ packages = ["src/gametl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF", "N"]
+ignore = [
+    "RUF001",  # ambiguous unicode: Turkish text and the ellipsis character are intended
+    "RUF012",  # mutable class attributes: Qt signal declarations
+    "N802",    # Qt overrides keep their camelCase names (paintEvent, nativeEventFilter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # Qt env setup before the PySide6 imports

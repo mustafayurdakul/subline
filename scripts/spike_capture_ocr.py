@@ -1,5 +1,6 @@
-"""M0 spike: capture a window with Windows Graphics Capture, OCR every frame,
-print text + boxes + per-stage timings, save the last annotated frame.
+"""Diagnostic tool: capture a window with Windows Graphics Capture, OCR every
+frame, print text, boxes and per-stage timings, and save the last annotated
+frame. Useful for checking what OCR sees before involving the overlay.
 
 Examples:
   python scripts/spike_capture_ocr.py --list-windows
@@ -169,8 +170,8 @@ def run_window(args: argparse.Namespace) -> int:
                 roi = parse_roi(args.roi, frame.width, frame.height)
                 print(
                     f"  first frame {frame.width}x{frame.height} "
-                    f"(dwm {dwm[2] - dwm[0]}x{dwm[3] - dwm[1]}, client {client[2] - client[0]}x{client[3] - client[1]}); "
-                    f"roi {roi}"
+                    f"(dwm {dwm[2] - dwm[0]}x{dwm[3] - dwm[1]}, "
+                    f"client {client[2] - client[0]}x{client[3] - client[1]}); roi {roi}"
                 )
             x0, y0, x1, y1 = roi
             crop = frame.image[y0:y1, x0:x1]
@@ -199,13 +200,17 @@ def run_window(args: argparse.Namespace) -> int:
     print()
     print(f"frames received: {cap.frames_received}, OCR runs: {len(ocr_totals)}, skipped (unchanged): {skipped}")
     if capture_gaps:
-        print(f"capture interval: median {statistics.median(capture_gaps):.0f}ms "
-              f"(~{1000 / statistics.median(capture_gaps):.1f} fps)")
+        print(
+            f"capture interval: median {statistics.median(capture_gaps):.0f}ms "
+            f"(~{1000 / statistics.median(capture_gaps):.1f} fps)"
+        )
     for name, series in (("ocr total", ocr_totals), ("det", det_times), ("rec", rec_times)):
         if series:
             s = sorted(series)
             p95 = s[min(len(s) - 1, int(len(s) * 0.95))]
-            print(f"{name:9s}: median {statistics.median(s):.0f}ms  p95 {p95:.0f}ms  min {s[0]:.0f}ms  max {s[-1]:.0f}ms")
+            print(
+                f"{name:9s}: median {statistics.median(s):.0f}ms  p95 {p95:.0f}ms  min {s[0]:.0f}ms  max {s[-1]:.0f}ms"
+            )
 
     if last_frame is not None and last_result is not None:
         save_outputs(args.save, last_frame.image, last_result, stem="capture")

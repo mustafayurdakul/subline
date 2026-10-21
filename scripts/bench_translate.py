@@ -59,10 +59,11 @@ def main() -> int:
             ms = (time.perf_counter() - t0) * 1000
             latencies.append(ms)
             u = translator.last_usage
+            cache_read = getattr(u, "cache_read_input_tokens", 0)
+            cache_write = getattr(u, "cache_creation_input_tokens", 0)
             print(
                 f"  call {i + 1}: {ms:6.0f} ms  in={u.input_tokens} out={u.output_tokens} "
-                f"cache_read={getattr(u, 'cache_read_input_tokens', 0)} cache_write={getattr(u, 'cache_creation_input_tokens', 0)}"
-                f"  -> {out[0][:50]!r}"
+                f"cache_read={cache_read} cache_write={cache_write}  -> {out[0][:50]!r}"
             )
         summary.append((name, latencies, dict(translator.usage_totals), translator.calls))
 

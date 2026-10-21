@@ -4,8 +4,8 @@ Qt native event filter (WM_HOTKEY arrives on the thread's message queue)."""
 from __future__ import annotations
 
 import ctypes
+from collections.abc import Callable
 from ctypes import wintypes
-from typing import Callable
 
 from PySide6.QtCore import QAbstractNativeEventFilter
 
@@ -18,6 +18,7 @@ _user32.UnregisterHotKey.restype = wintypes.BOOL
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
 WM_HOTKEY = 0x0312
 
+# fmt: off
 _MODIFIERS = {"ctrl": MOD_CONTROL, "control": MOD_CONTROL, "alt": MOD_ALT, "shift": MOD_SHIFT, "win": MOD_WIN}
 _NAMED_KEYS = {
     "space": 0x20, "tab": 0x09, "enter": 0x0D, "return": 0x0D, "esc": 0x1B, "escape": 0x1B,
@@ -25,6 +26,7 @@ _NAMED_KEYS = {
     "pageup": 0x21, "pagedown": 0x22, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
     "pause": 0x13, "scrolllock": 0x91, "printscreen": 0x2C,
 }
+# fmt: on
 
 
 def parse_combo(combo: str) -> tuple[int, int]:
@@ -88,7 +90,7 @@ class GlobalHotkeys(QAbstractNativeEventFilter):
     def registered(self) -> list[str]:
         return list(self._names)
 
-    def nativeEventFilter(self, event_type, message):  # noqa: N802 (Qt override)
+    def nativeEventFilter(self, event_type, message):
         if event_type == b"windows_generic_MSG":
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == WM_HOTKEY:
