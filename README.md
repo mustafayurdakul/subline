@@ -52,7 +52,10 @@ Translation options:
 
 - `--target-lang de` / `--source-lang ja` change the pair (`--lang` picks the
   OCR model; the source language defaults to it).
-- `--model claude-opus-5-5` for the quality setting; `--effort low|medium|high`.
+- `--model claude-opus-5-5` for the quality setting; `--effort low|medium|high`;
+  `--thinking adaptive` lets the model think (off by default: measured no
+  gain); `--structured` uses server-side structured output (guaranteed JSON,
+  about 0.5 s slower per call).
 - `--game "Name"` names the game in the prompt and the cache file;
   `--glossary terms.json` fixes renderings of names and terms;
   `--style "..."` adds tone notes.

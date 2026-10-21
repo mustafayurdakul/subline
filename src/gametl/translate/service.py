@@ -17,7 +17,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
 from .base import TranslationRequest, Translator
-from .cache import TranslationCache
+from .cache import TranslationCache, numeric_template
 
 
 class TranslationService:
@@ -43,10 +43,12 @@ class TranslationService:
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="translate")
         self._lock = threading.Lock()
         self._inflight: set[str] = set()
+        self._inflight_templates: set[str] = set()  # numeric templates of in-flight texts
         self._failed_until: dict[str, float] = {}
         self._context: deque[tuple[str, str]] = deque(maxlen=context_lines)
         self._futures: list[Future] = []
         self.stats = {"requests": 0, "items": 0, "translated": 0, "errors": 0, "cache_hits": 0}
+        self.latencies_ms: list[float] = []
 
     # -- pipeline side ---------------------------------------------------------
 
@@ -73,8 +75,15 @@ class TranslationService:
                     continue
                 if self._failed_until.get(key, 0.0) > now:
                     continue
+                # A ticking counter: the same text with other numbers is already
+                # on its way; its answer will serve this one by number swap.
+                template, numbers = numeric_template(key)
+                if numbers and template in self._inflight_templates:
+                    continue
                 seen.add(key)
                 self._inflight.add(key)
+                if numbers:
+                    self._inflight_templates.add(template)
                 batch.append(text)
             if not batch:
                 return False
@@ -92,12 +101,17 @@ class TranslationService:
             self._futures = [f for f in self._futures if not f.done()]
         translated = 0
         for future in done:
-            texts, results, error = future.result()
+            texts, results, error, elapsed_ms = future.result()
             now = time.monotonic()
+            if error is None:
+                self.latencies_ms.append(elapsed_ms)
+                if self.on_status:
+                    self.on_status(f"translated {len(texts)} item(s) in {elapsed_ms:.0f} ms")
             with self._lock:
                 for text, result in zip(texts, results):
                     key = self.cache.key(text)
                     self._inflight.discard(key)
+                    self._inflight_templates.discard(numeric_template(key)[0])
                     if result:
                         self.cache.put(text, self.target_lang, result)
                         self._context.append((text, result))
@@ -124,14 +138,16 @@ class TranslationService:
 
     def _run(
         self, texts: list[str], context: list[tuple[str, str]]
-    ) -> tuple[list[str], list[str | None], Exception | None]:
+    ) -> tuple[list[str], list[str | None], Exception | None, float]:
         request = TranslationRequest(
             texts=texts, source_lang=self.source_lang, target_lang=self.target_lang, context=context
         )
+        t0 = time.perf_counter()
         try:
             results = self.translator.translate(request)
         except Exception as exc:  # any backend failure: cool down the whole batch
-            return texts, [None] * len(texts), exc
+            return texts, [None] * len(texts), exc, (time.perf_counter() - t0) * 1000
+        elapsed_ms = (time.perf_counter() - t0) * 1000
         if len(results) != len(texts):
-            return texts, [None] * len(texts), RuntimeError("translator returned a wrong number of items")
-        return texts, results, None
+            return texts, [None] * len(texts), RuntimeError("translator returned a wrong number of items"), elapsed_ms
+        return texts, results, None, elapsed_ms

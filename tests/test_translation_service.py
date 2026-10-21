@@ -59,6 +59,22 @@ def test_submit_batches_and_results_arrive_via_drain() -> None:
         service.shutdown()
 
 
+def test_ticking_counter_waits_for_the_in_flight_sibling() -> None:
+    translator = GatedTranslator()
+    service = TranslationService(translator)
+    try:
+        assert service.submit(["HP 24   5s"]) is True
+        assert service.submit(["HP 24   6s"]) is False  # same template in flight: no second request
+        assert service.submit(["HP 24   7s", "Open the door."]) is True  # only the new text goes
+        translator.release.set()
+        assert wait_until(lambda: service.drain() > 0 and service.pending == 0)
+        assert [r.texts for r in translator.requests] == [["HP 24   5s"], ["Open the door."]]
+        assert service.lookup("HP 24 6s") == "HP 24   6S"  # served by number swap
+        assert service.lookup("HP 24 7s") == "HP 24   7S"
+    finally:
+        service.shutdown()
+
+
 def test_context_carries_recent_pairs() -> None:
     translator = GatedTranslator()
     translator.release.set()

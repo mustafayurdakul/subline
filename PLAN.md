@@ -445,6 +445,54 @@ Lessons:
   does not reach; the cache marker is harmless and starts paying off once a
   glossary makes the prompt long.
 
-Still to verify live: real latency per batch at low effort with and without
-thinking, Turkish length versus the box (expected to need M3 wrapping), and
-cost per hour of play.
+### Live results (2026-10-21, Haiku 5.5, effort low, this machine)
+
+First live run, 12 s on the fake game, structured output + adaptive thinking:
+8 requests, 9 items, 10 cache hits, 0 errors, request latency median 1.97 s
+(1.06-3.69 s), 1406 input + 366 output tokens plus 4422 cache-read and 1474
+cache-write tokens, about $0.00055. Translations read well, e.g. "We leave
+at dawn. Pack only what you can carry." -> "Şafakta yola çıkıyoruz. Sadece
+taşıyabileceğin kadarını al." Two problems: latency far above the 0.5-0.8 s
+budget, and the HUD timer sent four requests because each tick arrived while
+the previous one was still in flight.
+
+Benchmark (`scripts/bench_translate.py`, same 2-item batch, 4 calls each):
+
+| Mode                          | First call | Then median | Output/call |
+| ----------------------------- | ---------- | ----------- | ----------- |
+| adaptive thinking, structured | 1.9 s      | 1.49 s      | 78 tok      |
+| thinking off, structured      | 3.3 s      | 1.46 s      | 80 tok      |
+| adaptive thinking, plain JSON | 1.1 s      | 1.14 s      | 77 tok      |
+| thinking off, plain JSON      | 1.0 s      | 0.99 s      | 85 tok      |
+
+Findings and decisions:
+
+- **Structured output costs ~0.5 s per call** on this model. Plain JSON
+  requested in the prompt and parsed locally is now the default; malformed
+  output raises and the batch is retried after the cooldown. `--structured`
+  keeps the guaranteed-shape mode.
+- **Thinking makes no difference at low effort**: output stays ~80 tokens
+  either way, so the model already skips it. Default is now `disabled`
+  (`--thinking adaptive` to re-enable).
+- **Prompt caching** engages in structured mode (the schema makes the prefix
+  long enough: 737 cached tokens) but not in plain mode (483-token prompt,
+  under the minimum). Cost is negligible either way.
+- **In-flight counters**: `submit()` now skips a text whose numeric template
+  is already in flight; the answer serves it by number swap.
+- **Real latency floor** for a fresh line with Haiku from here is about
+  1.0 s per request (network round trip plus ~80 output tokens), so a new
+  subtitle shows its Turkish about 1.2-1.4 s after appearing, not the 0.5-
+  0.8 s estimated in 2.1. Repeated and number-only changes stay instant. The
+  fast paths in 2.1 (local draft then refine, pre-translated script) are the
+  way under 0.5 s; a leaner reply format (array of strings instead of
+  id/text objects) would shave perhaps 20 % more.
+- Turkish fit on screen so far: the sampled lines were as long as or shorter
+  than the English, and the single-line fitter handled them. Longer ones
+  will need M3 wrapping.
+
+Second live run with the new defaults (plain JSON, thinking off), 12 s:
+5 requests for 6 items, 16 cache hits, 0 errors; the HUD timer cost one
+request instead of four. Request latency median 1.57 s (0.99-1.92 s) for
+single-item batches, higher than the benchmark's 1.0 s: network variance
+from this machine dominates. 3067 input + 256 output tokens, about $0.0004.
+Per hour of dialogue-heavy play that is a few cents, as estimated.

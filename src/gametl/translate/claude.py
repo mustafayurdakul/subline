@@ -3,11 +3,17 @@
 One request per batch: the system prompt (fixed per session, cache-marked)
 carries the rules, the game name and the glossary; the user message is a JSON
 document with the target language, recent context and the numbered items;
-the reply is structured JSON parsed into `TranslationBatch`.
+the reply is a JSON object parsed into `TranslationBatch`.
 
-Model notes (Claude Haiku 5.5, the default): adaptive thinking is on by
-default and `effort` is the lever for latency, so this sends
-`output_config.effort` (default "low"); no sampling parameters (they 400); a
+Two reply modes. Default: the prompt asks for JSON and the text is parsed
+here (malformed output raises TranslationError and the batch is retried
+after a cooldown). Optional `structured=True` uses server-side structured
+output, which guarantees the shape but measured about 0.5 s slower per call
+on Haiku 5.5 (benchmark in PLAN.md section 11).
+
+Model notes (Claude Haiku 5.5, the default): thinking is sent as disabled
+(allowed at effort low to high) since it measured no quality gain here;
+`output_config.effort` stays "low"; no sampling parameters (they 400); a
 `refusal` stop reason has no server-side fallback and surfaces as a
 TranslationError.
 """
@@ -45,6 +51,24 @@ Rules:
 - Return only the JSON. No notes, no explanations, no transliteration guides."""
 
 
+# USD per million tokens: (input, output, cache read, cache write), prompts <= 100K tokens.
+PRICES_PER_MTOK: dict[str, tuple[float, float, float, float]] = {
+    "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
+    "claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50),
+    "claude-opus-5-5": (4.00, 20.00, 0.40, 5.00),
+}
+
+
+def estimate_cost_usd(model: str, totals: dict[str, int]) -> float | None:
+    prices = PRICES_PER_MTOK.get(model)
+    if prices is None:
+        return None
+    inp, out, cread, cwrite = prices
+    return (
+        totals["input"] * inp + totals["output"] * out + totals["cache_read"] * cread + totals["cache_write"] * cwrite
+    ) / 1_000_000
+
+
 class ClaudeTranslator:
     name = "claude"
 
@@ -52,7 +76,7 @@ class ClaudeTranslator:
         self,
         model: str = "claude-haiku-5-5",
         effort: str = "low",
-        thinking: str = "adaptive",  # "adaptive" | "disabled"
+        thinking: str = "disabled",  # "disabled" | "adaptive"
         game: str | None = None,
         glossary: dict[str, str] | None = None,
         style: str | None = None,
@@ -60,11 +84,13 @@ class ClaudeTranslator:
         target_lang: str = "tr",
         max_tokens: int = 2048,
         timeout: float = 20.0,
+        structured: bool = False,  # True: server-side structured output (measured ~0.5 s slower per call)
         client: Any = None,
     ) -> None:
         self.model = model
         self.effort = effort
         self.thinking = thinking
+        self.structured = structured
         self.game = game
         self.glossary = dict(glossary or {})
         self.style = style
@@ -72,6 +98,8 @@ class ClaudeTranslator:
         self.target_lang = target_lang
         self.max_tokens = max_tokens
         self.last_usage: Any = None
+        self.calls = 0
+        self.usage_totals = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
         self._system_cache: dict[tuple[str | None, str], list[dict[str, Any]]] = {}
 
         if client is None:
@@ -104,6 +132,11 @@ class ClaudeTranslator:
             extras.append("Glossary (always use these renderings):\n" + lines)
         if extras:
             text += "\n\n" + "\n".join(extras)
+        if not self.structured:
+            text += (
+                '\n\nReply with exactly one JSON object and nothing else: '
+                '{"items": [{"id": <id>, "text": "<translation>"}, ...]}'
+            )
         blocks = [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
         self._system_cache[key] = blocks
         return blocks
@@ -116,6 +149,24 @@ class ClaudeTranslator:
             "items": [{"id": i, "text": t} for i, t in enumerate(request.texts)],
         }
         return json.dumps(payload, ensure_ascii=False)
+
+    @staticmethod
+    def _parse_text_json(response: Any) -> TranslationBatch:
+        """Plain-JSON mode: the answer is the first text block (after any
+        thinking blocks), possibly wrapped in a code fence."""
+        text = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end < 0:
+            raise TranslationError("no JSON object in response text")
+        try:
+            return TranslationBatch.model_validate(json.loads(text[start : end + 1]))
+        except (ValueError, TypeError) as exc:
+            raise TranslationError(f"malformed JSON in response: {exc}") from exc
 
     # -- call ------------------------------------------------------------------
 
@@ -130,9 +181,10 @@ class ClaudeTranslator:
             "max_tokens": self.max_tokens,
             "system": self.system_blocks(source_lang, target_lang),
             "messages": [{"role": "user", "content": self.user_payload(request)}],
-            "output_format": TranslationBatch,
             "output_config": {"effort": self.effort},
         }
+        if self.structured:
+            kwargs["output_format"] = TranslationBatch
         if self.thinking == "disabled":
             kwargs["thinking"] = {"type": "disabled"}
 
@@ -142,13 +194,22 @@ class ClaudeTranslator:
             anthropic = None  # type: ignore[assignment]
 
         try:
-            response = self._client.messages.parse(**kwargs)
+            if self.structured:
+                response = self._client.messages.parse(**kwargs)
+            else:
+                response = self._client.messages.create(**kwargs)
         except Exception as exc:
             if anthropic is not None and isinstance(exc, (anthropic.APIConnectionError, anthropic.APIStatusError)):
                 raise TranslationError(f"{type(exc).__name__}: {exc}") from exc
             raise
 
-        self.last_usage = getattr(response, "usage", None)
+        self.calls += 1
+        self.last_usage = usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.usage_totals["input"] += getattr(usage, "input_tokens", 0) or 0
+            self.usage_totals["output"] += getattr(usage, "output_tokens", 0) or 0
+            self.usage_totals["cache_read"] += getattr(usage, "cache_read_input_tokens", 0) or 0
+            self.usage_totals["cache_write"] += getattr(usage, "cache_creation_input_tokens", 0) or 0
         stop = getattr(response, "stop_reason", None)
         if stop == "refusal":
             details = getattr(response, "stop_details", None)
@@ -156,9 +217,12 @@ class ClaudeTranslator:
         if stop == "max_tokens":
             raise TranslationError("response cut off at max_tokens")
 
-        batch = getattr(response, "parsed_output", None)
-        if batch is None:
-            raise TranslationError("no structured output in response")
+        if self.structured:
+            batch = getattr(response, "parsed_output", None)
+            if batch is None:
+                raise TranslationError("no structured output in response")
+        else:
+            batch = self._parse_text_json(response)
 
         out: list[str | None] = [None] * len(request.texts)
         for item in batch.items:

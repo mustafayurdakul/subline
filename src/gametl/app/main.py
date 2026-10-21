@@ -81,7 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("--translator", choices=["claude", "uppercase", "echo"], default="claude")
     tr.add_argument("--model", default="claude-haiku-5-5")
     tr.add_argument("--effort", default="low", choices=["low", "medium", "high"])
-    tr.add_argument("--no-thinking", action="store_true", help="send thinking=disabled (works at effort <= high)")
+    tr.add_argument("--thinking", choices=["disabled", "adaptive"], default="disabled",
+                    help="model thinking; disabled measured fastest with equal quality")
+    tr.add_argument("--structured", action="store_true",
+                    help="use server-side structured output (guaranteed shape, ~0.5 s slower per call)")
     tr.add_argument("--game", help="game name for the prompt and the cache file; default: window title")
     tr.add_argument("--glossary", help="JSON file {\"term\": \"translation\"} of names/terms to render consistently")
     tr.add_argument("--style", help="free-text style notes for the translator (tone, formality)")
@@ -183,7 +186,8 @@ def main(argv: list[str] | None = None) -> int:
         translator = ClaudeTranslator(
             model=args.model,
             effort=args.effort,
-            thinking="disabled" if args.no_thinking else "adaptive",
+            thinking=args.thinking,
+            structured=args.structured,
             game=game,
             glossary=glossary,
             style=args.style,
@@ -261,6 +265,19 @@ def main(argv: list[str] | None = None) -> int:
         f"translation: {st['requests']} requests, {st['items']} items sent, {st['translated']} translated, "
         f"{st['cache_hits']} cache hits, {st['errors']} errors; cache now {len(cache)} entries"
     )
+    if service.latencies_ms:
+        lat = sorted(service.latencies_ms)
+        print(f"request latency: median {lat[len(lat) // 2]:.0f}ms min {lat[0]:.0f}ms max {lat[-1]:.0f}ms")
+    totals = getattr(translator, "usage_totals", None)
+    if totals and getattr(translator, "calls", 0):
+        from gametl.translate.claude import estimate_cost_usd
+
+        cost = estimate_cost_usd(args.model, totals)
+        cost_text = f" ~${cost:.5f}" if cost is not None else ""
+        print(
+            f"tokens: {totals['input']} in, {totals['output']} out, {totals['cache_read']} cache read, "
+            f"{totals['cache_write']} cache write over {translator.calls} calls{cost_text}"
+        )
     return rc
 
 
