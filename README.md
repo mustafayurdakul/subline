@@ -4,8 +4,8 @@ Real-time in-game text translation overlay for Windows. Captures a game window,
 reads on-screen text with local OCR, translates it with Claude, and draws the
 translation over the original at the same position.
 
-Design: see [PLAN.md](PLAN.md). Status: M2 (real translation with Claude,
-English to Turkish by default).
+Design: see [PLAN.md](PLAN.md). Status: M3 (layout quality: wrapping, pill
+style on busy backgrounds, jitter smoothing, ignore zones).
 
 ## Setup
 
@@ -58,8 +58,22 @@ Translation options:
   about 0.5 s slower per call).
 - `--game "Name"` names the game in the prompt and the cache file;
   `--glossary terms.json` fixes renderings of names and terms;
-  `--style "..."` adds tone notes.
-- `--translator uppercase` runs the whole pipeline without any API calls.
+  `--tone "..."` adds notes on tone and formality.
+- `--translator uppercase` runs the whole pipeline without any API calls;
+  `--translator verbose` doubles every line to exercise wrapping.
+
+Appearance and ignores:
+
+- Translations longer than the original shrink a little, then wrap and grow
+  the box into free space (toward the side with more room), then shrink
+  further, then truncate with an ellipsis.
+- `--style auto` (default) patches the original out with its background
+  colour, but switches to a translucent pill with outlined text where the
+  background is busy or the contrast is low; `--style patch|pill|outline`
+  forces one.
+- `--ignore 0,0,0.5,0.1` (repeatable) never translates text in that zone of
+  the client area; `--ignore-pattern "^\d+$"` (repeatable) drops OCR lines
+  matching a pattern.
 
 Useful options:
 

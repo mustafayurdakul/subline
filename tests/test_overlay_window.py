@@ -86,11 +86,20 @@ def test_fit_font_fits_width(qapp: QApplication, target: QWidget) -> None:
     assert big.pixelSize() == int(50 * 0.8)
 
 
-def test_set_blocks_and_paint(qapp: QApplication, target: QWidget) -> None:
+def test_set_blocks_and_paint_all_styles(qapp: QApplication, target: QWidget) -> None:
     overlay = OverlayWindow(int(target.winId()), hide_when_unfocused=False, exclude_from_capture=False)
     overlay.start()
-    overlay.set_blocks([RenderBlock((10, 10, 200, 40), ["HELLO"], bg=(0, 0, 0), fg=(255, 255, 255))])
+    long_text = "a translation that is much longer than the source text was and must wrap"
+    overlay.set_blocks(
+        [
+            RenderBlock((10, 10, 200, 40), ["HELLO"], bg=(0, 0, 0), fg=(255, 255, 255)),
+            RenderBlock((10, 60, 200, 90), [long_text], style="pill", room_below=80),
+            RenderBlock((10, 200, 200, 230), ["outlined"], style="outline"),
+        ]
+    )
     qapp.processEvents()
     image = overlay.grab().toImage()
     assert image.width() > 0
+    layout = overlay.layout_for(overlay._blocks[1])
+    assert len(layout.lines) > 1 and layout.grown is True
     overlay.close()

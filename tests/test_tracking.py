@@ -85,6 +85,15 @@ def test_block_keeps_id_and_gains_stability() -> None:
     assert second[0].text == "Hello there"
 
 
+def test_small_box_jitter_is_ignored_but_real_moves_follow() -> None:
+    tracker = BlockTracker(jitter_px=3)
+    (block,) = tracker.update([line("Hello there", 300, 620, 900, 660)])
+    tracker.update([line("Hello there", 302, 618, 903, 661)])
+    assert block.bbox == (300, 620, 900, 660)  # wobble absorbed: no flicker
+    tracker.update([line("Hello there", 300, 610, 900, 650)])
+    assert block.bbox == (300, 610, 900, 650)  # a real move (still overlapping) is followed
+
+
 def test_text_change_is_confirmed_before_it_replaces_the_block() -> None:
     tracker = BlockTracker()
     (block,) = tracker.update([line("Hello there", 300, 620, 900, 660)])

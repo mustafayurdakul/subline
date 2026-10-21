@@ -23,3 +23,13 @@ class EchoTranslator:
 
     def translate(self, request: TranslationRequest) -> list[str]:
         return list(request.texts)
+
+
+class VerboseTranslator:
+    """Returns each line twice over, about double the length, to exercise
+    wrapping, shrinking and box growth without API calls."""
+
+    name = "verbose"
+
+    def translate(self, request: TranslationRequest) -> list[str]:
+        return ["\n".join(f"{ln} {ln.lower()}" for ln in t.split("\n")) for t in request.texts]

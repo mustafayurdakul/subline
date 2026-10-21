@@ -167,6 +167,7 @@ class BlockTracker:
         gap_factor: float = 0.7,
         min_containment: float = 0.8,
         confirm_frames: int = 1,
+        jitter_px: int = 3,
     ) -> None:
         self.min_iou = min_iou
         self.max_missing = max_missing
@@ -174,6 +175,7 @@ class BlockTracker:
         self.gap_factor = gap_factor
         self.min_containment = min_containment
         self.confirm_frames = confirm_frames  # extra sightings before a changed reading replaces the text
+        self.jitter_px = jitter_px  # box edge moves up to this many px are ignored (OCR jitter)
         self.blocks: list[TextBlock] = []
         self._next_id = 1
 
@@ -254,7 +256,8 @@ class BlockTracker:
             block.pending_text = None
             block.pending_frames = 0
             fragment = area(bbox) < area(block.bbox) and containment(bbox, block.bbox) >= self.min_containment
-            if not fragment:
+            jitter = max(abs(a - b) for a, b in zip(bbox, block.bbox)) <= self.jitter_px
+            if not fragment and not jitter:
                 block.bbox = bbox
             return
 

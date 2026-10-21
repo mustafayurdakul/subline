@@ -262,7 +262,7 @@ Alternative: `winget install Python.Python.3.12`, then `py -3.12 -m venv .venv`.
 | M0 | Spike (done 2026-10-21) | Python 3.12 via uv, project skeleton, WGC capture + RapidOCR with timings, fake game window for testing. Results in section 9. | done     |
 | M1 | Overlay MVP (done 2026-10-21) | Click-through overlay following the window, block tracker with confirmation and hysteresis, patch rendering with sampled colours, dummy translator, CLI entry point. Results in section 10. | done     |
 | M2 | Real translation (built 2026-10-21, live run pending) | Claude backend with structured output, asynchronous service, three-tier cache, context window, CLI options. Results in section 11. | built    |
-| M3 | Layout quality     | Fit/wrap, background and colour sampling, hysteresis, ignore zones.                           | 2-3 days |
+| M3 | Layout quality (done 2026-10-21) | Wrap/shrink/grow fitter, busy-background detection with pill fallback, jitter smoothing, ignore zones and patterns. Results in section 12. | done     |
 | M4 | App shell          | Tray icon, settings UI, window picker, hotkeys, per-game profiles, config in %APPDATA%.       | 2-3 days |
 | M5 | Fast paths         | Offline NMT backend (CTranslate2), fast-first-then-refine mode, script import + batch pre-translation, fuzzy lookup at runtime. See 2.1. | 3-4 days |
 | M6 | Packaging & extras | PyInstaller build, DirectML option, glossary editor, logs, predictive hiding (experimental).  | ongoing  |
@@ -496,3 +496,42 @@ request instead of four. Request latency median 1.57 s (0.99-1.92 s) for
 single-item batches, higher than the benchmark's 1.0 s: network variance
 from this machine dominates. 3067 input + 256 output tokens, about $0.0004.
 Per hour of dialogue-heavy play that is a few cents, as estimated.
+
+## 12. M3 results (2026-10-21)
+
+What exists:
+
+- **Fitter** (`layout/fit.py`, pure, measurement injected): for a
+  translation longer than the source it tries, in order, shrinking the font
+  down to 72 % of the source size while wrapping inside the source box;
+  keeping the size and growing the box into free space (toward the side
+  with more room, so subtitles grow upward and HUD lines downward); shrinking
+  further to a 10 px floor; truncating with an ellipsis. Explicit newlines
+  stay paragraph breaks. The pipeline reports the free space to the next
+  block above and below (4 px margin) and to the edge of the client area.
+- **Colour analysis** (`layout/colors.py`): besides background and text
+  colours it reports `busy` (robust spread of the ring, or of inner pixels
+  clearly on the background side, above 28 luminance levels, using the
+  median absolute deviation so an anti-aliased glyph fringe inside the ring
+  does not count) and `contrast`. `--style auto` draws a patch unless busy
+  or contrast under 60, then a translucent (alpha 215) rounded pill with
+  white outlined text. Outlines are eight offset draws in dark, then the
+  text.
+- **Jitter smoothing** (tracker): with unchanged text, box edge moves of
+  3 px or less are ignored; larger moves are followed. One-frame fragments
+  already kept the full box.
+- **Ignore zones and patterns** (`tracking/filters.py`): OCR lines whose
+  centre lies in a zone, or whose text matches a pattern, are dropped before
+  tracking. `--ignore x,y,w,h` and `--ignore-pattern REGEX`, both repeatable.
+- `scripts/fake_game.py --busy` draws a mosaic behind the subtitle band; the
+  `verbose` dummy translator doubles every line.
+
+Verified on the fake game: a doubled subtitle wraps to three lines at full
+size and grows upward from the bottom edge; on the mosaic the subtitle gets
+the pill and stays readable; the HUD disappears under an ignore zone; 63
+tests pass.
+
+Known gaps: colour sampling still assumes one text colour per block; text
+with a gradient or two colours (speaker name + line) gets one; the fitter
+does not reflow a source that was already two lines into one; growth never
+pushes neighbouring blocks, it only avoids them.

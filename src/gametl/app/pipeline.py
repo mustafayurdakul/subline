@@ -13,10 +13,11 @@ from PySide6.QtCore import QThread, Signal
 
 from ..capture.base import Frame
 from ..capture.wgc import WgcWindowCapture
-from ..layout.colors import bgr_to_rgb, sample_colors
+from ..layout.colors import analyze_colors, bgr_to_rgb
 from ..ocr.base import OcrEngine, TextLine
 from ..overlay.window import RenderBlock
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
+from ..tracking.filters import LineFilter
 from ..translate.service import TranslationService
 
 Box = tuple[int, int, int, int]
@@ -30,6 +31,9 @@ class PipelineConfig:
     full_scan_every: int = 10  # with a roi: scan the whole frame every N frames
     stable_frames: int = 1  # confirming frames before translating
     max_missing: int = 3  # frames a block survives without being seen
+    style: str = "auto"  # auto | patch | pill | outline; auto = patch unless the background is busy
+    line_filter: LineFilter | None = None  # ignore zones and patterns
+    grow_margin: int = 4  # px kept between a grown box and its neighbours
     debug: bool = False  # also emit outlines of every tracked block
     dump_dir: str | None = None  # debug: save each frame with block boxes drawn
 
@@ -80,10 +84,13 @@ class PipelineThread(QThread):
                     ocr_ms = (time.perf_counter() - t0) * 1000
                     self.ocr_ms.append(ocr_ms)
 
+                    if cfg.line_filter:
+                        lines = cfg.line_filter.apply(lines)
                     blocks = tracker.update(lines, scanned)
                     self._translate_ready(blocks, frame)
 
-                    render = [self._to_render(b) for b in blocks if b.translation is not None]
+                    area = cfg.area or (0, 0, frame.width, frame.height)
+                    render = [self._to_render(b, blocks, area) for b in blocks if b.translation is not None]
                     if cfg.debug:
                         render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
                         detail = " ".join(f"#{b.id}{b.bbox}{'*' if b.translation else ''}" for b in blocks)
@@ -127,9 +134,31 @@ class PipelineThread(QThread):
                 misses.append(block.text)
                 continue
             block.translation = translated
-            block.colors = sample_colors(frame.image, block.bbox)
+            sample = analyze_colors(frame.image, block.bbox)
+            block.colors = (sample.bg, sample.fg)
+            block.extra["busy"] = sample.busy
+            block.extra["contrast"] = sample.contrast
         if misses:
             self.service.submit(misses)
+
+    def _room(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> tuple[int, int]:
+        """Free pixels below and above a block before the next block that
+        overlaps it horizontally, or the edge of the area."""
+        ax0, ay0, ax1, ay1 = area
+        x0, y0, x1, y1 = block.bbox
+        below, above = ay1 - y1, y0 - ay0
+        margin = self.cfg.grow_margin
+        for other in blocks:
+            if other is block:
+                continue
+            ox0, oy0, ox1, oy1 = other.bbox
+            if ox1 <= x0 or ox0 >= x1:
+                continue
+            if oy0 >= y1:
+                below = min(below, oy0 - y1 - margin)
+            elif oy1 <= y0:
+                above = min(above, y0 - oy1 - margin)
+        return max(0, below), max(0, above)
 
     def _dump(self, frame: Frame, lines: list[TextLine], blocks: list[TextBlock]) -> None:
         import os
@@ -146,14 +175,23 @@ class PipelineThread(QThread):
             cv2.putText(img, f"#{b.id}", (x0, max(10, y0 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
         cv2.imwrite(os.path.join(self.cfg.dump_dir, f"frame_{self.frames:04d}.png"), img)  # type: ignore[arg-type]
 
-    @staticmethod
-    def _to_render(block: TextBlock) -> RenderBlock:
+    def _to_render(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> RenderBlock:
         bg, fg = block.colors or ((0, 0, 0), (255, 255, 255))
         assert block.translation is not None
+        style = self.cfg.style
+        if style == "auto":
+            busy = block.extra.get("busy", False)
+            low_contrast = block.extra.get("contrast", 255.0) < 60
+            style = "pill" if busy or low_contrast else "patch"
+        below, above = self._room(block, blocks, area)
         return RenderBlock(
             bbox=block.bbox,
             lines=block.translation.split("\n"),
             bg=bgr_to_rgb(bg),
             fg=bgr_to_rgb(fg),
             align="center",
+            style=style,
+            source_lines=max(1, len(block.line_texts)),
+            room_below=below,
+            room_above=above,
         )

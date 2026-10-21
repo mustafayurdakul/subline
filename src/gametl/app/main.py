@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     lang.add_argument("--target-lang", default="tr", help="target language code (default tr)")
 
     tr = p.add_argument_group("translation")
-    tr.add_argument("--translator", choices=["claude", "uppercase", "echo"], default="claude")
+    tr.add_argument("--translator", choices=["claude", "uppercase", "echo", "verbose"], default="claude")
     tr.add_argument("--model", default="claude-haiku-5-5")
     tr.add_argument("--effort", default="low", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"], default="disabled",
@@ -87,9 +87,17 @@ def main(argv: list[str] | None = None) -> int:
                     help="use server-side structured output (guaranteed shape, ~0.5 s slower per call)")
     tr.add_argument("--game", help="game name for the prompt and the cache file; default: window title")
     tr.add_argument("--glossary", help="JSON file {\"term\": \"translation\"} of names/terms to render consistently")
-    tr.add_argument("--style", help="free-text style notes for the translator (tone, formality)")
+    tr.add_argument("--tone", help="free-text notes for the translator on tone and formality")
     tr.add_argument("--cache-dir", help="where per-game translation caches live (default %%APPDATA%%\\gametl\\cache)")
     tr.add_argument("--no-cache-file", action="store_true", help="keep the cache in memory only")
+
+    look = p.add_argument_group("appearance and ignores")
+    look.add_argument("--style", choices=["auto", "patch", "pill", "outline"], default="auto",
+                      help="auto = patch the original out, pill on busy backgrounds")
+    look.add_argument("--ignore", action="append", default=[], metavar="x,y,w,h",
+                      help="zone of the client area (fractions or pixels) never to translate; repeatable")
+    look.add_argument("--ignore-pattern", action="append", default=[], metavar="REGEX",
+                      help="drop OCR lines matching this pattern (case-insensitive); repeatable")
 
     run = p.add_argument_group("pipeline")
     run.add_argument("--fps", type=float, default=10.0, help="capture cap")
@@ -123,8 +131,9 @@ def main(argv: list[str] | None = None) -> int:
     from gametl.app.pipeline import PipelineConfig, PipelineThread
     from gametl.ocr.rapid import RapidOcrEngine
     from gametl.overlay.window import OverlayWindow
+    from gametl.tracking.filters import LineFilter
     from gametl.translate.cache import TranslationCache
-    from gametl.translate.dummy import EchoTranslator, UppercaseTranslator
+    from gametl.translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
     from gametl.translate.service import TranslationService
 
     app = QApplication(sys.argv[:1])
@@ -166,6 +175,15 @@ def main(argv: list[str] | None = None) -> int:
         roi = (roi[0] + ax0, roi[1] + ay0, roi[2] + ax0, roi[3] + ay0)
     print(f"frame {frame_w}x{frame_h}, area {area or 'whole frame'}, roi {roi or 'whole area'}")
 
+    zones = []
+    for spec in args.ignore:
+        z = parse_roi(spec, ax1 - ax0, ay1 - ay0)
+        if z is not None:
+            zones.append((z[0] + ax0, z[1] + ay0, z[2] + ax0, z[3] + ay0))
+    line_filter = LineFilter.compile(zones, args.ignore_pattern) if (zones or args.ignore_pattern) else None
+    if line_filter:
+        print(f"ignoring {len(zones)} zone(s) and {len(args.ignore_pattern)} pattern(s)")
+
     # -- translation -----------------------------------------------------------
     source_lang = args.source_lang or args.lang
     game = args.game or title or "game"
@@ -190,12 +208,14 @@ def main(argv: list[str] | None = None) -> int:
             structured=args.structured,
             game=game,
             glossary=glossary,
-            style=args.style,
+            style=args.tone,
             source_lang=source_lang,
             target_lang=args.target_lang,
         )
     elif args.translator == "uppercase":
         translator = UppercaseTranslator()
+    elif args.translator == "verbose":
+        translator = VerboseTranslator()
     else:
         translator = EchoTranslator()
 
@@ -231,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         full_scan_every=args.full_scan_every,
         stable_frames=args.stable_frames,
         max_missing=args.max_missing,
+        style=args.style,
+        line_filter=line_filter,
         debug=args.debug,
         dump_dir=args.dump_dir,
     )
