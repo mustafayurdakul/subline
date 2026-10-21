@@ -4,12 +4,15 @@ Pure functions: text measurement is injected (`measure(text, font_px) ->
 width`), so the algorithm is testable without a GUI toolkit.
 
 Preference order when the translation is longer than the source:
-1. shrink the font a little (down to `shrink_floor` of the source size) so
+1. with `prefer_grow` (the default for subtitles): keep the source font
+   size and wrap, letting the box grow into free space the caller reports
+   as `max_height`, so every line renders at the same size;
+2. shrink the font a little (down to `shrink_floor` of the source size) so
    it still fits the source box, wrapping as needed;
-2. keep the font size and let the box grow (downwards, then upwards) into
-   free space the caller reports as `max_height`;
-3. shrink further, down to `min_px`;
-4. truncate with an ellipsis.
+3. keep the font size and let the box grow (without `prefer_grow`, this
+   comes after the small shrink);
+4. shrink further, down to `min_px`;
+5. truncate with an ellipsis.
 """
 
 from __future__ import annotations
@@ -74,6 +77,7 @@ def fit_text(
     min_px: int = 10,
     shrink_floor: float = 0.72,
     line_spacing: float = 1.15,
+    prefer_grow: bool = False,
 ) -> TextLayout:
     """Lay `text` out in a box `width` wide and `height` tall, starting from
     font size `base_px` (the source text's size). Explicit newlines are kept
@@ -89,6 +93,11 @@ def fit_text(
             lines.extend(wrap_words(paragraph, width, lambda s: measure(s, px)))
         line_h = px * line_spacing
         return lines, line_h, len(lines) * line_h
+
+    if prefer_grow:
+        lines, line_h, total = layout_at(base_px)
+        if total <= limit:
+            return TextLayout(lines, base_px, line_h, math.ceil(total), total > height, False)
 
     grow: tuple[list[str], int, float, float] | None = None
     for px in range(base_px, floor_px - 1, -1):

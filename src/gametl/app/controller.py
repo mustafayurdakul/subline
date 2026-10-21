@@ -223,6 +223,10 @@ class OverlayController(QObject):
             if settings.draft == "offline" and settings.translator != "offline":
                 self._say("loading offline draft model...")
             draft = build_draft_translator(settings, self.store)
+            for t in (self.translator, draft):
+                kind = getattr(t, "kind", None)
+                if kind:
+                    self._say(f"offline model: {kind} ({getattr(t, 'model_dir', '')})")
         except (OSError, ValueError, RuntimeError) as exc:
             self._say(f"translator setup failed: {exc}")
             return False

@@ -125,6 +125,10 @@ Faster than the API round trip:
 - **DeepL.** With a key in the `DEEPL_AUTH_KEY` environment variable (free
   tier: 500k characters a month), `--translator deepl` or `--draft deepl`
   gives fast, strong translations for European languages including Turkish.
+  Measured for English to Turkish: median 0.2 s per line against Haiku's
+  0.9 s, with equal or better wording, so for that pair the recommended
+  setup is Translator: deepl with Draft: none. Claude remains the choice
+  when you need a glossary, tone notes or a language DeepL lacks.
 - **Pre-translate the script.** If the game's text can be extracted (a text
   file with one line per entry, an .srt, a JSON file or a CSV), translate it
   once up front so every line is instant in play:

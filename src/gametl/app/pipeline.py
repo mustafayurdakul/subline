@@ -14,6 +14,7 @@ from PySide6.QtCore import QThread, Signal
 from ..capture.base import Frame
 from ..capture.wgc import WgcWindowCapture
 from ..layout.colors import analyze_colors, bgr_to_rgb
+from ..layout.style import StyleMemory
 from ..ocr.base import OcrEngine, TextLine
 from ..overlay.window import RenderBlock
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
@@ -58,6 +59,7 @@ class PipelineThread(QThread):
         self._stop = False
         self.paused = False  # keep capturing, show nothing, translate nothing
         self._reset = False
+        self.style_memory = StyleMemory()
         self.frames = 0
         self.ocr_ms: list[float] = []
 
@@ -88,6 +90,7 @@ class PipelineThread(QThread):
                     if self._reset:
                         self._reset = False
                         tracker = BlockTracker(max_missing=cfg.max_missing)
+                        self.style_memory = StyleMemory()
                         self.blocks_ready.emit([])
                     if self.paused:
                         if not was_paused:
@@ -162,6 +165,9 @@ class PipelineThread(QThread):
                 block.colors = (sample.bg, sample.fg)
                 block.extra["busy"] = sample.busy
                 block.extra["contrast"] = sample.contrast
+                self.style_memory.observe(
+                    block.bbox, max(1, len(block.line_texts)), sample.bg, sample.fg, sample.busy
+                )
             block.extra["draft"] = not is_final
             if not is_final:
                 misses.append(block.text)  # keep the final request alive (resubmits after a cooldown)
@@ -203,11 +209,14 @@ class PipelineThread(QThread):
         cv2.imwrite(os.path.join(self.cfg.dump_dir, f"frame_{self.frames:04d}.png"), img)  # type: ignore[arg-type]
 
     def _to_render(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> RenderBlock:
-        bg, fg = block.colors or ((0, 0, 0), (255, 255, 255))
         assert block.translation is not None
+        n_lines = max(1, len(block.line_texts))
+        memory = self.style_memory
+        # Lines that appear in the same place share one size, colour and style.
+        bg, fg = memory.colors(block.bbox) or block.colors or ((0, 0, 0), (255, 255, 255))
         style = self.cfg.style
         if style == "auto":
-            busy = block.extra.get("busy", False)
+            busy = memory.busy(block.bbox, default=bool(block.extra.get("busy", False)))
             low_contrast = block.extra.get("contrast", 255.0) < 60
             style = "pill" if busy or low_contrast else "patch"
         below, above = self._room(block, blocks, area)
@@ -218,7 +227,9 @@ class PipelineThread(QThread):
             fg=bgr_to_rgb(fg),
             align="center",
             style=style,
-            source_lines=max(1, len(block.line_texts)),
+            source_lines=n_lines,
+            font_px=memory.font_px(block.bbox, n_lines),
+            prefer_grow=True,
             room_below=below,
             room_above=above,
         )

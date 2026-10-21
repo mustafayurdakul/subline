@@ -63,6 +63,17 @@ def test_hopeless_text_is_truncated_at_minimum_size() -> None:
     assert layout.height <= 20 + 1
 
 
+def test_prefer_grow_keeps_the_size_and_wraps_when_there_is_room() -> None:
+    # 26 chars: would shrink to 30 px to stay on one line; with prefer_grow it wraps at 32 px.
+    text = "twenty-six characters here"
+    layout = fit_text(text, 400, 40, measure, base_px=32, max_height=120, prefer_grow=True)
+    assert layout.font_px == 32
+    assert len(layout.lines) == 2 and layout.grown is True
+    # Without room it falls back to the shrink-first order.
+    layout = fit_text(text, 400, 40, measure, base_px=32, max_height=None, prefer_grow=True)
+    assert layout.font_px < 32 and len(layout.lines) == 1
+
+
 def test_explicit_newlines_are_kept() -> None:
     layout = fit_text("first line\nsecond line", 400, 80, measure, base_px=30)
     assert layout.lines == ["first line", "second line"]

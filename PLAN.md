@@ -742,3 +742,43 @@ Changes:
 What the user should see now with `--draft offline`: the OPUS draft within
 about 0.1 s of a line appearing, replaced by Claude's wording a second later
 (often nearly identical).
+
+## 18. Third real-game feedback: draft still weak, inconsistent sizing (2026-10-22)
+
+Findings: the OPUS draft is better but still "pretty bad" on the game's
+lines; and translated subtitles came out in different sizes from line to
+line although the game's subtitles are uniform.
+
+Sizing, diagnosed: each block's font size was derived from its own OCR box
+height, which varies with the letters in the line (descenders, capitals,
+punctuation), and the fitter's first move for a long Turkish line was to
+shrink it to fit the width while short lines stayed full size.
+
+Changes:
+
+- **Style memory** (`layout/style.py`): per horizontal band of the frame
+  (64 px, neighbours included), the median source line height, median
+  background and text colours, and a majority vote on busy-background, from
+  the last 24 blocks seen there. Every block in the subtitle zone renders
+  with the band's size, colours and style once two have been seen; the
+  current box's own height is not included in the median, since it is the
+  jitter being removed. Reset with rescan and area changes.
+- **Wrap before shrink** (`layout/fit.py`, `prefer_grow`): when there is
+  room, a long translation wraps to a second line at the same size (growing
+  toward the side with more room, so upward for subtitles) instead of being
+  shrunk; shrinking remains the fallback when nothing can grow.
+
+Draft quality: offline MT for English to Turkish on game dialogue tops out
+around the OPUS tc-big model. With a DeepL free key in place, a live
+comparison on ten game lines (single-line requests from this machine):
+
+| Backend    | Median latency | Range        | Quality on the ten lines                   |
+| ---------- | -------------- | ------------ | ------------------------------------------ |
+| DeepL      | 196 ms         | 166-733 ms   | natural throughout; no misses              |
+| Haiku 5.5  | 930 ms         | 674-1117 ms  | natural; one awkward choice ("Yakında kal") |
+
+Decision: for English to Turkish, DeepL as the main translator with no
+draft is the best arrangement (no handover, five times faster, equal or
+better wording); Claude stays available for its glossary, tone notes and
+context, and for languages DeepL does not cover. The settings default stays
+Claude because DeepL needs a key; the README recommends DeepL for Turkish.

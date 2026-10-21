@@ -55,7 +55,9 @@ class RenderBlock:
     fg: RGB = (255, 255, 255)
     align: str = "center"  # "center" | "left"
     style: str = "patch"  # "patch" | "pill" | "outline"
-    source_lines: int = 1  # lines in the source text; sets the base font size
+    source_lines: int = 1  # lines in the source text; sets the base font size unless font_px is given
+    font_px: int | None = None  # base font size decided by the caller (style memory)
+    prefer_grow: bool = True  # keep the font size and wrap into free space before shrinking
     room_below: int = 0  # free pixels the box may grow into
     room_above: int = 0
     outline: bool = False  # debug: draw the box outline only
@@ -178,11 +180,14 @@ class OverlayWindow(QWidget):
     def layout_for(self, block: RenderBlock) -> TextLayout:
         x0, y0, x1, y1 = block.bbox
         width, height = x1 - x0, y1 - y0
-        key = (tuple(block.lines), width, height, block.source_lines, block.room_below, block.room_above)
+        key = (
+            tuple(block.lines), width, height, block.source_lines, block.font_px,
+            block.prefer_grow, block.room_below, block.room_above,
+        )
         cached = self._layout_cache.get(key)
         if cached is not None:
             return cached
-        base_px = max(6, int(height / max(1, block.source_lines) * 0.8))
+        base_px = block.font_px or max(6, int(height / max(1, block.source_lines) * 0.8))
         layout = fit_text(
             "\n".join(block.lines),
             width,
@@ -190,6 +195,7 @@ class OverlayWindow(QWidget):
             self.measure,
             base_px,
             max_height=height + block.room_below + block.room_above,
+            prefer_grow=block.prefer_grow,
         )
         if len(self._layout_cache) > 512:
             self._layout_cache.clear()
