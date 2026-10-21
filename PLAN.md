@@ -707,3 +707,38 @@ drag on the selector restarted the pipeline on the selected area.
 Open from the same run: everything else the real game showed (fonts, frame
 rate, scaling) still has to be reported; the selector covers only one area,
 and a second one (e.g. a dialogue box plus a choice menu) would need a list.
+
+## 17. Second real-game feedback: draft quality and Haiku latency (2026-10-21)
+
+Finding: with a selected subtitle area the overlay works well, but the
+Argos draft is too poor to read and Haiku's round trip is too slow for
+short lines that are only up briefly.
+
+Changes:
+
+- **OPUS-MT offline models.** `scripts/convert_offline_model.py` converts
+  Helsinki-NLP/opus-mt-tc-big-<src>-<tgt> (or any Marian model) to
+  CTranslate2 in a throwaway environment with PyTorch; the app loads it with
+  the model's own source and target SentencePiece files and prefers it over
+  the Argos package. One trap cost an hour: Marian models need the `</s>`
+  end-of-sentence token appended to the source tokens (the HF tokenizer adds
+  it silently); without it the decoder never stops and repeats to the length
+  limit. With it, English to Turkish output is close to Claude's on short
+  lines ("I told you not to open that door." -> "Sana o kapıyı açma
+  demiştim.", "Health potion" -> "Sağlık iksiri") at ~20 ms per line, where
+  Argos gave "Size o kapıyı açmamamı söyledim." and "Sağlık potayonu". A
+  `no_repeat_ngram_size=3` guard stays on as a safety net. The converted
+  en->tr model is installed in this machine's data folder.
+- **DeepL backend** (`translate/deepl.py`): optional main translator or
+  draft, keyed by `DEEPL_AUTH_KEY` (free tier), a few hundred milliseconds,
+  strong for Turkish. Tested against a stub only; no key on this machine.
+- **Claude trims.** The system prompt was cut to a third of its length and
+  the plain reply format is now a positional string list (no ids). Input
+  tokens 482 -> 316, output 85 -> 62 per two-line batch. Measured effect:
+  median 0.99 s -> 0.93 s per request. The round trip from this network
+  dominates; Haiku will not get meaningfully faster from here, so short,
+  briefly shown lines need the draft tier, and that tier is now good.
+
+What the user should see now with `--draft offline`: the OPUS draft within
+about 0.1 s of a line appearing, replaced by Claude's wording a second later
+(often nearly identical).

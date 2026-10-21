@@ -57,21 +57,29 @@ def client_area_in_frame(hwnd: int) -> tuple[Box, Box | None]:
     return (0, 0, frame_w, frame_h), area
 
 
-def ensure_anthropic_credentials() -> bool:
-    """True when the SDK will find credentials. Also picks up a key set in the
-    Windows user environment after this process started."""
-    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        return True
+def load_user_env(name: str) -> str | None:
+    """The variable from this process, else from the Windows user environment
+    (set after the process started), copied into os.environ."""
+    value = os.environ.get(name)
+    if value:
+        return value
     try:
         import winreg
 
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            value, _ = winreg.QueryValueEx(key, "ANTHROPIC_API_KEY")
-            if value:
-                os.environ["ANTHROPIC_API_KEY"] = str(value)
-                return True
+            value, _ = winreg.QueryValueEx(key, name)
     except OSError:
-        pass
+        return None
+    if value:
+        os.environ[name] = str(value)
+        return str(value)
+    return None
+
+
+def ensure_anthropic_credentials() -> bool:
+    """True when the SDK will find credentials."""
+    if load_user_env("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+        return True
     return (Path.home() / ".config" / "anthropic").exists()
 
 
@@ -90,6 +98,22 @@ def build_offline_translator(settings: Settings, store: ProfileStore) -> Transla
     return OfflineTranslator.from_models_dir(store.models_dir, settings.effective_source_lang, settings.target_lang)
 
 
+def build_deepl_translator() -> Translator:
+    from ..translate.deepl import DeepLTranslator
+
+    return DeepLTranslator(auth_key=load_user_env("DEEPL_AUTH_KEY"))
+
+
+def build_draft_translator(settings: Settings, store: ProfileStore) -> Translator | None:
+    if not settings.draft or settings.draft == settings.translator:
+        return None
+    if settings.draft == "offline":
+        return build_offline_translator(settings, store)
+    if settings.draft == "deepl":
+        return build_deepl_translator()
+    return None
+
+
 def build_translator(settings: Settings, game: str, store: ProfileStore | None = None) -> Translator:
     if settings.translator == "uppercase":
         return UppercaseTranslator()
@@ -99,6 +123,8 @@ def build_translator(settings: Settings, game: str, store: ProfileStore | None =
         return EchoTranslator()
     if settings.translator == "offline":
         return build_offline_translator(settings, store or ProfileStore())
+    if settings.translator == "deepl":
+        return build_deepl_translator()
     from ..translate.claude import ClaudeTranslator
 
     glossary = None
@@ -194,10 +220,9 @@ class OverlayController(QObject):
             return False
         try:
             self.translator = build_translator(settings, game, self.store)
-            draft = None
             if settings.draft == "offline" and settings.translator != "offline":
                 self._say("loading offline draft model...")
-                draft = build_offline_translator(settings, self.store)
+            draft = build_draft_translator(settings, self.store)
         except (OSError, ValueError, RuntimeError) as exc:
             self._say(f"translator setup failed: {exc}")
             return False

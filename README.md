@@ -111,12 +111,20 @@ Translation options:
 
 Faster than the API round trip:
 
-- **Offline draft.** `uv run gametl --download-model --target-lang tr` fetches
-  an Argos Translate package (a CTranslate2 model, no PyTorch) for the pair
-  into `%APPDATA%\gametl\models`. Then `--draft offline` (or Draft: offline in
-  the settings window) shows the offline translation within a fraction of a
-  second and swaps in Claude's when it arrives. `--translator offline` runs
-  fully offline with no API at all, at lower quality.
+- **Offline draft.** `--draft offline` (or Draft: offline in the settings
+  window) shows an offline translation within a fraction of a second and
+  swaps in Claude's when it arrives; `--translator offline` runs with no API
+  at all. Two model sources, both under `%APPDATA%\gametl\models`:
+  - the OPUS-MT model for the pair, converted once with
+    `uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr`
+    (about 230 MB; the conversion needs PyTorch, the app does not). Good
+    quality: in English to Turkish it is close to Claude on short lines.
+  - the Argos Translate package from `gametl --download-model` or the
+    settings button, smaller and easier but clearly weaker. The converted
+    model is preferred when both are installed.
+- **DeepL.** With a key in the `DEEPL_AUTH_KEY` environment variable (free
+  tier: 500k characters a month), `--translator deepl` or `--draft deepl`
+  gives fast, strong translations for European languages including Turkish.
 - **Pre-translate the script.** If the game's text can be extracted (a text
   file with one line per entry, an .srt, a JSON file or a CSV), translate it
   once up front so every line is instant in play:

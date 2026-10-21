@@ -37,18 +37,14 @@ class TranslationBatch(BaseModel):
     items: list[TranslatedItem]
 
 
-_SYSTEM_RULES = """You translate text captured by OCR from a video game screen, so the player can read the game in {target}.
+_SYSTEM_RULES = """Translate text captured by OCR from a video game screen{source_clause} into {target}.
+Keep the meaning, tone and register of game dialogue; items may also be UI labels or HUD text.
+Keep each translation about as long as its source (it must fit the same space), keep its line breaks (N lines in, N out), and keep numbers, units, symbols, placeholders and proper names unless the glossary says otherwise.
+Items may contain OCR errors (l/1, O/0, spacing): translate the intended text.
+"context" holds recent lines with their translations, oldest first; use it only for consistency.
+Reply with JSON only, no notes."""
 
-Rules:
-- Translate every item{source_clause} into {target}. Return each id exactly once.
-- Game dialogue may be informal, dramatic, abbreviated or in character; keep the meaning, tone and register.
-- The translation must fit in the same space on screen: keep it about as long as the source, preferring shorter phrasing.
-- Keep line breaks: a source with N lines gets a translation with N lines, broken at similar points.
-- Keep numbers, units, symbols, placeholders and proper names, unless the glossary says otherwise.
-- Items are OCR output and may contain small errors (l/1, O/0, missing or extra spaces); translate the intended text.
-- Items may be UI labels, menu entries or HUD text, not only sentences; translate them as UI text.
-- Use the "context" field (recent lines and their translations, oldest first) only for consistency of names and terms.
-- Return only the JSON. No notes, no explanations, no transliteration guides."""
+_PLAIN_FORMAT = '\nReply exactly as {"items": ["<translation of item 0>", "<translation of item 1>", ...]}: one string per item, same order and count.'
 
 
 # USD per million tokens: (input, output, cache read, cache write), prompts <= 100K tokens.
@@ -141,23 +137,25 @@ class ClaudeTranslator:
             lines = "\n".join(f"- {k} -> {v}" for k, v in sorted(self.glossary.items()))
             extras.append("Glossary (always use these renderings):\n" + lines)
         if extras:
-            text += "\n\n" + "\n".join(extras)
+            text += "\n" + "\n".join(extras)
         if not self.structured:
-            text += (
-                '\n\nReply with exactly one JSON object and nothing else: '
-                '{"items": [{"id": <id>, "text": "<translation>"}, ...]}'
-            )
+            text += _PLAIN_FORMAT
         blocks = [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
         self._system_cache[key] = blocks
         return blocks
 
-    @staticmethod
-    def user_payload(request: TranslationRequest) -> str:
-        payload = {
+    def user_payload(self, request: TranslationRequest) -> str:
+        """Plain mode sends items as a positional list (fewer tokens in and
+        out); structured mode keeps numbered objects to match the schema."""
+        payload: dict[str, Any] = {
             "target_language": language_name(request.target_lang) or request.target_lang,
-            "context": [{"source": s, "translation": t} for s, t in (request.context or [])],
-            "items": [{"id": i, "text": t} for i, t in enumerate(request.texts)],
         }
+        if request.context:
+            payload["context"] = [[s, t] for s, t in request.context]
+        if self.structured:
+            payload["items"] = [{"id": i, "text": t} for i, t in enumerate(request.texts)]
+        else:
+            payload["items"] = list(request.texts)
         return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
@@ -174,9 +172,24 @@ class ClaudeTranslator:
         if start < 0 or end < 0:
             raise TranslationError("no JSON object in response text")
         try:
-            return TranslationBatch.model_validate(json.loads(text[start : end + 1]))
-        except (ValueError, TypeError) as exc:
+            data = json.loads(text[start : end + 1])
+        except ValueError as exc:
             raise TranslationError(f"malformed JSON in response: {exc}") from exc
+        items = data.get("items") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            raise TranslationError("no items list in response")
+        normalised: list[dict[str, Any]] = []
+        for index, item in enumerate(items):
+            if isinstance(item, str):
+                normalised.append({"id": index, "text": item})
+            elif isinstance(item, dict) and "text" in item:
+                normalised.append({"id": int(item.get("id", index)), "text": str(item["text"])})
+            else:
+                raise TranslationError(f"unexpected item in response: {item!r}")
+        try:
+            return TranslationBatch.model_validate({"items": normalised})
+        except (ValueError, TypeError) as exc:
+            raise TranslationError(f"malformed items in response: {exc}") from exc
 
     # -- call ------------------------------------------------------------------
 

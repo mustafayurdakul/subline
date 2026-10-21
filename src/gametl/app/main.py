@@ -43,8 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     lang.add_argument("--target-lang", help="target language code; default tr")
 
     tr = p.add_argument_group("translation")
-    tr.add_argument("--translator", choices=["claude", "offline", "uppercase", "echo", "verbose"])
-    tr.add_argument("--draft", choices=["none", "offline"], help="instant offline draft until the translator answers")
+    tr.add_argument("--translator", choices=["claude", "deepl", "offline", "uppercase", "echo", "verbose"])
+    tr.add_argument("--draft", choices=["none", "offline", "deepl"], help="fast draft shown until the translator answers")
     tr.add_argument("--model", help="default claude-haiku-5-5")
     tr.add_argument("--effort", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"])

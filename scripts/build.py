@@ -39,20 +39,24 @@ def folder_size(path: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
+    parser.add_argument("--distpath", default="dist", help="output folder (default dist; use another when dist/gametl is in use)")
     args = parser.parse_args()
 
     if args.clean:
-        for name in ("build", "dist"):
+        for name in ("build", args.distpath):
             shutil.rmtree(ROOT / name, ignore_errors=True)
 
     make_ico(ROOT / "build" / "gametl.ico")
-    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(ROOT / "gametl.spec")]
+    cmd = [
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+        "--distpath", str(ROOT / args.distpath), str(ROOT / "gametl.spec"),
+    ]
     print(" ".join(cmd), flush=True)
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:
         return result.returncode
 
-    dist = ROOT / "dist" / "gametl"
+    dist = ROOT / args.distpath / "gametl"
     exes = sorted(p.name for p in dist.glob("*.exe"))
     print(f"\nbuilt {dist}: {folder_size(dist) / 1_000_000:.0f} MB, executables: {', '.join(exes)}")
     return 0

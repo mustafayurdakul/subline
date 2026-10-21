@@ -57,7 +57,7 @@ class StubMessages:
     def create(self, **kwargs):
         self.created.append(kwargs)
         payload = json.loads(kwargs["messages"][0]["content"])
-        body = json.dumps({"items": [{"id": it["id"], "text": it["text"].upper()} for it in payload["items"]]})
+        body = json.dumps({"items": [t.upper() for t in payload["items"]]})
         return SimpleNamespace(
             stop_reason="end_turn",
             stop_details=None,
@@ -96,7 +96,7 @@ class StubBatches:
     def results(self, batch_id):
         for req in self.requests:
             payload = json.loads(req["params"]["messages"][0]["content"])
-            body = json.dumps({"items": [{"id": it["id"], "text": "TR " + it["text"]} for it in payload["items"]]})
+            body = json.dumps({"items": ["TR " + t for t in payload["items"]]})
             message = SimpleNamespace(content=[SimpleNamespace(type="text", text=body)])
             yield SimpleNamespace(custom_id=req["custom_id"], result=SimpleNamespace(type="succeeded", message=message))
 

@@ -1,10 +1,17 @@
 """Offline neural translation with CTranslate2.
 
-Models come from Argos Translate packages (`.argosmodel` zips containing a
-CTranslate2 model and a SentencePiece tokenizer), downloaded from the Argos
-package index without the argostranslate runtime (which would pull in
-PyTorch). Quality is below Claude's, speed is ~50-200 ms per line on CPU,
-which makes it the "draft" tier: shown at once, replaced when Claude answers.
+Two model sources, both run by the same code:
+
+- OPUS-MT models (e.g. Helsinki-NLP/opus-mt-tc-big-en-tr) converted with
+  `scripts/convert_offline_model.py`: a CTranslate2 model plus the model's
+  source and target SentencePiece files. Best quality per language pair.
+- Argos Translate packages, downloaded from the Argos index without the
+  argostranslate runtime (which would pull in PyTorch): a CTranslate2 model
+  plus one shared SentencePiece file. Easiest to get, weaker quality.
+
+A converted OPUS model is preferred when both exist for a pair. Quality is
+below Claude's; speed is ~20-200 ms per line on CPU, which makes it the
+"draft" tier: shown at once, replaced when Claude answers.
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,7 +29,53 @@ ARGOS_INDEX_URL = "https://raw.githubusercontent.com/argosopentech/argospm-index
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
 
 
-# -- packages --------------------------------------------------------------------
+@dataclass(slots=True)
+class ModelFiles:
+    model_dir: Path
+    sp_source: Path
+    sp_target: Path  # same file as sp_source for Argos packages
+    kind: str  # "opus" | "argos"
+
+
+# -- locating models ---------------------------------------------------------------
+
+
+def locate_model_files(root: Path) -> ModelFiles | None:
+    """Model files under `root`: a CTranslate2 `model.bin` directory plus
+    either `source.spm` + `target.spm` (OPUS) or `sentencepiece.model` (Argos)."""
+    model_bins = sorted(root.rglob("model.bin"))
+    if not model_bins:
+        return None
+    model_dir = model_bins[0].parent
+    source = sorted(root.rglob("source.spm"))
+    target = sorted(root.rglob("target.spm"))
+    if source and target:
+        return ModelFiles(model_dir, source[0], target[0], "opus")
+    shared = sorted(root.rglob("sentencepiece.model"))
+    if shared:
+        return ModelFiles(model_dir, shared[0], shared[0], "argos")
+    return None
+
+
+def opus_dir(models_dir: Path, source: str, target: str) -> Path:
+    return Path(models_dir) / f"opus-{source}_{target}"
+
+
+def package_dir(models_dir: Path, source: str, target: str) -> Path:
+    return Path(models_dir) / f"argos-{source}_{target}"
+
+
+def find_model(models_dir: Path | str, source: str, target: str) -> ModelFiles | None:
+    """The best installed model for the pair: converted OPUS first, then Argos."""
+    for candidate in (opus_dir(Path(models_dir), source, target), package_dir(Path(models_dir), source, target)):
+        if candidate.exists():
+            found = locate_model_files(candidate)
+            if found:
+                return found
+    return None
+
+
+# -- Argos packages ---------------------------------------------------------------
 
 
 def find_package(index: list[dict], source: str, target: str) -> dict | None:
@@ -32,33 +86,20 @@ def find_package(index: list[dict], source: str, target: str) -> dict | None:
     return None
 
 
-def locate_model_files(root: Path) -> tuple[Path, Path] | None:
-    """(CTranslate2 model directory, sentencepiece model) under `root`."""
-    model_bins = sorted(root.rglob("model.bin"))
-    sp_models = sorted(root.rglob("sentencepiece.model"))
-    if not model_bins or not sp_models:
-        return None
-    return model_bins[0].parent, sp_models[0]
-
-
-def package_dir(models_dir: Path, source: str, target: str) -> Path:
-    return Path(models_dir) / f"argos-{source}_{target}"
-
-
 def ensure_model(
     source: str,
     target: str,
     models_dir: Path | str,
     progress: Callable[[str], None] | None = None,
 ) -> tuple[Path, Path]:
-    """Return the model files for the pair, downloading the Argos package on
-    first use. Raises RuntimeError when no package exists for the pair."""
+    """Return (model dir, sentencepiece) for the pair, downloading the Argos
+    package on first use. Raises RuntimeError when no package exists."""
     import requests
 
     dest = package_dir(Path(models_dir), source, target)
     found = locate_model_files(dest) if dest.exists() else None
     if found:
-        return found
+        return found.model_dir, found.sp_source
 
     say = progress or (lambda _s: None)
     say(f"fetching Argos package index for {source}->{target}")
@@ -94,10 +135,10 @@ def ensure_model(
     meta = {"source": source, "target": target, "package": entry.get("code"), "version": entry.get("package_version")}
     (dest / "gametl.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     say("offline model ready")
-    return found
+    return found.model_dir, found.sp_source
 
 
-# -- translator ------------------------------------------------------------------
+# -- translator ---------------------------------------------------------------------
 
 
 def split_sentences(line: str) -> list[str]:
@@ -111,7 +152,9 @@ class OfflineTranslator:
     def __init__(
         self,
         model_dir: Path | str,
-        sp_model: Path | str,
+        sp_source: Path | str,
+        sp_target: Path | str | None = None,
+        kind: str = "argos",
         compute_type: str = "int8",
         beam_size: int = 2,
         threads: int | None = None,
@@ -119,28 +162,48 @@ class OfflineTranslator:
         import ctranslate2
         import sentencepiece as spm
 
-        self.sp = spm.SentencePieceProcessor(model_file=str(sp_model))
+        self.sp_source = spm.SentencePieceProcessor(model_file=str(sp_source))
+        self.sp_target = (
+            self.sp_source if sp_target is None or Path(sp_target) == Path(sp_source)
+            else spm.SentencePieceProcessor(model_file=str(sp_target))
+        )
         kwargs: dict[str, Any] = {"device": "cpu", "compute_type": compute_type}
         if threads:
             kwargs["intra_threads"] = threads
         self.ct2 = ctranslate2.Translator(str(model_dir), **kwargs)
         self.beam_size = beam_size
+        self.kind = kind
+        self.model_dir = Path(model_dir)
 
     @classmethod
     def from_models_dir(cls, models_dir: Path | str, source: str, target: str, **kwargs: Any) -> "OfflineTranslator":
-        found = locate_model_files(package_dir(Path(models_dir), source, target))
+        found = find_model(models_dir, source, target)
         if not found:
             raise RuntimeError(
-                f"offline model for {source}->{target} not downloaded; run: gametl --download-model"
+                f"offline model for {source}->{target} not installed; run: gametl --download-model "
+                "(or convert an OPUS-MT model with scripts/convert_offline_model.py)"
             )
-        return cls(found[0], found[1], **kwargs)
+        return cls(found.model_dir, found.sp_source, found.sp_target, kind=found.kind, **kwargs)
 
     @classmethod
-    def _from_components(cls, ct2: Any, sp: Any, beam_size: int = 2) -> "OfflineTranslator":
+    def _from_components(
+        cls, ct2: Any, sp: Any, beam_size: int = 2, sp_target: Any = None, kind: str = "argos"
+    ) -> "OfflineTranslator":
         """For tests: inject stand-ins for the CTranslate2 and SentencePiece objects."""
         self = cls.__new__(cls)
-        self.ct2, self.sp, self.beam_size = ct2, sp, beam_size
+        self.ct2, self.sp_source, self.beam_size, self.kind = ct2, sp, beam_size, kind
+        self.sp_target = sp_target or sp
+        self.model_dir = Path(".")
         return self
+
+    def _encode(self, sentence: str) -> list[str]:
+        tokens = list(self.sp_source.encode(sentence, out_type=str))
+        if self.kind == "opus":
+            # Marian models are trained with an end-of-sentence token on the
+            # source (the HF tokenizer adds it); without it the decoder never
+            # stops and repeats until the length limit.
+            tokens.append("</s>")
+        return tokens
 
     def translate(self, request: TranslationRequest) -> list[str | None]:
         if not request.texts:
@@ -161,9 +224,11 @@ class OfflineTranslator:
         if not sentences:
             return ["" for _ in request.texts]
 
-        tokens = [self.sp.encode(s, out_type=str) for s in sentences]
-        results = self.ct2.translate_batch(tokens, beam_size=self.beam_size, max_decoding_length=256)
-        translated = [self.sp.decode(r.hypotheses[0]) if r.hypotheses else "" for r in results]
+        tokens = [self._encode(s) for s in sentences]
+        results = self.ct2.translate_batch(
+            tokens, beam_size=self.beam_size, max_decoding_length=256, no_repeat_ngram_size=3
+        )
+        translated = [self.sp_target.decode(r.hypotheses[0]) if r.hypotheses else "" for r in results]
 
         out: list[str | None] = []
         for lines_plan in plan:

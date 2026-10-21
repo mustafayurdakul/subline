@@ -102,7 +102,26 @@ def test_structured_request_shape_and_result_order() -> None:
         {"id": 0, "text": "Stay close."},
         {"id": 1, "text": "I told you not to open that door."},
     ]
-    assert payload["context"] == [{"source": "Hello", "translation": "Merhaba"}]
+    assert payload["context"] == [["Hello", "Merhaba"]]
+
+
+def test_plain_mode_sends_positional_items_and_reads_string_lists() -> None:
+    body = '{"items": ["Yakın dur.", "O kapıyı açma dedim."]}'
+    response = SimpleNamespace(
+        stop_reason="end_turn",
+        stop_details=None,
+        content=[SimpleNamespace(type="text", text=body)],
+        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+    )
+    client = StubClient(response)
+    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr")
+    out = translator.translate(TranslationRequest(["Stay close.", "I told you not to open that door."], target_lang="tr"))
+    assert out == ["Yakın dur.", "O kapıyı açma dedim."]
+    (call,) = client.messages.created
+    payload = json.loads(call["messages"][0]["content"])
+    assert payload["items"] == ["Stay close.", "I told you not to open that door."]
+    assert "context" not in payload
+    assert '{"items": ["<translation of item 0>"' in call["system"][0]["text"]
 
 
 def test_system_prompt_is_stable_across_calls() -> None:
@@ -177,7 +196,7 @@ def test_plain_json_mode_parses_text_block() -> None:
     assert out == ["Merhaba", "Yakın dur."]
     (call,) = client.messages.created
     assert "output_format" not in call
-    assert "Reply with exactly one JSON object" in call["system"][0]["text"]
+    assert "Reply exactly as" in call["system"][0]["text"]
     assert client.messages.calls == []
 
 

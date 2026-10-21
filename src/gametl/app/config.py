@@ -37,8 +37,8 @@ class Settings:
     source_lang: str = ""  # translator source; default: same as lang
     target_lang: str = "tr"
     # translation
-    translator: str = "claude"  # claude | offline | uppercase | echo | verbose
-    draft: str = ""  # "" | "offline": instant draft shown until the translator answers
+    translator: str = "claude"  # claude | deepl | offline | uppercase | echo | verbose
+    draft: str = ""  # "" | "offline" | "deepl": fast draft shown until the translator answers
     model: str = "claude-haiku-5-5"
     effort: str = "low"
     thinking: str = "disabled"

@@ -12,7 +12,7 @@ import statistics
 import sys
 import time
 
-from gametl.app.main import ensure_anthropic_credentials
+from gametl.app.controller import ensure_anthropic_credentials
 from gametl.translate.base import TranslationRequest
 from gametl.translate.claude import ClaudeTranslator, estimate_cost_usd
 

@@ -8,8 +8,10 @@ import pytest
 from gametl.translate.base import TranslationRequest
 from gametl.translate.offline import (
     OfflineTranslator,
+    find_model,
     find_package,
     locate_model_files,
+    opus_dir,
     package_dir,
     split_sentences,
 )
@@ -25,15 +27,41 @@ def test_find_package_matches_pair_with_links() -> None:
     assert find_package(index, "tr", "en") is None
 
 
-def test_locate_model_files(tmp_path: Path) -> None:
+def _make_argos(root: Path) -> None:
+    (root / "pkg" / "model").mkdir(parents=True)
+    (root / "pkg" / "model" / "model.bin").write_bytes(b"")
+    (root / "pkg" / "sentencepiece.model").write_bytes(b"")
+
+
+def _make_opus(root: Path) -> None:
+    (root / "model").mkdir(parents=True)
+    (root / "model" / "model.bin").write_bytes(b"")
+    (root / "source.spm").write_bytes(b"")
+    (root / "target.spm").write_bytes(b"")
+
+
+def test_locate_model_files_argos_and_opus(tmp_path: Path) -> None:
     assert locate_model_files(tmp_path) is None
-    (tmp_path / "pkg" / "model").mkdir(parents=True)
-    (tmp_path / "pkg" / "model" / "model.bin").write_bytes(b"")
-    (tmp_path / "pkg" / "sentencepiece.model").write_bytes(b"")
-    model_dir, sp = locate_model_files(tmp_path)
-    assert model_dir == tmp_path / "pkg" / "model"
-    assert sp == tmp_path / "pkg" / "sentencepiece.model"
-    assert package_dir(tmp_path, "en", "tr") == tmp_path / "argos-en_tr"
+    argos = tmp_path / "a"
+    _make_argos(argos)
+    found = locate_model_files(argos)
+    assert found.kind == "argos"
+    assert found.model_dir == argos / "pkg" / "model"
+    assert found.sp_source == found.sp_target == argos / "pkg" / "sentencepiece.model"
+
+    opus = tmp_path / "o"
+    _make_opus(opus)
+    found = locate_model_files(opus)
+    assert found.kind == "opus"
+    assert found.sp_source == opus / "source.spm" and found.sp_target == opus / "target.spm"
+
+
+def test_find_model_prefers_converted_opus(tmp_path: Path) -> None:
+    assert find_model(tmp_path, "en", "tr") is None
+    _make_argos(package_dir(tmp_path, "en", "tr"))
+    assert find_model(tmp_path, "en", "tr").kind == "argos"
+    _make_opus(opus_dir(tmp_path, "en", "tr"))
+    assert find_model(tmp_path, "en", "tr").kind == "opus"
 
 
 def test_split_sentences() -> None:
@@ -54,9 +82,19 @@ class FakeCT2:
     def __init__(self) -> None:
         self.batches: list[list[list[str]]] = []
 
-    def translate_batch(self, tokens, beam_size, max_decoding_length):
+    def translate_batch(self, tokens, beam_size, max_decoding_length, no_repeat_ngram_size=0):
         self.batches.append(tokens)
-        return [SimpleNamespace(hypotheses=[[t.upper() for t in toks]]) for toks in tokens]
+        return [SimpleNamespace(hypotheses=[[t.upper() for t in toks if t != "</s>"]]) for toks in tokens]
+
+
+def test_opus_models_get_the_end_of_sentence_token() -> None:
+    ct2 = FakeCT2()
+    translator = OfflineTranslator._from_components(ct2, FakeSP(), kind="opus")
+    assert translator.translate(TranslationRequest(["New Game"], target_lang="tr")) == ["NEW GAME"]
+    assert ct2.batches[0] == [["New", "Game", "</s>"]]
+    argos = OfflineTranslator._from_components(FakeCT2(), FakeSP(), kind="argos")
+    argos.translate(TranslationRequest(["New Game"], target_lang="tr"))
+    assert argos.ct2.batches[0] == [["New", "Game"]]
 
 
 def test_offline_translator_keeps_lines_and_batches_sentences() -> None:
