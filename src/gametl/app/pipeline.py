@@ -17,7 +17,7 @@ from ..layout.colors import bgr_to_rgb, sample_colors
 from ..ocr.base import OcrEngine, TextLine
 from ..overlay.window import RenderBlock
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
-from ..translate.base import TranslationRequest, Translator
+from ..translate.service import TranslationService
 
 Box = tuple[int, int, int, int]
 
@@ -30,7 +30,6 @@ class PipelineConfig:
     full_scan_every: int = 10  # with a roi: scan the whole frame every N frames
     stable_frames: int = 1  # confirming frames before translating
     max_missing: int = 3  # frames a block survives without being seen
-    target_lang: str = "en"
     debug: bool = False  # also emit outlines of every tracked block
     dump_dir: str | None = None  # debug: save each frame with block boxes drawn
 
@@ -43,14 +42,14 @@ class PipelineThread(QThread):
         self,
         hwnd: int,
         engine: OcrEngine,
-        translator: Translator,
+        service: TranslationService,
         config: PipelineConfig | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.hwnd = hwnd
         self.engine = engine
-        self.translator = translator
+        self.service = service
         self.cfg = config or PipelineConfig()
         self._stop = False
         self.frames = 0
@@ -117,14 +116,20 @@ class PipelineThread(QThread):
         return lines, roi
 
     def _translate_ready(self, blocks: list[TextBlock], frame: Frame) -> None:
-        todo = [b for b in blocks if b.translation is None and b.stable_frames >= self.cfg.stable_frames]
-        if not todo:
-            return
-        request = TranslationRequest(texts=[b.text for b in todo], target_lang=self.cfg.target_lang)
-        results = self.translator.translate(request)
-        for block, translated in zip(todo, results):
+        """Fill in translations that are ready; queue the rest. Never blocks."""
+        self.service.drain()
+        misses: list[str] = []
+        for block in blocks:
+            if block.translation is not None or block.stable_frames < self.cfg.stable_frames:
+                continue
+            translated = self.service.lookup(block.text)
+            if translated is None:
+                misses.append(block.text)
+                continue
             block.translation = translated
             block.colors = sample_colors(frame.image, block.bbox)
+        if misses:
+            self.service.submit(misses)
 
     def _dump(self, frame: Frame, lines: list[TextLine], blocks: list[TextBlock]) -> None:
         import os

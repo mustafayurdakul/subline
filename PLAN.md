@@ -7,7 +7,8 @@ default translator with Opus 5.5 as the quality option (see 4.4); patch as the
 default overlay style (see 4.5); a delay of about half a second before a
 never-seen line shows its translation is acceptable for v1 (see 2.1).
 
-Still open: the first test game and language pair (see 7).
+Language pair for v1: English source, Turkish target (settled 2026-10-21).
+First test game still to be named; `scripts/fake_game.py` stands in.
 
 ## 1. Goal
 
@@ -260,7 +261,7 @@ Alternative: `winget install Python.Python.3.12`, then `py -3.12 -m venv .venv`.
 | -- | ------------------ | --------------------------------------------------------------------------------------------- | -------- |
 | M0 | Spike (done 2026-10-21) | Python 3.12 via uv, project skeleton, WGC capture + RapidOCR with timings, fake game window for testing. Results in section 9. | done     |
 | M1 | Overlay MVP (done 2026-10-21) | Click-through overlay following the window, block tracker with confirmation and hysteresis, patch rendering with sampled colours, dummy translator, CLI entry point. Results in section 10. | done     |
-| M2 | Real translation   | Claude backend, batching, cache, context, stabilizer.                                         | 2 days   |
+| M2 | Real translation (built 2026-10-21, live run pending) | Claude backend with structured output, asynchronous service, three-tier cache, context window, CLI options. Results in section 11. | built    |
 | M3 | Layout quality     | Fit/wrap, background and colour sampling, hysteresis, ignore zones.                           | 2-3 days |
 | M4 | App shell          | Tray icon, settings UI, window picker, hotkeys, per-game profiles, config in %APPDATA%.       | 2-3 days |
 | M5 | Fast paths         | Offline NMT backend (CTranslate2), fast-first-then-refine mode, script import + batch pre-translation, fuzzy lookup at runtime. See 2.1. | 3-4 days |
@@ -273,10 +274,15 @@ move/resize, alt-tab, borderless vs exclusive).
 
 ## 7. Decisions needed
 
-1. First target game(s) and language pair(s) for testing. This drives the OCR
-   model choice and the screenshot benchmark set.
+1. First target game for testing on real rendering (the fake game covers the
+   pipeline but not real fonts, effects or frame rates).
 
 Settled:
+
+- Language pair: English to Turkish first. OCR model: PP-OCRv6 small, lang
+  `en`. Turkish is Latin-script, so the bundled UI font covers it; Turkish
+  translations run longer than English, which M3's wrapping must absorb
+  (2026-10-21).
 
 - Default overlay style: patch, hiding the original under a sampled
   background; pill and outline stay as options (2026-10-21).
@@ -382,6 +388,63 @@ Design points settled while building it:
   runs at the cap and the rest is swept every 10th frame.
 
 Known gaps for later milestones: no text wrapping or shrinking beyond
-single-line fitting (M3); translation is synchronous in the worker (M2 makes
-it asynchronous); colour sampling is a median of the border ring, which fails
-on busy backgrounds (M3); the overlay is not tested on multi-monitor setups.
+single-line fitting (M3); colour sampling is a median of the border ring,
+which fails on busy backgrounds (M3); the overlay is not tested on
+multi-monitor setups.
+
+## 11. M2 results (2026-10-21)
+
+Built and tested offline; the live run against the API is still to do (no
+API credentials on this machine yet).
+
+What exists:
+
+- **Claude backend** (`translate/claude.py`): one request per batch of stable
+  blocks. The system prompt (rules, game name, glossary, style notes) is
+  fixed per language pair and marked for prompt caching; the user message is
+  a JSON document with target language, recent context pairs and numbered
+  items; the reply is structured output parsed into a pydantic model, so no
+  JSON repair is needed. Defaults: `claude-haiku-5-5`, effort `low`, adaptive
+  thinking (the model skips thinking on simple requests at low effort; a
+  `--no-thinking` switch sends `disabled` for measurement), `max_tokens`
+  2048 to leave room for thinking, no sampling parameters (they return 400 on
+  this model). A `refusal` or `max_tokens` stop reason raises; the service
+  then cools the batch down instead of retrying at once.
+- **Asynchronous service** (`translate/service.py`): the pipeline thread
+  asks the cache for every stable untranslated block each frame and submits
+  the misses as one batch to a worker pool; finished batches are folded into
+  the cache on the next frame. In-flight texts are not resubmitted; failed
+  texts wait a cooldown (default 3 s). The last ten (source, translation)
+  pairs travel with each request as context.
+- **Cache** (`translate/cache.py`), three tiers: exact match on normalised
+  text; numeric reuse, where a cached translation is reused with its numbers
+  swapped when only the digits changed (HUD counters, timers, prices,
+  matched by value so reordering in Turkish is fine, and refused when a
+  number is duplicated or spelled out); fuzzy match against the 200 most
+  recent entries for OCR noise. Persisted as JSON per game and target
+  language under `%APPDATA%\gametl\cache`.
+- **CLI**: `--translator claude|uppercase|echo`, `--model`, `--effort`,
+  `--no-thinking`, `--game`, `--glossary`, `--style`, `--target-lang` (default
+  `tr`), `--source-lang` (defaults to the OCR language), `--cache-dir`,
+  `--no-cache-file`. Credentials come from `ANTHROPIC_API_KEY`, also read
+  from the Windows user environment if set after the terminal opened.
+
+Measured with the uppercase translator through the full asynchronous path
+on the fake game, 7 s: 4 requests for 5 unique texts, 11 cache hits (every
+HUD timer tick served by numeric reuse), 0 errors, cache file written. The
+same run before the numeric tier made 9 requests, nearly all for the timer.
+
+Lessons:
+
+- Changing numbers are the main request sink in a HUD; the numeric tier
+  removes it without any per-game configuration. Ignore zones (M3) remain
+  useful for text that should not be touched at all.
+- A bug worth remembering: `cache or TranslationCache()` replaced the
+  file-backed cache with an empty one because an empty cache has length 0.
+- Prompt caching needs a minimum prefix length that a short system prompt
+  does not reach; the cache marker is harmless and starts paying off once a
+  glossary makes the prompt long.
+
+Still to verify live: real latency per batch at low effort with and without
+thinking, Turkish length versus the box (expected to need M3 wrapping), and
+cost per hour of play.

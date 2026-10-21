@@ -4,8 +4,8 @@ Real-time in-game text translation overlay for Windows. Captures a game window,
 reads on-screen text with local OCR, translates it with Claude, and draws the
 translation over the original at the same position.
 
-Design: see [PLAN.md](PLAN.md). Status: M1 (overlay MVP with a dummy
-translator); real translation arrives in M2.
+Design: see [PLAN.md](PLAN.md). Status: M2 (real translation with Claude,
+English to Turkish by default).
 
 ## Setup
 
@@ -31,17 +31,34 @@ dot-sourcing `scripts\env.ps1` before every `uv` command:
 uv sync
 ```
 
-## Run the overlay (M1)
+## Run the overlay
 
-Start the game in borderless or windowed mode, then:
+Translation uses Claude through the Anthropic API. Put your key in the
+`ANTHROPIC_API_KEY` environment variable (Windows: Settings > System > About >
+Advanced system settings > Environment Variables; the app also reads it from
+the user environment if it was set after the terminal opened). Then start the
+game in borderless or windowed mode and run:
 
 ```
 uv run gametl --window "Part of the window title"
 ```
 
-The overlay follows the window, reads its text, and patches each block with
-the "translation" (upper-cased for now) in the sampled background and text
-colours. Useful options:
+The overlay follows the window, reads its English text, and patches each block
+with the Turkish translation in the sampled background and text colours.
+Translations are cached per game under `%APPDATA%\gametl\cache`, so repeated
+lines show instantly and cost nothing.
+
+Translation options:
+
+- `--target-lang de` / `--source-lang ja` change the pair (`--lang` picks the
+  OCR model; the source language defaults to it).
+- `--model claude-opus-5-5` for the quality setting; `--effort low|medium|high`.
+- `--game "Name"` names the game in the prompt and the cache file;
+  `--glossary terms.json` fixes renderings of names and terms;
+  `--style "..."` adds tone notes.
+- `--translator uppercase` runs the whole pipeline without any API calls.
+
+Useful options:
 
 - `--roi 0,0.75,1,0.25` OCR only the subtitle strip at full rate and the rest
   of the frame once every `--full-scan-every` frames.
