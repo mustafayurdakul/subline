@@ -34,7 +34,13 @@ class AreaSelector(QWidget):
     selected = Signal(tuple)  # (x0, y0, x1, y1) in frame pixels
     cancelled = Signal()
 
-    def __init__(self, target_rect: Box, hint: str = "Drag to select the area to translate. Esc cancels.") -> None:
+    def __init__(
+        self,
+        target_rect: Box,
+        hint: str = "Drag to select the area to translate. Esc cancels.",
+        mirror_x: bool = False,
+        center_x: int | None = None,
+    ) -> None:
         super().__init__(
             None,
             Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
@@ -47,6 +53,12 @@ class AreaSelector(QWidget):
         x0, y0, x1, y1 = target_rect
         self.setGeometry(x0, y0, x1 - x0, y1 - y0)
         self.hint = hint
+        # Subtitles are centred: keep the selection symmetric about the window's
+        # (or the client area's) horizontal centre, so one edge and the height suffice.
+        self.mirror_x = mirror_x
+        self.center_x = center_x if center_x is not None else (x1 - x0) // 2
+        if mirror_x:
+            self.hint += " The area is kept centred."
         self._origin: QPoint | None = None
         self._current: QPoint | None = None
         self._done = False
@@ -62,7 +74,11 @@ class AreaSelector(QWidget):
     def selection(self) -> QRect | None:
         if self._origin is None or self._current is None:
             return None
-        return QRect(self._origin, self._current).normalized()
+        rect = QRect(self._origin, self._current).normalized()
+        if self.mirror_x:
+            half = max(abs(rect.left() - self.center_x), abs(rect.right() + 1 - self.center_x))
+            rect = QRect(self.center_x - half, rect.top(), 2 * half, rect.height())
+        return rect
 
     # -- events ----------------------------------------------------------------
 
@@ -105,6 +121,9 @@ class AreaSelector(QWidget):
     def paintEvent(self, _event) -> None:  # noqa: N802
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(0, 0, 0, 110))
+        if self.mirror_x:
+            p.setPen(QPen(QColor(80, 220, 120, 160), 1, Qt.PenStyle.DashLine))
+            p.drawLine(self.center_x, 0, self.center_x, self.height())
         sel = self.selection()
         if sel is not None and not sel.isEmpty():
             p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)

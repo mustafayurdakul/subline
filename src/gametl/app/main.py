@@ -55,7 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--no-cache-file", action="store_true", default=None, help="keep the cache in memory only")
 
     look = p.add_argument_group("appearance and ignores")
-    look.add_argument("--style", choices=["auto", "patch", "pill", "outline"])
+    look.add_argument("--render", choices=["subtitle", "inplace"],
+                      help="with an area: one fixed subtitle style centred in it (default), or per-block at the OCR box")
+    look.add_argument("--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size")
+    look.add_argument("--subtitle-color", metavar="#RRGGBB", help="subtitle text colour (default #FFFFFF)")
+    look.add_argument("--subtitle-background", choices=["pill", "none"])
+    look.add_argument("--subtitle-position", choices=["source", "bottom", "center"])
+    look.add_argument("--show-source", action="store_true", default=None,
+                      help="do not cover the original line when the subtitle is drawn elsewhere")
+    look.add_argument("--no-center-zone", action="store_true", default=None, help="do not mirror a selected area about the centre")
+    look.add_argument("--style", choices=["auto", "patch", "pill", "outline"], help="in-place style")
     look.add_argument("--font")
     look.add_argument("--ignore", action="append", metavar="x,y,w,h", help="zone never to translate; repeatable")
     look.add_argument("--ignore-pattern", action="append", metavar="REGEX", help="drop OCR lines matching; repeatable")
@@ -83,6 +92,8 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
         "thinking": "thinking", "game": "game", "glossary": "glossary_path", "tone": "tone",
         "style": "style", "font": "font", "fps": "fps", "full_scan_every": "full_scan_every",
         "stable_frames": "stable_frames", "max_missing": "max_missing",
+        "render": "render", "subtitle_font": "subtitle_font_px", "subtitle_color": "subtitle_color",
+        "subtitle_background": "subtitle_background", "subtitle_position": "subtitle_position",
     }
     for arg, attr in direct.items():
         value = getattr(args, arg, None)
@@ -90,6 +101,10 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
             setattr(s, attr, value)
     if args.draft is not None:
         s.draft = "" if args.draft == "none" else args.draft
+    if args.no_center_zone is not None:
+        s.center_zone = False
+    if args.show_source is not None:
+        s.subtitle_hide_source = False
     if args.include_frame is not None:
         s.include_frame = True
     if args.structured is not None:
@@ -114,7 +129,10 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
 def utf8_console() -> None:
     """Status lines may contain the target language; never die on a cp1252
     console. A windowed build has no console at all: write to a log file in
-    the data folder instead."""
+    the data folder instead. Either way, a native crash (access violation
+    in a DLL) dumps the Python stacks of all threads to the same place."""
+    import faulthandler
+
     if sys.stdout is None or sys.stderr is None:
         from gametl.app.config import app_dir
 
@@ -125,12 +143,17 @@ def utf8_console() -> None:
         log = open(log_path, mode, encoding="utf-8", buffering=1)
         sys.stdout = sys.stdout or log
         sys.stderr = sys.stderr or log
+        faulthandler.enable(file=log, all_threads=True)
         return
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except (AttributeError, ValueError):
             pass
+    try:
+        faulthandler.enable(all_threads=True)
+    except (AttributeError, OSError, ValueError):
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:

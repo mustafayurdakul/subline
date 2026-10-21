@@ -21,7 +21,20 @@ from gametl.overlay.window import (  # noqa: E402
     WS_EX_TRANSPARENT,
     OverlayWindow,
     RenderBlock,
+    subtitle_rect,
 )
+
+
+def test_subtitle_rect_positions_and_clamps() -> None:
+    zone = (100, 600, 1100, 700)  # 1000 wide, 100 tall
+    r = subtitle_rect(zone, anchor_y=650, text_w=400, text_h=40, position="source")
+    assert (r.left(), r.top(), r.width(), r.height()) == (400, 630, 400, 40)  # centred, on the source line
+    r = subtitle_rect(zone, anchor_y=650, text_w=400, text_h=40, position="bottom")
+    assert r.top() == 700 - 12 - 40
+    r = subtitle_rect(zone, anchor_y=650, text_w=400, text_h=40, position="center")
+    assert r.top() == 630
+    r = subtitle_rect(zone, anchor_y=605, text_w=400, text_h=40, position="source")  # would poke out at the top
+    assert r.top() == 612
 
 
 @pytest.fixture(scope="module")
@@ -95,8 +108,14 @@ def test_set_blocks_and_paint_all_styles(qapp: QApplication, target: QWidget) ->
             RenderBlock((10, 10, 200, 40), ["HELLO"], bg=(0, 0, 0), fg=(255, 255, 255)),
             RenderBlock((10, 60, 200, 90), [long_text], style="pill", room_below=80),
             RenderBlock((10, 200, 200, 230), ["outlined"], style="outline"),
+            RenderBlock((60, 260, 160, 280), [long_text], style="subtitle", zone=(0, 240, 400, 300), font_px=18),
+            # One word: the wrapper never measures, so the font must still get registered (crashed before).
+            RenderBlock((60, 260, 160, 280), ["Run!"], style="subtitle", zone=(0, 240, 400, 300), font_px=24),
+            RenderBlock((60, 260, 160, 280), ["Yes."], style="subtitle", zone=(0, 240, 400, 300), font_px=24, position="bottom"),
         ]
     )
+    overlay.grab()
+    assert getattr(overlay, "_paint_errors", 0) == 0
     qapp.processEvents()
     image = overlay.grab().toImage()
     assert image.width() > 0

@@ -41,6 +41,20 @@ def parse_zone(spec: str | None, width: int, height: int) -> Box | None:
     return max(0, int(x)), max(0, int(y)), min(width, int(x + w)), min(height, int(y + h))
 
 
+def parse_color(text: str, default: tuple[int, int, int] = (255, 255, 255)) -> tuple[int, int, int]:
+    """'#RRGGBB' or 'r,g,b' -> RGB tuple; anything else gives the default."""
+    text = (text or "").strip()
+    try:
+        if text.startswith("#") and len(text) == 7:
+            return int(text[1:3], 16), int(text[3:5], 16), int(text[5:7], 16)
+        if "," in text:
+            r, g, b = (int(v) for v in text.split(","))
+            return max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))
+    except ValueError:
+        pass
+    return default
+
+
 def client_area_in_frame(hwnd: int) -> tuple[Box, Box | None]:
     """(frame box, client area within the frame or None when degenerate)."""
     rect = window_rect(hwnd)
@@ -276,6 +290,12 @@ class OverlayController(QObject):
             max_missing=settings.max_missing,
             style=settings.style,
             line_filter=line_filter,
+            render=settings.render,
+            subtitle_font_px=settings.subtitle_font_px,
+            subtitle_color=parse_color(settings.subtitle_color),
+            subtitle_pill=settings.subtitle_background == "pill",
+            subtitle_position=settings.subtitle_position,
+            subtitle_hide_source=settings.subtitle_hide_source,
             debug=settings.debug,
             dump_dir=settings.dump_dir or None,
         )
@@ -346,7 +366,12 @@ class OverlayController(QObject):
                 return False
             hwnd = resolved[0]
         self._area_hwnd = hwnd
-        self._selector = AreaSelector(window_rect(hwnd))
+        active = settings or self.settings or Settings()
+        frame, area = client_area_in_frame(hwnd)
+        if active.include_frame:
+            area = None
+        ax0, _, ax1, _ = area or frame
+        self._selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_zone, center_x=(ax0 + ax1) // 2)
         self._selector.selected.connect(self._apply_selected_area)
         self._selector.cancelled.connect(self._selection_cancelled)
         self._selector.start()

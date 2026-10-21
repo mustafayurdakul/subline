@@ -32,6 +32,14 @@ class Settings:
     game: str = ""  # name for the prompt and the cache; default: window title
     include_frame: bool = False  # read the title bar / frame too
     roi: str = ""  # the only area read and translated: x,y,w,h (fractions or px of the client area); empty = whole area
+    center_zone: bool = True  # keep a selected area symmetric about the client area's horizontal centre
+    # subtitle mode: with an area set, render translations in it with one fixed style
+    render: str = "subtitle"  # "subtitle" | "inplace" (per-block, at the OCR box)
+    subtitle_font_px: int = 0  # 0 = the game's own subtitle size (median line height)
+    subtitle_color: str = "#FFFFFF"
+    subtitle_background: str = "pill"  # "pill" | "none"
+    subtitle_position: str = "source"  # "source" (where the game drew it) | "bottom" | "center" of the area
+    subtitle_hide_source: bool = True  # cover the original line when the subtitle is drawn elsewhere
     # languages and OCR
     lang: str = "en"  # OCR model language
     source_lang: str = ""  # translator source; default: same as lang

@@ -782,3 +782,72 @@ draft is the best arrangement (no handover, five times faster, equal or
 better wording); Claude stays available for its glossary, tone notes and
 context, and for languages DeepL does not cover. The settings default stays
 Claude because DeepL needs a key; the README recommends DeepL for Turkish.
+
+## 19. Fourth real-game feedback: subtitle mode (2026-10-22)
+
+Findings: DeepL alone "working very well"; styling still inconsistent even
+with the style memory; and selecting a centred subtitle area by hand is
+hard.
+
+Changes:
+
+- **Centred selection** (`overlay/selector.py`): with `center_zone` (on by
+  default) the dimmed layer shows a centre guide and keeps the rectangle
+  symmetric about the client area's horizontal centre while dragging, so a
+  rough drag on one side yields a centred zone. `--no-center-zone` or the
+  checkbox turn it off.
+- **Subtitle render mode** (`render: subtitle`, the default when an area
+  is set): the source line is still patched out under its sampled
+  background colour, but the translation is no longer placed on the OCR
+  box. It is drawn in one fixed style: a fixed font size
+  (`subtitle_font_px`; 0 = the game's own line height from the style
+  memory), a fixed colour (`subtitle_color`, default white) with an
+  outline, on a translucent pill (`subtitle_background`), centred
+  horizontally in the zone and placed vertically on the source line, at the
+  zone's bottom, or in its middle (`subtitle_position`). Long lines wrap at
+  the fixed size within the zone. `render: inplace` restores per-block
+  placement with the style memory.
+- Settings window: Render, font size, colour, background, position and
+  centring on the Appearance tab; command-line equivalents.
+
+- **Hiding the source line**: a flat patch in the sampled background
+  colour when the background is flat; a dark rounded band when the style
+  memory says the background is busy, because a flat rectangle over
+  artwork looks like a glitch while a dark band reads as a subtitle
+  background. (Seen by accident: a test screenshot taken while the user's
+  real game was in front showed the patch as a navy rectangle over the
+  scene.)
+
+Verified on the fake game: with a zone over the subtitle strip, a doubled
+line renders centred in the zone on a pill (it wraps once the zone is
+narrower than the line); a fixed 30 px size at the zone bottom renders
+every line identically; 107 tests pass.
+
+## 20. Crash in subtitle mode, and one pill instead of a patch (2026-10-22)
+
+Finding: "sometimes it crashes". The Windows event log held two APPCRASH
+events (01:09 and 01:12) for the 01:03 build: access violation in
+Qt6Gui.dll, same offset both times. Reproduced in a script: for a
+one-word subtitle ("Run!") the word wrapper never measures anything, so
+the font size was never registered, the subtitle painter raised
+`KeyError` on the missing metrics in the middle of `paintEvent`, the
+painter was never ended, and Qt faulted on a later paint. Short lines
+made it intermittent.
+
+Fixes: the painter registers the font before reading its metrics; every
+`paintEvent` ends its painter in a `finally` and logs a paint exception
+(three at most) instead of corrupting Qt; `faulthandler` now writes the
+Python stacks of all threads to the log on any native crash, so the next
+one, if any, names its line. The subtitle layout cache is capped and the
+per-frame OCR timing list is bounded, after a Windows "pre-leak" warning
+the day before pointed at slowly growing memory.
+
+Cover: the user asked why the original line is covered at all when the
+pill is already there. The pill was translucent (alpha 200), so the
+original would ghost through it, and when the subtitle is placed at the
+zone's bottom or middle the original is not under it at all. Now there is
+no flat patch in subtitle mode: the pill is near-opaque (alpha 230) and,
+when it overlaps the source line, it is widened to one shape covering
+both; when the subtitle sits elsewhere, a matching dark band hides the
+source line unless "hide the original line" is turned off
+(`subtitle_hide_source`, `--show-source`).

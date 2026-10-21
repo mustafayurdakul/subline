@@ -67,8 +67,17 @@ Most games show far more text than you want translated (HUD, menus, item
 names). Press **Ctrl+Shift+A** with the game in front and drag a rectangle
 over the subtitle area: from then on only that area is read and translated,
 and the choice is saved in the profile as fractions of the window, so it
-survives resizing. "Select area to translate" and "Clear area" are also in
-the tray menu and next to the area field in settings.
+survives resizing. The rectangle is kept centred horizontally while you drag
+(a guide line shows the centre), so one edge and the height are enough.
+"Select area to translate" and "Clear area" are also in the tray menu and
+next to the area field in settings.
+
+With an area selected, translations are rendered as subtitles: one fixed
+font size (the game's own by default, or a number in Appearance), one
+colour with an outline on a translucent pill, centred in the area and
+placed on the line the game drew, wrapping when Turkish runs long. The
+original line is hidden under its background colour. Switch Render to
+`inplace` in Appearance to put each translation on its own OCR box instead.
 
 Default global hotkeys (changeable in the Hotkeys tab):
 

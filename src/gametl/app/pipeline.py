@@ -7,6 +7,7 @@ The UI thread never waits on OCR or translation.
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass
 
 from PySide6.QtCore import QThread, Signal
@@ -34,6 +35,13 @@ class PipelineConfig:
     max_missing: int = 3  # frames a block survives without being seen
     style: str = "auto"  # auto | patch | pill | outline; auto = patch unless the background is busy
     line_filter: LineFilter | None = None  # ignore zones and patterns
+    # subtitle mode (needs roi): one fixed style, centred in the zone
+    render: str = "subtitle"  # "subtitle" | "inplace"
+    subtitle_font_px: int = 0  # 0 = median source line height
+    subtitle_color: tuple[int, int, int] = (255, 255, 255)  # RGB
+    subtitle_pill: bool = True
+    subtitle_position: str = "source"
+    subtitle_hide_source: bool = True
     grow_margin: int = 4  # px kept between a grown box and its neighbours
     debug: bool = False  # also emit outlines of every tracked block
     dump_dir: str | None = None  # debug: save each frame with block boxes drawn
@@ -61,7 +69,7 @@ class PipelineThread(QThread):
         self._reset = False
         self.style_memory = StyleMemory()
         self.frames = 0
-        self.ocr_ms: list[float] = []
+        self.ocr_ms: deque[float] = deque(maxlen=2000)  # bounded: a long session must not grow memory
 
     def stop(self) -> None:
         self._stop = True
@@ -214,6 +222,20 @@ class PipelineThread(QThread):
         memory = self.style_memory
         # Lines that appear in the same place share one size, colour and style.
         bg, fg = memory.colors(block.bbox) or block.colors or ((0, 0, 0), (255, 255, 255))
+        if self.cfg.render == "subtitle" and self.cfg.roi is not None:
+            return RenderBlock(
+                bbox=block.bbox,
+                lines=block.translation.split("\n"),
+                bg=bgr_to_rgb(bg),
+                fg=self.cfg.subtitle_color,
+                style="subtitle",
+                source_lines=n_lines,
+                font_px=self.cfg.subtitle_font_px or memory.font_px(block.bbox, n_lines),
+                zone=self.cfg.roi,
+                position=self.cfg.subtitle_position,
+                pill=self.cfg.subtitle_pill,
+                hide_source=self.cfg.subtitle_hide_source,
+            )
         style = self.cfg.style
         if style == "auto":
             busy = memory.busy(block.bbox, default=bool(block.extra.get("busy", False)))

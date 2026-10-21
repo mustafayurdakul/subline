@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -190,9 +191,31 @@ class SettingsDialog(QDialog):
     def _appearance_tab(self) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
+        self.render = QComboBox()
+        self.render.addItems(["subtitle", "inplace"])
+        self.render.setToolTip("subtitle: with an area selected, one fixed style centred in it. inplace: per block at the OCR box.")
+        form.addRow("Render", self.render)
+        self.subtitle_font_px = QSpinBox()
+        self.subtitle_font_px.setRange(0, 200)
+        self.subtitle_font_px.setSpecialValueText("game's own size")
+        form.addRow("Subtitle font size (px)", self.subtitle_font_px)
+        self.subtitle_color = QLineEdit()
+        self.subtitle_color.setPlaceholderText("#FFFFFF")
+        form.addRow("Subtitle colour", self.subtitle_color)
+        self.subtitle_background = QComboBox()
+        self.subtitle_background.addItems(["pill", "none"])
+        form.addRow("Subtitle background", self.subtitle_background)
+        self.subtitle_position = QComboBox()
+        self.subtitle_position.addItems(["source", "bottom", "center"])
+        self.subtitle_position.setToolTip("source: where the game drew the line; bottom / center: of the selected area")
+        form.addRow("Subtitle position", self.subtitle_position)
+        self.subtitle_hide_source = QCheckBox("hide the original line when the subtitle is drawn elsewhere")
+        form.addRow("", self.subtitle_hide_source)
+        self.center_zone = QCheckBox("keep a selected area centred horizontally")
+        form.addRow("", self.center_zone)
         self.style = QComboBox()
         self.style.addItems(["auto", "patch", "pill", "outline"])
-        form.addRow("Style", self.style)
+        form.addRow("In-place style", self.style)
         self.font = QLineEdit()
         form.addRow("Font", self.font)
         self.fps = QDoubleSpinBox()
@@ -281,6 +304,13 @@ class SettingsDialog(QDialog):
         self.tone.setText(s.tone)
         self.use_cache_file.setChecked(s.use_cache_file)
         self.style.setCurrentText(s.style)
+        self.render.setCurrentText(s.render)
+        self.subtitle_font_px.setValue(s.subtitle_font_px)
+        self.subtitle_color.setText(s.subtitle_color)
+        self.subtitle_background.setCurrentText(s.subtitle_background)
+        self.subtitle_position.setCurrentText(s.subtitle_position)
+        self.subtitle_hide_source.setChecked(s.subtitle_hide_source)
+        self.center_zone.setChecked(s.center_zone)
         self.font.setText(s.font)
         self.fps.setValue(s.fps)
         for name, edit in self.hotkey_edits.items():
@@ -308,6 +338,13 @@ class SettingsDialog(QDialog):
         s.tone = self.tone.text().strip()
         s.use_cache_file = self.use_cache_file.isChecked()
         s.style = self.style.currentText()
+        s.render = self.render.currentText()
+        s.subtitle_font_px = int(self.subtitle_font_px.value())
+        s.subtitle_color = self.subtitle_color.text().strip() or "#FFFFFF"
+        s.subtitle_background = self.subtitle_background.currentText()
+        s.subtitle_position = self.subtitle_position.currentText()
+        s.subtitle_hide_source = self.subtitle_hide_source.isChecked()
+        s.center_zone = self.center_zone.isChecked()
         s.font = self.font.text().strip() or "Segoe UI"
         s.fps = float(self.fps.value())
         s.hotkeys = {name: (edit.text().strip() or DEFAULT_HOTKEYS[name]) for name, edit in self.hotkey_edits.items()}

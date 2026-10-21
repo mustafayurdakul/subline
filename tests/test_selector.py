@@ -39,6 +39,20 @@ def test_drag_emits_selection_in_frame_pixels(qapp: QApplication) -> None:
     assert got == [(50, 400, 701, 561)]
 
 
+def test_mirrored_selection_is_symmetric_about_the_centre(qapp: QApplication) -> None:
+    selector = AreaSelector((100, 100, 900, 700), mirror_x=True, center_x=400)
+    got: list[tuple] = []
+    selector.selected.connect(got.append)
+    selector.start()
+    qapp.processEvents()
+    # A rough drag on the left side only: from x=50 to x=300.
+    QTest.mousePress(selector, Qt.MouseButton.LeftButton, pos=QPoint(50, 400))
+    QTest.mouseMove(selector, QPoint(300, 560))
+    QTest.mouseRelease(selector, Qt.MouseButton.LeftButton, pos=QPoint(300, 560))
+    qapp.processEvents()
+    assert got == [(50, 400, 750, 561)]  # mirrored: 400 - 350 .. 400 + 350
+
+
 def test_tiny_drag_and_escape_cancel(qapp: QApplication) -> None:
     selector = AreaSelector((100, 100, 900, 700))
     cancelled: list[int] = []

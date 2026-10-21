@@ -54,13 +54,35 @@ class RenderBlock:
     bg: RGB = (0, 0, 0)
     fg: RGB = (255, 255, 255)
     align: str = "center"  # "center" | "left"
-    style: str = "patch"  # "patch" | "pill" | "outline"
+    style: str = "patch"  # "patch" | "pill" | "outline" | "subtitle"
     source_lines: int = 1  # lines in the source text; sets the base font size unless font_px is given
     font_px: int | None = None  # base font size decided by the caller (style memory)
     prefer_grow: bool = True  # keep the font size and wrap into free space before shrinking
     room_below: int = 0  # free pixels the box may grow into
     room_above: int = 0
     outline: bool = False  # debug: draw the box outline only
+    # subtitle style: draw the text centred in `zone` on a pill; the pill (or a
+    # matching band) hides the source line
+    zone: Box | None = None
+    position: str = "source"  # "source" | "bottom" | "center"
+    pill: bool = True
+    hide_source: bool = True  # cover the source line when the text is drawn elsewhere
+
+
+def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: str, margin: int = 12) -> QRect:
+    """Where a subtitle of `text_w` x `text_h` goes inside `zone`: centred
+    horizontally; vertically on the source line, at the bottom, or in the
+    middle, always kept inside the zone."""
+    zx0, zy0, zx1, zy1 = zone
+    x = (zx0 + zx1) // 2 - text_w // 2
+    if position == "bottom":
+        y = zy1 - margin - text_h
+    elif position == "center":
+        y = (zy0 + zy1) // 2 - text_h // 2
+    else:
+        y = anchor_y - text_h // 2
+    y = max(zy0 + margin, min(y, zy1 - margin - text_h))
+    return QRect(x, y, text_w, text_h)
 
 
 class OverlayWindow(QWidget):
@@ -158,9 +180,17 @@ class OverlayWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        for block in self._blocks:
-            self._paint_block(painter, block)
-        painter.end()
+        try:
+            for block in self._blocks:
+                self._paint_block(painter, block)
+        except Exception:  # a paint bug must never leave the painter open: Qt then faults later
+            import traceback
+
+            self._paint_errors = getattr(self, "_paint_errors", 0) + 1
+            if self._paint_errors <= 3:
+                traceback.print_exc()
+        finally:
+            painter.end()
 
     # -- text fitting ------------------------------------------------------------
 
@@ -221,6 +251,9 @@ class OverlayWindow(QWidget):
             return
         if not block.lines:
             return
+        if block.style == "subtitle" and block.zone is not None:
+            self._paint_subtitle(p, block, pad, pad_x)
+            return
 
         layout = self.layout_for(block)
         height = y1 - y0
@@ -255,12 +288,57 @@ class OverlayWindow(QWidget):
         flags = Qt.AlignmentFlag.AlignVCenter | h_align
         total = len(layout.lines) * layout.line_height
         ty = ry0 + max(0.0, ((ry1 - ry0) - total) / 2)
-        for line in layout.lines:
-            r = QRect(x0, int(ty), x1 - x0, int(layout.line_height) + 1)
+        self._draw_lines(p, layout.lines, QRect(x0, int(ty), x1 - x0, int(total) + 1), layout.line_height, flags, fg, outlined)
+
+    def _draw_lines(self, p: QPainter, lines: list[str], area: QRect, line_h: float, flags, fg: QColor, outlined: bool) -> None:
+        ty = float(area.top())
+        for line in lines:
+            r = QRect(area.left(), int(ty), area.width(), int(line_h) + 1)
             if outlined:
                 p.setPen(QColor(0, 0, 0, 220))
                 for dx, dy in _OUTLINE_OFFSETS:
                     p.drawText(r.translated(dx, dy), flags, line)
             p.setPen(fg)
             p.drawText(r, flags, line)
-            ty += layout.line_height
+            ty += line_h
+
+    def _paint_subtitle(self, p: QPainter, block: RenderBlock, pad: int, pad_x: int) -> None:
+        """Subtitle mode: the translation in one fixed style, centred in the
+        zone, on a near-opaque pill. The pill is widened to cover the source
+        line when the two overlap; when the text is placed elsewhere, a
+        matching band hides the source line (if `hide_source`)."""
+        x0, y0, x1, y1 = block.bbox
+        zx0, zy0, zx1, zy1 = block.zone  # type: ignore[misc]
+        source = QRect(x0 - pad_x, y0 - pad, (x1 - x0) + 2 * pad_x, (y1 - y0) + 2 * pad)
+
+        font_px = block.font_px or max(6, int((y1 - y0) / max(1, block.source_lines) * 0.8))
+        margin = max(12, font_px // 2)
+        width = max(50, (zx1 - zx0) - 2 * margin)
+        key = ("subtitle", tuple(block.lines), width, font_px, zy1 - zy0)
+        layout = self._layout_cache.get(key)
+        if layout is None:
+            layout = fit_text(
+                "\n".join(block.lines), width, int(font_px * 1.15), self.measure, font_px,
+                max_height=(zy1 - zy0) - 2 * margin, prefer_grow=True,
+            )
+            if len(self._layout_cache) > 512:
+                self._layout_cache.clear()
+            self._layout_cache[key] = layout
+        font = self.font_at(layout.font_px)  # registers the metrics too (a one-word line never measured)
+        metrics = self._metrics[layout.font_px]
+        text_w = min(width, max(metrics.horizontalAdvance(ln) for ln in layout.lines))
+        rect = subtitle_rect(block.zone, (y0 + y1) // 2, text_w, layout.height, block.position, margin)  # type: ignore[arg-type]
+        pill_rect = rect.adjusted(-font_px // 2, -font_px // 5, font_px // 2, font_px // 5)
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 230))
+        if block.pill and pill_rect.intersects(source):
+            p.drawRoundedRect(pill_rect.united(source), 8, 8)  # one shape covers both
+        else:
+            if block.hide_source:
+                p.drawRoundedRect(source, 6, 6)
+            if block.pill:
+                p.drawRoundedRect(pill_rect, 8, 8)
+        p.setFont(font)
+        flags = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter
+        self._draw_lines(p, layout.lines, rect, layout.line_height, flags, QColor(*block.fg), outlined=True)
