@@ -35,6 +35,7 @@ class RapidOcrEngine:
         det_limit_type: str = "max",
         threads: int | None = None,
         log_level: str = "error",  # "warning" logs every frame with no text
+        model_root_dir: str | None = None,  # where models download to; default: inside the package
     ) -> None:
         # Imported lazily: rapidocr pulls in onnxruntime + opencv at import time.
         from rapidocr import RapidOCR
@@ -60,6 +61,8 @@ class RapidOcrEngine:
         }
         if threads is not None:
             params["EngineConfig.onnxruntime.intra_op_num_threads"] = threads
+        if model_root_dir:
+            params["Global.model_root_dir"] = model_root_dir
 
         self.lang = lang
         self.version = version

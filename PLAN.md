@@ -265,7 +265,8 @@ Alternative: `winget install Python.Python.3.12`, then `py -3.12 -m venv .venv`.
 | M3 | Layout quality (done 2026-10-21) | Wrap/shrink/grow fitter, busy-background detection with pill fallback, jitter smoothing, ignore zones and patterns. Results in section 12. | done     |
 | M4 | App shell (done 2026-10-21) | Tray icon, settings window with window picker, global hotkeys, per-game profiles in %APPDATA%, controller shared with the CLI. Results in section 13. | done     |
 | M5 | Fast paths (done 2026-10-21) | Offline CTranslate2 backend from Argos packages, draft-then-refine tier, script import with sync or Batches API pre-translation into the cache. Results in section 14. | done     |
-| M6 | Packaging & extras | PyInstaller build, DirectML option, glossary editor, logs, predictive hiding (experimental).  | ongoing  |
+| M6 | Packaging (done 2026-10-21) | PyInstaller one-folder build with tray and console executables, models downloaded on first run, log file for the windowed app. Results in section 15. | done     |
+| M7 | Extras             | DirectML option, glossary editor, predictive hiding (experimental), leaner reply format, high-DPI and multi-monitor checks, a real game. | open     |
 
 Testing: a folder of real game screenshots (varied fonts and languages) with
 expected text as an OCR benchmark; unit tests for the cache, the stabilizer and
@@ -639,3 +640,41 @@ Unit tests cover the loaders, chunking, the batch request shape,
 submit/save/collect with a stub client, the draft tier ordering, the model
 rule for disabled thinking, and the offline translator's batching and line
 handling with stand-ins; 91 tests pass.
+
+## 15. M6 results (2026-10-21)
+
+What exists:
+
+- **Build** (`gametl.spec`, `scripts/build.py`): `uv run --group build
+  python scripts/build.py` makes `dist/gametl/`, a one-folder PyInstaller
+  build with two executables over one runtime: `gametl.exe` (windowed tray
+  app) and `gametl-cli.exe` (console; also `gametl-cli pretranslate ...`,
+  since the main entry point dispatches that subcommand so one analysis
+  serves both tools). The icon is generated from the tray drawing at build
+  time. rapidocr's package data is bundled minus any models a development
+  install downloaded; ctranslate2 and onnxruntime DLLs are collected
+  explicitly; unused Qt modules are excluded.
+- **First run**: the OCR engine now takes a model directory, and the
+  controller points it at `%APPDATA%\gametl\models\ocr`, so a fresh machine
+  downloads the two PP-OCRv6 small models (~20 MB) on first "Apply and run"
+  with a status line; the offline model downloads from the new "Download
+  offline model" button in the settings window (or `--download-model`).
+- **No console**: the windowed executable redirects its output to
+  `%APPDATA%\gametl\gametl.log`, truncated when it passes 5 MB.
+
+Measured: build takes about 50 s; `dist/gametl` is 402 MiB, of which
+OpenCV 112, PySide6 92, CTranslate2 60, ONNX Runtime 38, numpy 21, Pillow
+13. Verified with the fake game: the console build lists windows, runs the
+overlay from a fresh data folder (downloading the OCR models first) and
+saves a screenshot; the windowed build runs tray mode and writes the log;
+the pretranslate subcommand responds.
+
+Size levers for later: `opencv-python-headless` 5.0 is the largest item and
+is used only for resizing, colour conversion and the debug drawings, so a
+slimmer image library could save ~100 MB; the OpenCV and Qt DLLs are not
+compressed (UPX is off). A one-file build was not attempted: the start-up
+unpack would add seconds for no benefit on a tray app.
+
+Not covered: no installer and no code signing (SmartScreen will warn on an
+unsigned download), no start-with-Windows entry, not tested on a machine
+without the Visual C++ runtime that Python wheels assume.

@@ -3,7 +3,7 @@ ignores and hotkeys; apply at once or save as a per-game profile."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,6 +31,25 @@ OCR_LANGS = ["en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it
 
 def _lines(widget: QPlainTextEdit) -> list[str]:
     return [ln.strip() for ln in widget.toPlainText().splitlines() if ln.strip()]
+
+
+class ModelDownloadThread(QThread):
+    progress = Signal(str)
+    finished_ok = Signal(bool, str)
+
+    def __init__(self, source: str, target: str, models_dir, parent=None) -> None:
+        super().__init__(parent)
+        self.source, self.target, self.models_dir = source, target, models_dir
+
+    def run(self) -> None:
+        from ..translate.offline import ensure_model
+
+        try:
+            model_dir, _ = ensure_model(self.source, self.target, self.models_dir, self.progress.emit)
+        except Exception as exc:  # reported in the dialog
+            self.finished_ok.emit(False, f"download failed: {exc}")
+            return
+        self.finished_ok.emit(True, f"offline model ready: {model_dir}")
 
 
 class SettingsDialog(QDialog):
@@ -123,8 +142,17 @@ class SettingsDialog(QDialog):
         form.addRow("Translator", self.translator)
         self.draft = QComboBox()
         self.draft.addItems(["none", "offline"])
-        self.draft.setToolTip("Show an instant offline draft, replaced when the translator answers. Needs the offline model (gametl --download-model).")
-        form.addRow("Draft", self.draft)
+        self.draft.setToolTip("Show an instant offline draft, replaced when the translator answers. Needs the offline model.")
+        self.download_btn = QPushButton("Download offline model")
+        self.download_btn.clicked.connect(self.download_model)
+        draft_row = QHBoxLayout()
+        draft_row.addWidget(self.draft, 1)
+        draft_row.addWidget(self.download_btn)
+        form.addRow("Draft", draft_row)
+        self.download_status = QLabel("")
+        self.download_status.setWordWrap(True)
+        form.addRow("", self.download_status)
+        self._download: ModelDownloadThread | None = None
         self.model = QComboBox()
         self.model.setEditable(True)
         self.model.addItems(["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"])
@@ -194,6 +222,24 @@ class SettingsDialog(QDialog):
             data = self.window_combo.itemData(index)
             return int(data) if data else None
         return None
+
+    def download_model(self) -> None:
+        if self._download is not None and self._download.isRunning():
+            return
+        source = self.source_lang.text().strip() or self.lang.currentText().strip() or "en"
+        target = self.target_lang.text().strip() or "tr"
+        self.download_btn.setEnabled(False)
+        self.download_status.setText(f"downloading offline model for {source} -> {target}...")
+        self._download = ModelDownloadThread(source, target, self.store.models_dir, self)
+        self._download.progress.connect(self.download_status.setText)
+        self._download.finished_ok.connect(self._download_done)
+        self._download.start()
+
+    def _download_done(self, ok: bool, message: str) -> None:
+        self.download_btn.setEnabled(True)
+        self.download_status.setText(message)
+        if ok and self.draft.currentText() == "none":
+            self.draft.setCurrentText("offline")
 
     def _browse_glossary(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Glossary JSON", "", "JSON (*.json)")

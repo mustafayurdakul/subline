@@ -169,8 +169,8 @@ class OverlayController(QObject):
     def engine(self, lang: str, frame_w: int = 1280, frame_h: int = 720) -> RapidOcrEngine:
         engine = self._engines.get(lang)
         if engine is None:
-            self._say(f"loading OCR model ({lang})...")
-            engine = RapidOcrEngine(lang=lang)
+            self._say(f"loading OCR model ({lang})... first use downloads it")
+            engine = RapidOcrEngine(lang=lang, model_root_dir=str(self.store.models_dir / "ocr"))
             engine.warm_up(frame_w, frame_h)
             self._engines[lang] = engine
         return engine

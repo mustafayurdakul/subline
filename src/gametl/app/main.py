@@ -5,6 +5,7 @@
   gametl --profile fake-game               # run with a saved profile
   gametl --tray --window "Fake Game"       # tray icon and start at once
   gametl --window "Fake Game" --save-profile "Fake Game"   # save these options as a profile
+  gametl pretranslate script.txt --game "Fake Game"        # same as gametl-pretranslate
 
 Options given on the command line override the profile (or the defaults).
 """
@@ -105,7 +106,20 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
 
 
 def utf8_console() -> None:
-    """Status lines may contain the target language; never die on a cp1252 console."""
+    """Status lines may contain the target language; never die on a cp1252
+    console. A windowed build has no console at all: write to a log file in
+    the data folder instead."""
+    if sys.stdout is None or sys.stderr is None:
+        from gametl.app.config import app_dir
+
+        log_dir = app_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "gametl.log"
+        mode = "w" if log_path.exists() and log_path.stat().st_size > 5_000_000 else "a"
+        log = open(log_path, mode, encoding="utf-8", buffering=1)
+        sys.stdout = sys.stdout or log
+        sys.stderr = sys.stderr or log
+        return
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
@@ -115,6 +129,11 @@ def utf8_console() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "pretranslate":  # one executable, two tools: `gametl pretranslate ...`
+        from gametl.app.pretranslate import main as pretranslate_main
+
+        return pretranslate_main(argv[1:])
     args = build_parser().parse_args(argv)
 
     # Physical pixels everywhere: overlay geometry == capture-frame pixels.

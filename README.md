@@ -4,10 +4,24 @@ Real-time in-game text translation overlay for Windows. Captures a game window,
 reads on-screen text with local OCR, translates it with Claude, and draws the
 translation over the original at the same position.
 
-Design: see [PLAN.md](PLAN.md). Status: M5 (offline draft translation,
-draft-then-refine, script pre-translation).
+Design: see [PLAN.md](PLAN.md). Status: M6 (packaged build).
 
-## Setup
+## Packaged build (no Python needed)
+
+```
+uv run --group build python scripts/build.py
+```
+
+produces `dist/gametl/` with two executables that share one runtime:
+`gametl.exe` (the tray app; its output goes to `%APPDATA%\gametl\gametl.log`)
+and `gametl-cli.exe` (the same app with a console, for command-line use and
+`gametl-cli pretranslate ...`). Copy the folder anywhere and run
+`gametl.exe`. The OCR models (about 20 MB) download on first run into
+`%APPDATA%\gametl\models`, as does the offline model when you press
+"Download offline model" in the settings window. The API key is read from
+the `ANTHROPIC_API_KEY` user environment variable as before.
+
+## Setup for development
 
 Requires Python 3.12 (3.15 is too new for the compiled dependencies). With
 [uv](https://docs.astral.sh/uv/):
