@@ -71,6 +71,10 @@ class TrayApp(QObject):
         self.rescan_action = self.menu.addAction("Rescan screen")
         self.rescan_action.triggered.connect(self.controller.rescan)
         self.menu.addSeparator()
+        self.menu.addAction("Select area to translate...").triggered.connect(self.select_area)
+        self.clear_area_action = self.menu.addAction("Clear area (whole window)")
+        self.clear_area_action.triggered.connect(self.clear_area)
+        self.menu.addSeparator()
         self.menu.addAction("Settings...").triggered.connect(self.open_settings)
         self.profiles_menu = self.menu.addMenu("Profiles")
         self.profiles_menu.aboutToShow.connect(self._rebuild_profiles_menu)
@@ -85,6 +89,7 @@ class TrayApp(QObject):
         controller.status.connect(self._on_status)
         controller.running_changed.connect(self._on_running)
         controller.paused_changed.connect(self._on_paused)
+        controller.area_selected.connect(self._on_area_selected)
 
         self.apply_hotkeys(settings)
         self._refresh_labels()
@@ -99,16 +104,38 @@ class TrayApp(QObject):
         if self.controller.running:
             self.controller.set_paused(not self.controller.paused)
 
+    def select_area(self) -> None:
+        self.controller.select_area(self.settings)
+
+    def clear_area(self) -> None:
+        self.controller.clear_area()
+
+    def _on_area_selected(self, spec: str) -> None:
+        self.settings.roi = spec
+        if spec:
+            self.settings.full_scan_every = 0
+        if self.dialog is not None:
+            self.dialog.roi.setText(spec)
+        if self.profile_name:
+            self.store.save(self.profile_name, self.settings)
+            self._on_status(f"area {'set' if spec else 'cleared'} and saved to profile {self.profile_name}")
+
     def open_settings(self) -> None:
         if self.dialog is None:
             self.dialog = SettingsDialog(self.settings, self.store)
             self.dialog.applied.connect(self.apply)
             self.dialog.profile_saved.connect(self._on_profile_saved)
+            self.dialog.select_area_requested.connect(self._select_area_from_dialog)
         else:
             self.dialog.load_settings(self.settings)
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
+
+    def _select_area_from_dialog(self) -> None:
+        assert self.dialog is not None
+        self.settings = self.dialog.to_settings(self.settings)
+        self.controller.select_area(self.settings)
 
     def apply(self, settings: Settings, hwnd: int | None = None) -> None:
         self.settings = settings
@@ -121,6 +148,7 @@ class TrayApp(QObject):
             "toggle": self.toggle,
             "pause": self.toggle_pause,
             "rescan": self.controller.rescan,
+            "select": self.select_area,
             "settings": self.open_settings,
         }
         failed = [

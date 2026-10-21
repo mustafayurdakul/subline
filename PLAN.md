@@ -678,3 +678,32 @@ unpack would add seconds for no benefit on a tray app.
 Not covered: no installer and no code signing (SmartScreen will warn on an
 unsigned download), no start-with-Windows entry, not tested on a machine
 without the Visual C++ runtime that Python wheels assume.
+
+## 16. First real-game feedback (2026-10-21)
+
+Finding: on a real game the app translated everything on screen, which is
+far more than wanted; the useful target is one area, typically the subtitle
+strip.
+
+Change: zone-only is now the default behaviour and the zone is chosen on
+screen.
+
+- **Area selector** (`overlay/selector.py`): a dimmed layer over the game
+  window; drag a rectangle (Esc cancels, drags under 8 px count as cancel).
+  The rectangle is converted to fractions of the client area so it survives
+  window moves and resizes.
+- **Hotkey and menu**: `select` hotkey (default Ctrl+Shift+A), "Select area
+  to translate..." and "Clear area" in the tray, "Select on screen" next to
+  the area field in settings. The controller restarts the pipeline on the
+  new area at once; the tray writes it into the loaded profile.
+- **Default**: with an area set, nothing outside it is read any more
+  (`full_scan_every` default changed from 10 to 0; the sweep remains as an
+  option).
+
+Verified on the fake game: a command-line run with a zone over the subtitle
+strip left the HUD untouched with no ignore zone configured; a scripted
+drag on the selector restarted the pipeline on the selected area.
+
+Open from the same run: everything else the real game showed (fonts, frame
+rate, scaling) still has to be reported; the selector covers only one area,
+and a second one (e.g. a dialogue box plus a choice menu) would need a list.

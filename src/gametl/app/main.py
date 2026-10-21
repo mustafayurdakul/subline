@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--window", help="title substring of the game window")
     target.add_argument("--hwnd", help="window handle (decimal or 0x hex)")
     target.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the window to appear")
-    target.add_argument("--roi", help="subtitle zone x,y,w,h as fractions or pixels of the client area")
+    target.add_argument("--roi", help="the only area to read and translate: x,y,w,h as fractions or pixels of the client area")
     target.add_argument("--include-frame", action="store_true", default=None, help="also read the title bar / window frame")
 
     lang = p.add_argument_group("languages")
@@ -62,13 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = p.add_argument_group("pipeline")
     run.add_argument("--fps", type=float, help="capture cap; default 10")
-    run.add_argument("--full-scan-every", type=int)
+    run.add_argument("--full-scan-every", type=int, help="with --roi: also sweep the rest every N frames (default 0 = never)")
     run.add_argument("--stable-frames", type=int)
     run.add_argument("--max-missing", type=int)
     run.add_argument("--no-hide-unfocused", action="store_true", default=None, help="keep the overlay up when the game is not in front")
     run.add_argument("--capturable", action="store_true", default=None, help="do not exclude the overlay from screen capture")
     run.add_argument("--run-for", type=float, default=0.0, help="quit after N seconds (0 = until the window closes)")
     run.add_argument("--screenshot", help="with --run-for: save a screenshot of the game area before quitting")
+    run.add_argument("--debug", action="store_true", default=None, help="outline every tracked block and print per-frame stats")
+    run.add_argument("--dump-dir", help="debug: save every captured frame with OCR lines and blocks drawn")
     return p
 
 
@@ -102,6 +104,10 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
         s.ignore_zones = list(args.ignore)
     if args.ignore_pattern:
         s.ignore_patterns = list(args.ignore_pattern)
+    if args.debug is not None:
+        s.debug = True
+    if args.dump_dir:
+        s.dump_dir = args.dump_dir
     return s
 
 

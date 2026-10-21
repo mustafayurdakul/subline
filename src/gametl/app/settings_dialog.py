@@ -55,6 +55,7 @@ class ModelDownloadThread(QThread):
 class SettingsDialog(QDialog):
     applied = Signal(object, object)  # Settings, hwnd or None
     profile_saved = Signal(str)
+    select_area_requested = Signal()
 
     def __init__(self, settings: Settings, store: ProfileStore, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -108,8 +109,14 @@ class SettingsDialog(QDialog):
         self.game.setPlaceholderText("name used in the prompt and cache; default: window title")
         form.addRow("Game name", self.game)
         self.roi = QLineEdit()
-        self.roi.setPlaceholderText("subtitle zone x,y,w,h as fractions, e.g. 0,0.75,1,0.25 (optional)")
-        form.addRow("Subtitle zone", self.roi)
+        self.roi.setPlaceholderText("x,y,w,h as fractions, e.g. 0,0.75,1,0.25; empty = whole window")
+        select_btn = QPushButton("Select on screen")
+        select_btn.setToolTip("Drag a rectangle over the game (also the Select hotkey)")
+        select_btn.clicked.connect(self.select_area_requested.emit)
+        roi_row = QHBoxLayout()
+        roi_row.addWidget(self.roi, 1)
+        roi_row.addWidget(select_btn)
+        form.addRow("Area to translate", roi_row)
         self.ignore_zones = QPlainTextEdit()
         self.ignore_zones.setPlaceholderText("one zone per line, x,y,w,h as fractions of the client area")
         self.ignore_zones.setFixedHeight(70)
@@ -197,7 +204,13 @@ class SettingsDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
         self.hotkey_edits: dict[str, QLineEdit] = {}
-        labels = {"toggle": "Start / stop overlay", "pause": "Pause / resume", "rescan": "Rescan screen", "settings": "Open settings"}
+        labels = {
+            "toggle": "Start / stop overlay",
+            "pause": "Pause / resume",
+            "rescan": "Rescan screen",
+            "select": "Select area to translate",
+            "settings": "Open settings",
+        }
         for name, label in labels.items():
             edit = QLineEdit()
             edit.setPlaceholderText(DEFAULT_HOTKEYS[name])

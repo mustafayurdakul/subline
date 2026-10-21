@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, Signal
 
 from ..capture.windows import client_rect_on_screen, find_window, window_rect, window_title
 from ..ocr.rapid import RapidOcrEngine
+from ..overlay.selector import AreaSelector, rect_to_zone_spec
 from ..overlay.window import OverlayWindow
 from ..tracking.filters import LineFilter
 from ..translate.base import Translator
@@ -124,6 +125,7 @@ class OverlayController(QObject):
     status = Signal(str)
     running_changed = Signal(bool)
     paused_changed = Signal(bool)
+    area_selected = Signal(str)  # zone spec 'x,y,w,h' as fractions of the client area
 
     def __init__(self, store: ProfileStore | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -138,6 +140,7 @@ class OverlayController(QObject):
         self.cache: TranslationCache | None = None
         self.cache_path: Path | None = None
         self._engines: dict[str, RapidOcrEngine] = {}
+        self._selector: AreaSelector | None = None
 
     # -- state -------------------------------------------------------------
 
@@ -244,6 +247,8 @@ class OverlayController(QObject):
             max_missing=settings.max_missing,
             style=settings.style,
             line_filter=line_filter,
+            debug=settings.debug,
+            dump_dir=settings.dump_dir or None,
         )
         self.worker = PipelineThread(self.hwnd, engine, self.service, config)
         self.worker.blocks_ready.connect(self.overlay.set_blocks)
@@ -294,6 +299,57 @@ class OverlayController(QObject):
         if self.worker is not None:
             self.worker.rescan()
             self._say("rescanning")
+
+    # -- area selection ------------------------------------------------------
+
+    def select_area(self, settings: Settings | None = None) -> bool:
+        """Open the drag-to-select layer over the game window. The result
+        becomes the only area read and translated; a running overlay
+        restarts on it. Uses the running window, else the one `settings`
+        names."""
+        if self._selector is not None:
+            return True
+        hwnd = self.hwnd
+        if hwnd is None or not self.running:
+            resolved = self.resolve_window(settings or self.settings or Settings())
+            if resolved is None:
+                self._say("select area: no game window found; start the game or set its title first")
+                return False
+            hwnd = resolved[0]
+        self._area_hwnd = hwnd
+        self._selector = AreaSelector(window_rect(hwnd))
+        self._selector.selected.connect(self._apply_selected_area)
+        self._selector.cancelled.connect(self._selection_cancelled)
+        self._selector.start()
+        self._say("drag to select the area to translate (Esc cancels)")
+        return True
+
+    def _selection_cancelled(self) -> None:
+        self._selector = None
+        self._say("area selection cancelled")
+
+    def _apply_selected_area(self, rect: tuple) -> None:
+        self._selector = None
+        hwnd = getattr(self, "_area_hwnd", None) or self.hwnd
+        frame, area = client_area_in_frame(hwnd)
+        if self.settings is not None and self.settings.include_frame:
+            area = None
+        spec = rect_to_zone_spec(tuple(rect), area or frame)
+        self._say(f"area selected: {spec}; translating only that area")
+        if self.settings is not None:
+            self.settings.roi = spec
+            self.settings.full_scan_every = 0
+        self.area_selected.emit(spec)
+        if self.running and self.settings is not None:
+            self.start(self.settings, hwnd)
+
+    def clear_area(self) -> None:
+        if self.settings is not None:
+            self.settings.roi = ""
+        self.area_selected.emit("")
+        self._say("area cleared: translating the whole window")
+        if self.running and self.settings is not None:
+            self.start(self.settings, self.hwnd)
 
     # -- reporting ---------------------------------------------------------
 

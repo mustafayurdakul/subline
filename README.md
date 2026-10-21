@@ -63,10 +63,18 @@ settings under `%APPDATA%\gametl\profiles` so the game can be started from
 the tray's Profiles menu next time. The tray menu also has Start/Stop, Pause,
 Rescan and the data folder.
 
+Most games show far more text than you want translated (HUD, menus, item
+names). Press **Ctrl+Shift+A** with the game in front and drag a rectangle
+over the subtitle area: from then on only that area is read and translated,
+and the choice is saved in the profile as fractions of the window, so it
+survives resizing. "Select area to translate" and "Clear area" are also in
+the tray menu and next to the area field in settings.
+
 Default global hotkeys (changeable in the Hotkeys tab):
 
 | Hotkey | Action |
 | --- | --- |
+| Ctrl+Shift+A | select the area to translate (drag a rectangle; Esc cancels) |
 | Ctrl+Shift+T | start / stop the overlay |
 | Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
 | Ctrl+Shift+R | rescan: forget tracked blocks and read the screen afresh |
@@ -138,8 +146,9 @@ Appearance and ignores:
 
 Useful options:
 
-- `--roi 0,0.75,1,0.25` OCR only the subtitle strip at full rate and the rest
-  of the frame once every `--full-scan-every` frames.
+- `--roi 0,0.75,1,0.25` reads and translates only that area (fractions of the
+  client area); `--full-scan-every 10` additionally sweeps the rest every
+  tenth frame (off by default).
 - `--lang japan` (or `ch`, `korean`, `de`, ...) selects the OCR model.
 - `--debug` outlines every tracked block and prints per-frame stats;
   `--dump-dir out/dump` also saves each frame with OCR lines and blocks drawn.

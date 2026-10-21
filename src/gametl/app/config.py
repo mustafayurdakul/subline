@@ -20,6 +20,7 @@ DEFAULT_HOTKEYS: dict[str, str] = {
     "toggle": "ctrl+shift+t",  # start / stop the overlay
     "pause": "ctrl+shift+p",  # hide translations, keep running
     "rescan": "ctrl+shift+r",  # forget tracked blocks and read the screen afresh
+    "select": "ctrl+shift+a",  # drag-select the area to translate (e.g. the subtitle strip)
     "settings": "ctrl+shift+s",  # open the settings window
 }
 
@@ -30,7 +31,7 @@ class Settings:
     window_match: str = ""  # substring of the game window title
     game: str = ""  # name for the prompt and the cache; default: window title
     include_frame: bool = False  # read the title bar / frame too
-    roi: str = ""  # subtitle zone x,y,w,h (fractions or px of the client area)
+    roi: str = ""  # the only area read and translated: x,y,w,h (fractions or px of the client area); empty = whole area
     # languages and OCR
     lang: str = "en"  # OCR model language
     source_lang: str = ""  # translator source; default: same as lang
@@ -52,13 +53,16 @@ class Settings:
     ignore_patterns: list[str] = field(default_factory=list)
     # pipeline
     fps: float = 10.0
-    full_scan_every: int = 10
+    full_scan_every: int = 0  # with a zone: also sweep the rest of the area every N frames (0 = never)
     stable_frames: int = 1
     max_missing: int = 3
     hide_when_unfocused: bool = True
     exclude_from_capture: bool = True
     # app
     hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
+    # debugging (command line only)
+    debug: bool = False  # outline every tracked block, print per-frame stats
+    dump_dir: str = ""  # save every captured frame with OCR lines and blocks drawn
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)

@@ -18,6 +18,12 @@ def test_hotkeys_fill_in_defaults() -> None:
     s = Settings.from_dict({"hotkeys": {"toggle": "ctrl+alt+t"}})
     assert s.hotkeys["toggle"] == "ctrl+alt+t"
     assert s.hotkeys["pause"] == DEFAULT_HOTKEYS["pause"]
+    assert s.hotkeys["select"] == "ctrl+shift+a"  # added later: older profiles get it too
+
+
+def test_zone_only_is_the_default() -> None:
+    assert Settings().full_scan_every == 0
+    assert Settings().roi == ""
 
 
 def test_effective_source_lang() -> None:
