@@ -243,8 +243,9 @@ class BlockTracker:
         reading unless the reading is only a fragment of the known text.
         Different text: it becomes a pending reading; only once it has been
         seen `confirm_frames` more times does it replace the text. Until then
-        the old text, translation and box stay, which hides one-frame OCR
-        misses and typewriter reveals.
+        the old text and box stay (so a one-frame OCR miss or a typewriter
+        reveal does not spawn a new block), but the translation is hidden,
+        since the screen no longer shows the text it belongs to.
         """
         text = "\n".join(ln.text for ln in group)
         block.lines = group
@@ -266,6 +267,11 @@ class BlockTracker:
         else:
             block.pending_text = text
             block.pending_frames = 0
+        # The screen no longer shows the text this translation belongs to:
+        # drop it now rather than draw it over different (often wider) text.
+        # If the reading turns out to be jitter, the cache restores it in a frame.
+        block.translation = None
+        block.extra.pop("draft", None)
 
         if block.pending_frames >= self.confirm_frames:
             block.text = block.pending_text

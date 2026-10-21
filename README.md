@@ -4,8 +4,8 @@ Real-time in-game text translation overlay for Windows. Captures a game window,
 reads on-screen text with local OCR, translates it with Claude, and draws the
 translation over the original at the same position.
 
-Design: see [PLAN.md](PLAN.md). Status: M4 (tray app with settings window,
-window picker, global hotkeys and per-game profiles).
+Design: see [PLAN.md](PLAN.md). Status: M5 (offline draft translation,
+draft-then-refine, script pre-translation).
 
 ## Setup
 
@@ -86,6 +86,28 @@ Translation options:
   `--tone "..."` adds notes on tone and formality.
 - `--translator uppercase` runs the whole pipeline without any API calls;
   `--translator verbose` doubles every line to exercise wrapping.
+
+Faster than the API round trip:
+
+- **Offline draft.** `uv run gametl --download-model --target-lang tr` fetches
+  an Argos Translate package (a CTranslate2 model, no PyTorch) for the pair
+  into `%APPDATA%\gametl\models`. Then `--draft offline` (or Draft: offline in
+  the settings window) shows the offline translation within a fraction of a
+  second and swaps in Claude's when it arrives. `--translator offline` runs
+  fully offline with no API at all, at lower quality.
+- **Pre-translate the script.** If the game's text can be extracted (a text
+  file with one line per entry, an .srt, a JSON file or a CSV), translate it
+  once up front so every line is instant in play:
+
+  ```
+  uv run gametl-pretranslate script.txt --game "Fake Game"
+  ```
+
+  By default this uses Opus 5.5 through the Batches API at half price and
+  waits up to ten minutes; `--wait 0` submits and exits, and
+  `--resume JOBFILE` collects later. `--sync` uses the normal API at once.
+  The `--game` name must match the one the overlay runs with, since it names
+  the cache file.
 
 Appearance and ignores:
 

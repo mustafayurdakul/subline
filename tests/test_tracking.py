@@ -99,11 +99,12 @@ def test_text_change_is_confirmed_before_it_replaces_the_block() -> None:
     (block,) = tracker.update([line("Hello there", 300, 620, 900, 660)])
     tracker.update([line("Hello there", 300, 620, 900, 660)])
     block.translation = "HELLO THERE"
-    # First sighting of new text: pending, old translation stays up.
+    # First sighting of new text: pending; the old translation is hidden at
+    # once (it would be drawn over different text), the old reading kept.
     (same,) = tracker.update([line("Where were you?", 320, 620, 880, 660)])
     assert same.id == block.id
     assert same.text == "Hello there"
-    assert same.translation == "HELLO THERE"
+    assert same.translation is None
     assert same.pending_text == "Where were you?"
     # Second sighting confirms it: text replaced, translation cleared, already stable.
     (same,) = tracker.update([line("Where were you?", 320, 620, 880, 660)])
@@ -113,15 +114,17 @@ def test_text_change_is_confirmed_before_it_replaces_the_block() -> None:
     assert same.bbox == (320, 620, 880, 660)
 
 
-def test_one_frame_ocr_miss_does_not_disturb_the_block() -> None:
+def test_one_frame_ocr_miss_keeps_the_reading_but_hides_the_translation() -> None:
     tracker = BlockTracker()
     (block,) = tracker.update([line("Hello there", 300, 620, 900, 660)])
     block.translation = "x"
-    tracker.update([line("Garbage", 300, 620, 900, 660)])
+    (same,) = tracker.update([line("Garbage", 300, 620, 900, 660)])
+    assert same.translation is None  # hidden for this frame
     (same,) = tracker.update([line("Hello there", 300, 620, 900, 660)])
-    assert same.text == "Hello there"
-    assert same.translation == "x"
+    assert same.text == "Hello there"  # reading never replaced: no retranslation, cache restores it
+    assert same.id == block.id
     assert same.pending_text is None
+    assert same.stable_frames == 1
 
 
 def test_typewriter_reveal_settles_only_when_typing_stops() -> None:
@@ -191,11 +194,11 @@ def test_vertical_fragment_keeps_full_box_until_confirmed() -> None:
     tracker = BlockTracker()
     (block,) = tracker.update([line("first", 280, 612, 920, 652), line("second", 300, 660, 900, 700)])
     block.translation = "x"
-    # One frame only sees the first line: pending, nothing visible changes.
+    # One frame only sees the first line: pending, box kept, translation hidden.
     (same,) = tracker.update([line("first", 280, 612, 920, 652)])
     assert same.id == block.id
     assert same.bbox == (280, 612, 920, 700)
-    assert same.translation == "x"
+    assert same.translation is None
     # Seen again: the second line really is gone.
     (same,) = tracker.update([line("first", 280, 612, 920, 652)])
     assert same.text == "first"

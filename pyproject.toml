@@ -16,6 +16,10 @@ dependencies = [
     "pyside6>=6.8",
     # M2: translation
     "anthropic",
+    # M5: offline draft translation (CTranslate2 models from Argos packages)
+    "ctranslate2>=4.0",
+    "sentencepiece>=0.2",
+    "requests>=2.31",
 ]
 
 # GPU OCR (any vendor, via DirectML) is opt-in and conflicts with the CPU
@@ -23,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 gametl = "gametl.app.main:main"
+gametl-pretranslate = "gametl.app.pretranslate:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

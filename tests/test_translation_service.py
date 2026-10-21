@@ -75,6 +75,32 @@ def test_ticking_counter_waits_for_the_in_flight_sibling() -> None:
         service.shutdown()
 
 
+class InstantDraft:
+    name = "draft"
+
+    def translate(self, request: TranslationRequest) -> list[str | None]:
+        return [f"draft:{t}" for t in request.texts]
+
+
+def test_draft_is_shown_first_then_replaced_by_the_final() -> None:
+    final = GatedTranslator()
+    service = TranslationService(final, draft_translator=InstantDraft())
+    try:
+        assert service.lookup_best("Stay close.") is None
+        assert service.submit(["Stay close."]) is True
+        assert wait_until(lambda: (service.drain(), service.lookup_best("Stay close.") is not None)[1])
+        assert service.lookup_best("Stay close.") == ("draft:Stay close.", False)
+        assert service.stats["drafts"] == 1
+        assert service.submit(["Stay close."]) is False  # final in flight, draft present: nothing new
+
+        final.release.set()
+        assert wait_until(lambda: service.drain() > 0)
+        assert service.lookup_best("Stay close.") == ("STAY CLOSE.", True)
+        assert service.lookup("Stay close.") == "STAY CLOSE."
+    finally:
+        service.shutdown()
+
+
 def test_context_carries_recent_pairs() -> None:
     translator = GatedTranslator()
     translator.release.set()

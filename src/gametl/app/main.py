@@ -26,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--profile", help="load this saved profile first")
     mode.add_argument("--save-profile", metavar="NAME", help="save the resulting settings as a profile and continue")
     mode.add_argument("--data-dir", help="where profiles and caches live (default %%APPDATA%%\\gametl)")
+    mode.add_argument("--download-model", action="store_true",
+                      help="download the offline model for the language pair and exit")
 
     target = p.add_argument_group("target")
     target.add_argument("--window", help="title substring of the game window")
@@ -40,7 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     lang.add_argument("--target-lang", help="target language code; default tr")
 
     tr = p.add_argument_group("translation")
-    tr.add_argument("--translator", choices=["claude", "uppercase", "echo", "verbose"])
+    tr.add_argument("--translator", choices=["claude", "offline", "uppercase", "echo", "verbose"])
+    tr.add_argument("--draft", choices=["none", "offline"], help="instant offline draft until the translator answers")
     tr.add_argument("--model", help="default claude-haiku-5-5")
     tr.add_argument("--effort", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"])
@@ -82,6 +85,8 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
         value = getattr(args, arg, None)
         if value is not None:
             setattr(s, attr, value)
+    if args.draft is not None:
+        s.draft = "" if args.draft == "none" else args.draft
     if args.include_frame is not None:
         s.include_frame = True
     if args.structured is not None:
@@ -99,7 +104,17 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
     return s
 
 
+def utf8_console() -> None:
+    """Status lines may contain the target language; never die on a cp1252 console."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     args = build_parser().parse_args(argv)
 
     # Physical pixels everywhere: overlay geometry == capture-frame pixels.
@@ -130,6 +145,17 @@ def main(argv: list[str] | None = None) -> int:
         store.last_profile = slug(args.save_profile)
         profile_name = slug(args.save_profile)
         print(f"profile saved to {path}")
+
+    if args.download_model:
+        from gametl.translate.offline import ensure_model
+
+        try:
+            model_dir, sp = ensure_model(settings.effective_source_lang, settings.target_lang, store.models_dir, print)
+        except Exception as exc:
+            print(f"download failed: {exc}")
+            return 2
+        print(f"offline model ready: {model_dir}")
+        return 0
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication

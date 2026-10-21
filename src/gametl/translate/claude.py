@@ -69,6 +69,16 @@ def estimate_cost_usd(model: str, totals: dict[str, int]) -> float | None:
     ) / 1_000_000
 
 
+def supports_disabled_thinking(model: str) -> bool:
+    """Claude Haiku 5.5 and Claude Opus 5 accept thinking=disabled at effort
+    high or below; Claude Opus 5.5 and Claude Sonnet 5.5 return 400 for it
+    (thinking stays adaptive there, effort is the only lever)."""
+    model = model.lower()
+    if model.startswith("claude-opus-5-5") or model.startswith("claude-sonnet-5-5"):
+        return False
+    return model.startswith("claude-haiku-5-5") or model.startswith("claude-opus-5")
+
+
 class ClaudeTranslator:
     name = "claude"
 
@@ -185,7 +195,7 @@ class ClaudeTranslator:
         }
         if self.structured:
             kwargs["output_format"] = TranslationBatch
-        if self.thinking == "disabled":
+        if self.thinking == "disabled" and supports_disabled_thinking(self.model):
             kwargs["thinking"] = {"type": "disabled"}
 
         try:

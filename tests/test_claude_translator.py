@@ -121,6 +121,19 @@ def test_missing_or_blank_items_become_none() -> None:
     assert out == ["Merhaba", None, None]
 
 
+def test_disabled_thinking_is_not_sent_to_models_that_reject_it() -> None:
+    from gametl.translate.claude import supports_disabled_thinking
+
+    assert supports_disabled_thinking("claude-haiku-5-5")
+    assert supports_disabled_thinking("claude-opus-5")
+    assert not supports_disabled_thinking("claude-opus-5-5")
+    assert not supports_disabled_thinking("claude-sonnet-5-5")
+    client = StubClient(response_with([(0, "x")]))
+    translator = ClaudeTranslator(client=client, model="claude-opus-5-5", thinking="disabled", structured=True)
+    translator.translate(TranslationRequest(["a"], target_lang="tr"))
+    assert "thinking" not in client.messages.calls[0]
+
+
 def test_adaptive_thinking_omits_the_parameter() -> None:
     client = StubClient(response_with([(0, "x")]))
     translator = ClaudeTranslator(client=client, thinking="adaptive", structured=True)

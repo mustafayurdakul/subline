@@ -264,7 +264,7 @@ Alternative: `winget install Python.Python.3.12`, then `py -3.12 -m venv .venv`.
 | M2 | Real translation (built 2026-10-21, live run pending) | Claude backend with structured output, asynchronous service, three-tier cache, context window, CLI options. Results in section 11. | built    |
 | M3 | Layout quality (done 2026-10-21) | Wrap/shrink/grow fitter, busy-background detection with pill fallback, jitter smoothing, ignore zones and patterns. Results in section 12. | done     |
 | M4 | App shell (done 2026-10-21) | Tray icon, settings window with window picker, global hotkeys, per-game profiles in %APPDATA%, controller shared with the CLI. Results in section 13. | done     |
-| M5 | Fast paths         | Offline NMT backend (CTranslate2), fast-first-then-refine mode, script import + batch pre-translation, fuzzy lookup at runtime. See 2.1. | 3-4 days |
+| M5 | Fast paths (done 2026-10-21) | Offline CTranslate2 backend from Argos packages, draft-then-refine tier, script import with sync or Batches API pre-translation into the cache. Results in section 14. | done     |
 | M6 | Packaging & extras | PyInstaller build, DirectML option, glossary editor, logs, predictive hiding (experimental).  | ongoing  |
 
 Testing: a folder of real game screenshots (varied fonts and languages) with
@@ -574,3 +574,68 @@ Not covered: the tray and dialog are exercised by launch and round-trip only,
 not by simulated clicks; hotkeys are registered in tests but not pressed;
 first-run experience on a machine without the OCR models downloads them
 during "Apply and run" with only a status line to show for it.
+
+## 14. M5 results (2026-10-21)
+
+What exists:
+
+- **Offline backend** (`translate/offline.py`): CTranslate2 + SentencePiece
+  running the model from an Argos Translate package, downloaded straight
+  from the Argos package index (the `argostranslate` runtime was avoided
+  because it drags in PyTorch; the package zip is unpacked without its
+  stanza sentence splitter). Lines are split into sentences on punctuation,
+  all sentences of a batch go through one `translate_batch`, and line breaks
+  are preserved. `gametl --download-model` fetches the pair's package into
+  `%APPDATA%\gametl\models`; `--translator offline` runs without the API.
+- **Draft-then-refine** (`translate/service.py`): the service takes an
+  optional draft translator; `submit()` sends a draft batch and a final
+  batch at the same time, `lookup_best()` returns the cached final answer
+  if there is one, else the draft. The pipeline shows the draft and keeps
+  the block flagged so the final replaces it on arrival. Drafts live only in
+  memory; the cache holds finals.
+- **Script pre-translation** (`translate/pretranslate.py`,
+  `gametl-pretranslate`): loads .txt / .srt / .json / .csv, strips tags and
+  duplicates, skips lines already cached, and writes into the same per-game
+  cache the overlay reads. Sync mode chunks through the normal API; batch
+  mode builds Batches API requests in plain-JSON reply mode, saves the job
+  (batch id + chunk texts) so it can be collected later with `--resume`,
+  and defaults to Opus 5.5 at half price.
+
+Live results on this machine:
+
+| Run                                   | Result                                                        |
+| ------------------------------------- | ------------------------------------------------------------- |
+| Offline model download (en->tr)       | Argos translate-en_tr 1.5, 129 MB, loads in ~0.4 s            |
+| Offline per line                      | 12-26 ms single, ~60-70 ms per batch in the service           |
+| Offline-only overlay run              | 4 lines translated, latency median 68 ms, no API              |
+| Draft then refine (offline + Haiku)   | drafts median 53 ms, finals median 1.06 s, 0 errors          |
+| Sync pre-translation, 5 lines, Haiku  | 1 call, 560 in / 194 out tokens                               |
+| Overlay from the pre-translated cache | 0 requests, 4 cache hits                                      |
+| Batch pre-translation, 5 lines, Opus  | 2 chunks, ended in ~3 min, 5 lines collected, 0 failed        |
+
+Offline quality is draft-grade: "We leave at dawn. Pack only what you can
+carry." became "Sabahtan ayrıldık. Sadece ne taşıyabilirsiniz." (wrong
+tense, broken second sentence), while the same line from Haiku was
+"Şafakta yola çıkıyoruz. Sadece taşıyabileceğin kadarını al." The draft
+tier is for the first second only; a player who reads the drafts should
+expect roughness.
+
+Two problems found by the live runs:
+
+- The first batch job failed on every chunk with "thinking.type.disabled is
+  not supported for this model": the pre-translation command defaults to
+  Opus 5.5, which rejects disabled thinking, while the translator had been
+  sending it for every model. The translator now sends `disabled` only to
+  models that accept it (Haiku 5.5, Opus 5) and leaves Opus 5.5 and
+  Sonnet 5.5 on adaptive thinking. Batch failures now print the error.
+- A subtitle change left the previous translation's patch, narrower than
+  the new line, drawn over it for a frame, so the new line's ends poked out.
+  The tracker now hides a block's translation the moment a different
+  reading appears (the old reading and box are still kept, so one-frame OCR
+  misses and typewriter reveals do not spawn new blocks); if the reading
+  turns out to be jitter, the cache restores the translation a frame later.
+
+Unit tests cover the loaders, chunking, the batch request shape,
+submit/save/collect with a stub client, the draft tier ordering, the model
+rule for disabled thinking, and the offline translator's batching and line
+handling with stand-ins; 91 tests pass.

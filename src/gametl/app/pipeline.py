@@ -146,17 +146,25 @@ class PipelineThread(QThread):
         self.service.drain()
         misses: list[str] = []
         for block in blocks:
-            if block.translation is not None or block.stable_frames < self.cfg.stable_frames:
+            if block.stable_frames < self.cfg.stable_frames:
                 continue
-            translated = self.service.lookup(block.text)
-            if translated is None:
+            if block.translation is not None and not block.extra.get("draft"):
+                continue  # final translation in place
+            best = self.service.lookup_best(block.text)
+            if best is None:
                 misses.append(block.text)
                 continue
-            block.translation = translated
-            sample = analyze_colors(frame.image, block.bbox)
-            block.colors = (sample.bg, sample.fg)
-            block.extra["busy"] = sample.busy
-            block.extra["contrast"] = sample.contrast
+            translated, is_final = best
+            if block.translation != translated:
+                block.translation = translated
+            if block.colors is None:
+                sample = analyze_colors(frame.image, block.bbox)
+                block.colors = (sample.bg, sample.fg)
+                block.extra["busy"] = sample.busy
+                block.extra["contrast"] = sample.contrast
+            block.extra["draft"] = not is_final
+            if not is_final:
+                misses.append(block.text)  # keep the final request alive (resubmits after a cooldown)
         if misses:
             self.service.submit(misses)
 

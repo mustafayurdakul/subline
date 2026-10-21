@@ -36,7 +36,8 @@ class Settings:
     source_lang: str = ""  # translator source; default: same as lang
     target_lang: str = "tr"
     # translation
-    translator: str = "claude"  # claude | uppercase | echo | verbose
+    translator: str = "claude"  # claude | offline | uppercase | echo | verbose
+    draft: str = ""  # "" | "offline": instant draft shown until the translator answers
     model: str = "claude-haiku-5-5"
     effort: str = "low"
     thinking: str = "disabled"
@@ -102,6 +103,10 @@ class ProfileStore:
     @property
     def cache_dir(self) -> Path:
         return self.root / "cache"
+
+    @property
+    def models_dir(self) -> Path:
+        return self.root / "models"
 
     @property
     def config_path(self) -> Path:

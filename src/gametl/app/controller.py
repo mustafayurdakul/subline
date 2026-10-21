@@ -83,13 +83,21 @@ def grab_screen_region(rect: Box, path: str) -> None:
     image.save(path)
 
 
-def build_translator(settings: Settings, game: str) -> Translator:
+def build_offline_translator(settings: Settings, store: ProfileStore) -> Translator:
+    from ..translate.offline import OfflineTranslator
+
+    return OfflineTranslator.from_models_dir(store.models_dir, settings.effective_source_lang, settings.target_lang)
+
+
+def build_translator(settings: Settings, game: str, store: ProfileStore | None = None) -> Translator:
     if settings.translator == "uppercase":
         return UppercaseTranslator()
     if settings.translator == "verbose":
         return VerboseTranslator()
     if settings.translator == "echo":
         return EchoTranslator()
+    if settings.translator == "offline":
+        return build_offline_translator(settings, store or ProfileStore())
     from ..translate.claude import ClaudeTranslator
 
     glossary = None
@@ -182,8 +190,12 @@ class OverlayController(QObject):
             self._say("no Anthropic credentials: set ANTHROPIC_API_KEY in your user environment variables")
             return False
         try:
-            self.translator = build_translator(settings, game)
-        except (OSError, ValueError) as exc:
+            self.translator = build_translator(settings, game, self.store)
+            draft = None
+            if settings.draft == "offline" and settings.translator != "offline":
+                self._say("loading offline draft model...")
+                draft = build_offline_translator(settings, self.store)
+        except (OSError, ValueError, RuntimeError) as exc:
             self._say(f"translator setup failed: {exc}")
             return False
 
@@ -212,6 +224,7 @@ class OverlayController(QObject):
             target_lang=settings.target_lang,
             source_lang=settings.effective_source_lang,
             on_status=self._say,
+            draft_translator=draft,
         )
 
         engine = self.engine(settings.lang, frame[2], frame[3])
@@ -299,6 +312,11 @@ class OverlayController(QObject):
             if self.service.latencies_ms:
                 lat = sorted(self.service.latencies_ms)
                 parts.append(f"request latency: median {lat[len(lat) // 2]:.0f}ms min {lat[0]:.0f}ms max {lat[-1]:.0f}ms")
+            if self.service.draft_latencies_ms:
+                lat = sorted(self.service.draft_latencies_ms)
+                parts.append(
+                    f"draft: {st['drafts']} items, latency median {lat[len(lat) // 2]:.0f}ms max {lat[-1]:.0f}ms"
+                )
         totals = getattr(self.translator, "usage_totals", None)
         calls = getattr(self.translator, "calls", 0)
         if totals and calls and self.settings:
