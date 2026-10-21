@@ -56,11 +56,17 @@ class PipelineThread(QThread):
         self.service = service
         self.cfg = config or PipelineConfig()
         self._stop = False
+        self.paused = False  # keep capturing, show nothing, translate nothing
+        self._reset = False
         self.frames = 0
         self.ocr_ms: list[float] = []
 
     def stop(self) -> None:
         self._stop = True
+
+    def rescan(self) -> None:
+        """Forget every tracked block on the next frame and read afresh."""
+        self._reset = True
 
     # -- loop ----------------------------------------------------------------
 
@@ -71,6 +77,7 @@ class PipelineThread(QThread):
         try:
             with WgcWindowCapture(self.hwnd, min_interval_ms=interval) as cap:
                 self.status.emit("capture started")
+                was_paused = False
                 while not self._stop:
                     frame = cap.next_frame(timeout=0.5)
                     if frame is None:
@@ -78,6 +85,18 @@ class PipelineThread(QThread):
                             self.status.emit("capture closed: target window gone")
                             break
                         continue
+                    if self._reset:
+                        self._reset = False
+                        tracker = BlockTracker(max_missing=cfg.max_missing)
+                        self.blocks_ready.emit([])
+                    if self.paused:
+                        if not was_paused:
+                            self.blocks_ready.emit([])
+                            was_paused = True
+                        continue
+                    if was_paused:
+                        was_paused = False
+                        tracker = BlockTracker(max_missing=cfg.max_missing)
                     self.frames += 1
                     t0 = time.perf_counter()
                     lines, scanned = self._ocr(frame)

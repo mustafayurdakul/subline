@@ -4,8 +4,8 @@ Real-time in-game text translation overlay for Windows. Captures a game window,
 reads on-screen text with local OCR, translates it with Claude, and draws the
 translation over the original at the same position.
 
-Design: see [PLAN.md](PLAN.md). Status: M3 (layout quality: wrapping, pill
-style on busy backgrounds, jitter smoothing, ignore zones).
+Design: see [PLAN.md](PLAN.md). Status: M4 (tray app with settings window,
+window picker, global hotkeys and per-game profiles).
 
 ## Setup
 
@@ -31,17 +31,42 @@ dot-sourcing `scripts\env.ps1` before every `uv` command:
 uv sync
 ```
 
-## Run the overlay
+## Run the app
 
 Translation uses Claude through the Anthropic API. Put your key in the
 `ANTHROPIC_API_KEY` environment variable (Windows: Settings > System > About >
 Advanced system settings > Environment Variables; the app also reads it from
-the user environment if it was set after the terminal opened). Then start the
-game in borderless or windowed mode and run:
+the user environment if it was set after the terminal opened).
+
+```
+uv run gametl
+```
+
+With no options this puts an icon in the tray and opens the settings window:
+pick the game window from the list (Refresh after launching the game), set
+languages and translator, then "Apply and run". "Save profile" stores the
+settings under `%APPDATA%\gametl\profiles` so the game can be started from
+the tray's Profiles menu next time. The tray menu also has Start/Stop, Pause,
+Rescan and the data folder.
+
+Default global hotkeys (changeable in the Hotkeys tab):
+
+| Hotkey | Action |
+| --- | --- |
+| Ctrl+Shift+T | start / stop the overlay |
+| Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
+| Ctrl+Shift+R | rescan: forget tracked blocks and read the screen afresh |
+| Ctrl+Shift+S | open settings |
+
+From the command line, with the game in borderless or windowed mode:
 
 ```
 uv run gametl --window "Part of the window title"
 ```
+
+`--profile NAME` loads a saved profile first and explicit options override
+it; `--save-profile NAME` stores the resulting options; `--tray --window ...`
+starts at once with the tray icon.
 
 The overlay follows the window, reads its English text, and patches each block
 with the Turkish translation in the sampled background and text colours.

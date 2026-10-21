@@ -1,305 +1,177 @@
-"""Command-line entry point: overlay a window with translated text.
+"""Command-line entry point.
 
-  gametl --window "Fake Game"                       # English -> Turkish with Claude
-  gametl --window "Fake Game" --roi 0,0.75,1,0.25   # subtitle strip at full rate
-  gametl --window "Fake Game" --translator uppercase --debug
-  gametl --window "Fake Game" --run-for 8 --screenshot out/overlay.png
+  gametl                                   # tray icon; opens settings if nothing is configured
+  gametl --window "Fake Game"              # run on that window from the command line
+  gametl --profile fake-game               # run with a saved profile
+  gametl --tray --window "Fake Game"       # tray icon and start at once
+  gametl --window "Fake Game" --save-profile "Fake Game"   # save these options as a profile
+
+Options given on the command line override the profile (or the defaults).
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
 import sys
-import time
-from pathlib import Path
+
+from gametl.app.config import ProfileStore, Settings, slug
 
 
-def parse_roi(spec: str | None, width: int, height: int) -> tuple[int, int, int, int] | None:
-    if not spec:
-        return None
-    x, y, w, h = (float(v) for v in spec.split(","))
-    if max(x, y, w, h) <= 1.0:
-        x, y, w, h = x * width, y * height, w * width, h * height
-    return max(0, int(x)), max(0, int(y)), min(width, int(x + w)), min(height, int(y + h))
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    mode = p.add_argument_group("mode")
+    mode.add_argument("--tray", action="store_true", help="run with a tray icon (default when no window is given)")
+    mode.add_argument("--list-windows", action="store_true", help="list capturable windows and exit")
+    mode.add_argument("--profile", help="load this saved profile first")
+    mode.add_argument("--save-profile", metavar="NAME", help="save the resulting settings as a profile and continue")
+    mode.add_argument("--data-dir", help="where profiles and caches live (default %%APPDATA%%\\gametl)")
+
+    target = p.add_argument_group("target")
+    target.add_argument("--window", help="title substring of the game window")
+    target.add_argument("--hwnd", help="window handle (decimal or 0x hex)")
+    target.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the window to appear")
+    target.add_argument("--roi", help="subtitle zone x,y,w,h as fractions or pixels of the client area")
+    target.add_argument("--include-frame", action="store_true", default=None, help="also read the title bar / window frame")
+
+    lang = p.add_argument_group("languages")
+    lang.add_argument("--lang", help="OCR model language (en, ch, japan, korean, de, ...); default en")
+    lang.add_argument("--source-lang", help="source language for the translator; default: same as --lang")
+    lang.add_argument("--target-lang", help="target language code; default tr")
+
+    tr = p.add_argument_group("translation")
+    tr.add_argument("--translator", choices=["claude", "uppercase", "echo", "verbose"])
+    tr.add_argument("--model", help="default claude-haiku-5-5")
+    tr.add_argument("--effort", choices=["low", "medium", "high"])
+    tr.add_argument("--thinking", choices=["disabled", "adaptive"])
+    tr.add_argument("--structured", action="store_true", default=None, help="server-side structured output")
+    tr.add_argument("--game", help="game name for the prompt and the cache file; default: window title")
+    tr.add_argument("--glossary", help="JSON file {\"term\": \"translation\"}")
+    tr.add_argument("--tone", help="notes for the translator on tone and formality")
+    tr.add_argument("--no-cache-file", action="store_true", default=None, help="keep the cache in memory only")
+
+    look = p.add_argument_group("appearance and ignores")
+    look.add_argument("--style", choices=["auto", "patch", "pill", "outline"])
+    look.add_argument("--font")
+    look.add_argument("--ignore", action="append", metavar="x,y,w,h", help="zone never to translate; repeatable")
+    look.add_argument("--ignore-pattern", action="append", metavar="REGEX", help="drop OCR lines matching; repeatable")
+
+    run = p.add_argument_group("pipeline")
+    run.add_argument("--fps", type=float, help="capture cap; default 10")
+    run.add_argument("--full-scan-every", type=int)
+    run.add_argument("--stable-frames", type=int)
+    run.add_argument("--max-missing", type=int)
+    run.add_argument("--no-hide-unfocused", action="store_true", default=None, help="keep the overlay up when the game is not in front")
+    run.add_argument("--capturable", action="store_true", default=None, help="do not exclude the overlay from screen capture")
+    run.add_argument("--run-for", type=float, default=0.0, help="quit after N seconds (0 = until the window closes)")
+    run.add_argument("--screenshot", help="with --run-for: save a screenshot of the game area before quitting")
+    return p
 
 
-def grab_screen_region(rect: tuple[int, int, int, int], path: str) -> None:
-    """Screenshot of a screen rectangle including layered windows (ours)."""
-    from PIL import ImageGrab
-
-    image = ImageGrab.grab(bbox=rect, include_layered_windows=True, all_screens=True)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    image.save(path)
-
-
-def default_cache_dir() -> Path:
-    base = os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "gametl" / "cache"
-
-
-def slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "game"
-
-
-def ensure_anthropic_credentials() -> bool:
-    """True when the SDK will find credentials. Also picks up a key set in the
-    Windows user environment after this process started."""
-    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        return True
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            value, _ = winreg.QueryValueEx(key, "ANTHROPIC_API_KEY")
-            if value:
-                os.environ["ANTHROPIC_API_KEY"] = str(value)
-                return True
-    except OSError:
-        pass
-    profile_dir = Path.home() / ".config" / "anthropic"
-    return profile_dir.exists()
+def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
+    """Overlay explicit command-line options on `base`."""
+    s = base.copy()
+    direct = {
+        "window": "window_match", "roi": "roi", "lang": "lang", "source_lang": "source_lang",
+        "target_lang": "target_lang", "translator": "translator", "model": "model", "effort": "effort",
+        "thinking": "thinking", "game": "game", "glossary": "glossary_path", "tone": "tone",
+        "style": "style", "font": "font", "fps": "fps", "full_scan_every": "full_scan_every",
+        "stable_frames": "stable_frames", "max_missing": "max_missing",
+    }
+    for arg, attr in direct.items():
+        value = getattr(args, arg, None)
+        if value is not None:
+            setattr(s, attr, value)
+    if args.include_frame is not None:
+        s.include_frame = True
+    if args.structured is not None:
+        s.structured = True
+    if args.no_cache_file is not None:
+        s.use_cache_file = False
+    if args.no_hide_unfocused is not None:
+        s.hide_when_unfocused = False
+    if args.capturable is not None:
+        s.exclude_from_capture = False
+    if args.ignore:
+        s.ignore_zones = list(args.ignore)
+    if args.ignore_pattern:
+        s.ignore_patterns = list(args.ignore_pattern)
+    return s
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    target = p.add_mutually_exclusive_group(required=True)
-    target.add_argument("--window", help="title substring of the game window")
-    target.add_argument("--hwnd", help="window handle (decimal or 0x hex)")
-    p.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the window to appear")
-    p.add_argument("--roi", help="subtitle zone x,y,w,h as fractions or pixels of the client area; default all of it")
-    p.add_argument("--include-frame", action="store_true", help="also read the title bar / window frame (default: client area only)")
-
-    lang = p.add_argument_group("languages")
-    lang.add_argument("--lang", default="en", help="OCR model language (en, ch, japan, korean, de, ...)")
-    lang.add_argument("--source-lang", help="source language for the translator; default: same as --lang")
-    lang.add_argument("--target-lang", default="tr", help="target language code (default tr)")
-
-    tr = p.add_argument_group("translation")
-    tr.add_argument("--translator", choices=["claude", "uppercase", "echo", "verbose"], default="claude")
-    tr.add_argument("--model", default="claude-haiku-5-5")
-    tr.add_argument("--effort", default="low", choices=["low", "medium", "high"])
-    tr.add_argument("--thinking", choices=["disabled", "adaptive"], default="disabled",
-                    help="model thinking; disabled measured fastest with equal quality")
-    tr.add_argument("--structured", action="store_true",
-                    help="use server-side structured output (guaranteed shape, ~0.5 s slower per call)")
-    tr.add_argument("--game", help="game name for the prompt and the cache file; default: window title")
-    tr.add_argument("--glossary", help="JSON file {\"term\": \"translation\"} of names/terms to render consistently")
-    tr.add_argument("--tone", help="free-text notes for the translator on tone and formality")
-    tr.add_argument("--cache-dir", help="where per-game translation caches live (default %%APPDATA%%\\gametl\\cache)")
-    tr.add_argument("--no-cache-file", action="store_true", help="keep the cache in memory only")
-
-    look = p.add_argument_group("appearance and ignores")
-    look.add_argument("--style", choices=["auto", "patch", "pill", "outline"], default="auto",
-                      help="auto = patch the original out, pill on busy backgrounds")
-    look.add_argument("--ignore", action="append", default=[], metavar="x,y,w,h",
-                      help="zone of the client area (fractions or pixels) never to translate; repeatable")
-    look.add_argument("--ignore-pattern", action="append", default=[], metavar="REGEX",
-                      help="drop OCR lines matching this pattern (case-insensitive); repeatable")
-
-    run = p.add_argument_group("pipeline")
-    run.add_argument("--fps", type=float, default=10.0, help="capture cap")
-    run.add_argument("--full-scan-every", type=int, default=10, help="with --roi: full-area scan every N frames")
-    run.add_argument("--stable-frames", type=int, default=1)
-    run.add_argument("--max-missing", type=int, default=3)
-    run.add_argument("--font", default="Segoe UI")
-    run.add_argument("--no-hide-unfocused", action="store_true", help="keep the overlay up when the game is not in front")
-    run.add_argument("--capturable", action="store_true", help="do not exclude the overlay from screen capture")
-    run.add_argument("--debug", action="store_true", help="outline every tracked block and print per-frame stats")
-    run.add_argument("--dump-dir", help="debug: save every captured frame with OCR lines and blocks drawn")
-    run.add_argument("--run-for", type=float, default=0.0, help="quit after N seconds (0 = until the window closes)")
-    run.add_argument("--screenshot", help="with --run-for: save a screenshot of the game area before quitting")
-    args = p.parse_args(argv)
+    args = build_parser().parse_args(argv)
 
     # Physical pixels everywhere: overlay geometry == capture-frame pixels.
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
-
-    from gametl.capture.windows import (
-        client_rect_on_screen,
-        enable_per_monitor_dpi_awareness,
-        find_window,
-        window_rect,
-    )
+    from gametl.capture.windows import enable_per_monitor_dpi_awareness, list_windows
 
     enable_per_monitor_dpi_awareness()
+
+    if args.list_windows:
+        for w in sorted(list_windows(), key=lambda w: w.title.casefold()):
+            print(f"0x{w.hwnd:08X} {w.width:5d}x{w.height:<5d} [{w.class_name}] {w.title}")
+        return 0
+
+    store = ProfileStore(args.data_dir)
+    profile_name = args.profile
+    if profile_name:
+        if not store.exists(profile_name):
+            print(f"no profile named {profile_name!r}; saved profiles: {', '.join(store.list()) or 'none'}")
+            return 2
+        base = store.load(profile_name)
+        profile_name = slug(profile_name)
+    else:
+        base = Settings()
+    settings = settings_from_args(args, base)
+
+    if args.save_profile:
+        path = store.save(args.save_profile, settings)
+        store.last_profile = slug(args.save_profile)
+        profile_name = slug(args.save_profile)
+        print(f"profile saved to {path}")
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from gametl.app.pipeline import PipelineConfig, PipelineThread
-    from gametl.ocr.rapid import RapidOcrEngine
-    from gametl.overlay.window import OverlayWindow
-    from gametl.tracking.filters import LineFilter
-    from gametl.translate.cache import TranslationCache
-    from gametl.translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
-    from gametl.translate.service import TranslationService
+    from gametl.app.controller import OverlayController, grab_screen_region
 
     app = QApplication(sys.argv[:1])
+    app.setQuitOnLastWindowClosed(False)
+    controller = OverlayController(store)
+    controller.status.connect(lambda s: print(s, flush=True))
 
-    # -- target window ---------------------------------------------------------
-    title = args.window or ""
-    if args.hwnd:
-        hwnd = int(args.hwnd, 0)
+    hwnd = int(args.hwnd, 0) if args.hwnd else None
+    tray_mode = args.tray or (not settings.window_match and hwnd is None)
+
+    if tray_mode:
+        from gametl.app.tray import TrayApp
+
+        tray = TrayApp(app, controller, store, settings, profile_name)
+        if settings.window_match or hwnd:
+            controller.start(settings, hwnd, wait=args.wait)
+        else:
+            tray.open_settings()
     else:
-        deadline = time.perf_counter() + args.wait
-        info = find_window(args.window)
-        while info is None and time.perf_counter() < deadline:
-            time.sleep(0.5)
-            info = find_window(args.window)
-        if info is None:
-            print(f"no visible window with title containing {args.window!r}")
+        if not controller.start(settings, hwnd, wait=args.wait):
             return 2
-        hwnd, title = info.hwnd, info.title
-        print(f"target: {info.title!r} hwnd=0x{hwnd:X} rect={info.rect}")
-
-    rect = window_rect(hwnd)
-    frame_w, frame_h = rect[2] - rect[0], rect[3] - rect[1]
-    # The capture frame covers the DWM bounds (title bar included on a normal
-    # window). By default only the client area, where the game draws, is read.
-    area: tuple[int, int, int, int] | None = None
-    if not args.include_frame:
-        c = client_rect_on_screen(hwnd)
-        area = (
-            max(0, c[0] - rect[0]),
-            max(0, c[1] - rect[1]),
-            min(frame_w, c[2] - rect[0]),
-            min(frame_h, c[3] - rect[1]),
-        )
-        if area[2] <= area[0] or area[3] <= area[1]:
-            area = None
-    ax0, ay0, ax1, ay1 = area or (0, 0, frame_w, frame_h)
-    roi = parse_roi(args.roi, ax1 - ax0, ay1 - ay0)
-    if roi is not None:
-        roi = (roi[0] + ax0, roi[1] + ay0, roi[2] + ax0, roi[3] + ay0)
-    print(f"frame {frame_w}x{frame_h}, area {area or 'whole frame'}, roi {roi or 'whole area'}")
-
-    zones = []
-    for spec in args.ignore:
-        z = parse_roi(spec, ax1 - ax0, ay1 - ay0)
-        if z is not None:
-            zones.append((z[0] + ax0, z[1] + ay0, z[2] + ax0, z[3] + ay0))
-    line_filter = LineFilter.compile(zones, args.ignore_pattern) if (zones or args.ignore_pattern) else None
-    if line_filter:
-        print(f"ignoring {len(zones)} zone(s) and {len(args.ignore_pattern)} pattern(s)")
-
-    # -- translation -----------------------------------------------------------
-    source_lang = args.source_lang or args.lang
-    game = args.game or title or "game"
-    if args.translator == "claude":
-        if not ensure_anthropic_credentials():
-            print(
-                "No Anthropic credentials found. Set ANTHROPIC_API_KEY in your user environment "
-                "variables (Windows: Settings > System > About > Advanced system settings > "
-                "Environment Variables), or run with --translator uppercase to test without translation."
-            )
-            return 2
-        from gametl.translate.claude import ClaudeTranslator
-
-        glossary = None
-        if args.glossary:
-            with open(args.glossary, encoding="utf-8") as fh:
-                glossary = json.load(fh)
-        translator = ClaudeTranslator(
-            model=args.model,
-            effort=args.effort,
-            thinking=args.thinking,
-            structured=args.structured,
-            game=game,
-            glossary=glossary,
-            style=args.tone,
-            source_lang=source_lang,
-            target_lang=args.target_lang,
-        )
-    elif args.translator == "uppercase":
-        translator = UppercaseTranslator()
-    elif args.translator == "verbose":
-        translator = VerboseTranslator()
-    else:
-        translator = EchoTranslator()
-
-    cache_path = None
-    if not args.no_cache_file:
-        cache_dir = Path(args.cache_dir) if args.cache_dir else default_cache_dir()
-        cache_path = cache_dir / f"{slug(game)}.{args.target_lang}.{translator.name}.json"
-    cache = TranslationCache(cache_path)
-    print(f"translator: {translator.name}, {source_lang} -> {args.target_lang}, cache {cache_path or 'memory'} ({len(cache)} entries)")
-
-    service = TranslationService(
-        translator,
-        cache,
-        target_lang=args.target_lang,
-        source_lang=source_lang,
-        on_status=lambda s: print(s, flush=True),
-    )
-
-    # -- OCR, overlay, pipeline ---------------------------------------------------
-    engine = RapidOcrEngine(lang=args.lang)
-    print(f"OCR warm-up {engine.warm_up(frame_w, frame_h):.0f}ms")
-
-    overlay = OverlayWindow(
-        hwnd,
-        hide_when_unfocused=not args.no_hide_unfocused,
-        exclude_from_capture=not args.capturable,
-        font_family=args.font,
-    )
-    config = PipelineConfig(
-        area=area,
-        roi=roi,
-        fps=args.fps,
-        full_scan_every=args.full_scan_every,
-        stable_frames=args.stable_frames,
-        max_missing=args.max_missing,
-        style=args.style,
-        line_filter=line_filter,
-        debug=args.debug,
-        dump_dir=args.dump_dir,
-    )
-    worker = PipelineThread(hwnd, engine, service, config)
-    worker.blocks_ready.connect(overlay.set_blocks)
-    worker.status.connect(lambda s: print(s, flush=True))
-    overlay.target_lost.connect(app.quit)
-
-    overlay.start()
-    print(f"overlay up: ex_style=0x{overlay.ex_style():08X} excluded_from_capture={overlay.excluded_from_capture}")
-    worker.start()
+        controller.running_changed.connect(lambda running: None if running else app.quit())
 
     if args.run_for:
 
         def finish() -> None:
-            if args.screenshot and overlay.target_rect:
-                grab_screen_region(overlay.target_rect, args.screenshot)
+            if args.screenshot and controller.overlay and controller.overlay.target_rect:
+                grab_screen_region(controller.overlay.target_rect, args.screenshot)
                 print(f"screenshot saved to {args.screenshot}")
             app.quit()
 
         QTimer.singleShot(int(args.run_for * 1000), finish)
 
     rc = app.exec()
-    worker.stop()
-    worker.wait(3000)
-    service.shutdown()
-    if worker.ocr_ms:
-        s = sorted(worker.ocr_ms)
-        print(f"frames {worker.frames}, ocr median {s[len(s) // 2]:.0f}ms max {s[-1]:.0f}ms")
-    st = service.stats
-    print(
-        f"translation: {st['requests']} requests, {st['items']} items sent, {st['translated']} translated, "
-        f"{st['cache_hits']} cache hits, {st['errors']} errors; cache now {len(cache)} entries"
-    )
-    if service.latencies_ms:
-        lat = sorted(service.latencies_ms)
-        print(f"request latency: median {lat[len(lat) // 2]:.0f}ms min {lat[0]:.0f}ms max {lat[-1]:.0f}ms")
-    totals = getattr(translator, "usage_totals", None)
-    if totals and getattr(translator, "calls", 0):
-        from gametl.translate.claude import estimate_cost_usd
-
-        cost = estimate_cost_usd(args.model, totals)
-        cost_text = f" ~${cost:.5f}" if cost is not None else ""
-        print(
-            f"tokens: {totals['input']} in, {totals['output']} out, {totals['cache_read']} cache read, "
-            f"{totals['cache_write']} cache write over {translator.calls} calls{cost_text}"
-        )
+    stats = controller.stats_text()
+    controller.stop()
+    if stats:
+        print(stats)
     return rc
 
 

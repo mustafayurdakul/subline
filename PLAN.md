@@ -263,7 +263,7 @@ Alternative: `winget install Python.Python.3.12`, then `py -3.12 -m venv .venv`.
 | M1 | Overlay MVP (done 2026-10-21) | Click-through overlay following the window, block tracker with confirmation and hysteresis, patch rendering with sampled colours, dummy translator, CLI entry point. Results in section 10. | done     |
 | M2 | Real translation (built 2026-10-21, live run pending) | Claude backend with structured output, asynchronous service, three-tier cache, context window, CLI options. Results in section 11. | built    |
 | M3 | Layout quality (done 2026-10-21) | Wrap/shrink/grow fitter, busy-background detection with pill fallback, jitter smoothing, ignore zones and patterns. Results in section 12. | done     |
-| M4 | App shell          | Tray icon, settings UI, window picker, hotkeys, per-game profiles, config in %APPDATA%.       | 2-3 days |
+| M4 | App shell (done 2026-10-21) | Tray icon, settings window with window picker, global hotkeys, per-game profiles in %APPDATA%, controller shared with the CLI. Results in section 13. | done     |
 | M5 | Fast paths         | Offline NMT backend (CTranslate2), fast-first-then-refine mode, script import + batch pre-translation, fuzzy lookup at runtime. See 2.1. | 3-4 days |
 | M6 | Packaging & extras | PyInstaller build, DirectML option, glossary editor, logs, predictive hiding (experimental).  | ongoing  |
 
@@ -535,3 +535,42 @@ Known gaps: colour sampling still assumes one text colour per block; text
 with a gradient or two colours (speaker name + line) gets one; the fitter
 does not reflow a source that was already two lines into one; growth never
 pushes neighbouring blocks, it only avoids them.
+
+## 13. M4 results (2026-10-21)
+
+What exists:
+
+- **Settings and profiles** (`app/config.py`): one `Settings` dataclass
+  holds every option; profiles are Settings as JSON under
+  `%APPDATA%\gametl\profiles\<slug>.json`, `config.json` remembers the last
+  profile, and a profile matches a game by a title substring. Unknown keys
+  in older or newer files are ignored.
+- **Controller** (`app/controller.py`): builds the OCR engine (cached per
+  language), translator, cache, service, overlay and pipeline thread from a
+  Settings object; start/stop/pause/rescan; shared by the CLI, the tray and
+  the settings window. Pause keeps capturing but shows and translates
+  nothing; rescan drops all tracked blocks.
+- **Global hotkeys** (`app/hotkeys.py`): Win32 RegisterHotKey on the thread
+  queue, delivered through a Qt native event filter; combos like
+  `ctrl+shift+t`, `alt+f5`; a combo another program owns is reported, not
+  fatal.
+- **Tray** (`app/tray.py`): icon drawn in code with a status dot; menu with
+  status, Start/Stop, Pause, Rescan, Settings, Profiles, data folder, Quit;
+  double-click opens settings.
+- **Settings window** (`app/settings_dialog.py`): tabs for game (window
+  picker with refresh, zone, ignores), translation, appearance, hotkeys;
+  "Apply and run" and "Save profile".
+- **CLI** (`app/main.py`): same options as before plus `--tray`,
+  `--profile`, `--save-profile`, `--data-dir`; with no window it runs the
+  tray and opens settings. Command-line options override the loaded
+  profile only when given.
+
+Verified on the fake game: profile saved from the CLI, tray mode started
+from that profile with the overlay running, bare tray launch opens the
+settings window and exits cleanly; 78 tests pass (config, hotkey parsing and
+registration, dialog round trip, CLI override rules).
+
+Not covered: the tray and dialog are exercised by launch and round-trip only,
+not by simulated clicks; hotkeys are registered in tests but not pressed;
+first-run experience on a machine without the OCR models downloads them
+during "Apply and run" with only a status line to show for it.
