@@ -1,0 +1,38 @@
+[project]
+name = "gametl"
+version = "0.0.1"
+description = "Real-time in-game text translation overlay for Windows"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # M0: capture + OCR
+    "windows-capture",
+    "rapidocr>=3.0",
+    "onnxruntime>=1.19",
+    "opencv-python-headless>=4.9",
+    "numpy",
+    "pillow>=10",
+    # M1: overlay
+    "pyside6>=6.8",
+    # M2: translation
+    "anthropic",
+]
+
+# GPU OCR (any vendor, via DirectML) is opt-in and conflicts with the CPU
+# onnxruntime package: `uv pip uninstall onnxruntime && uv pip install onnxruntime-directml`.
+
+[project.scripts]
+gametl = "gametl.app.main:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gametl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
