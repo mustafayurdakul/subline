@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from ..capture.windows import list_windows
 from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
+from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 
 # fmt: off
 OCR_LANGS = [
@@ -79,11 +80,18 @@ class SettingsDialog(QDialog):
     profile_saved = Signal(str)
     select_area_requested = Signal()
 
-    def __init__(self, settings: Settings, store: ProfileStore, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        store: ProfileStore,
+        secrets: SecretStore | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("gametl settings")
         self.setMinimumWidth(560)
         self.store = store
+        self.secrets: SecretStore = secrets if secrets is not None else WindowsCredentialStore()
         self._download: ModelDownloadThread | None = None
         self._build()
         self.load_settings(settings)
@@ -157,6 +165,12 @@ class SettingsDialog(QDialog):
         self.lang.setEditable(True)
         self.lang.addItems(OCR_LANGS)
         form.addRow("OCR language", self.lang)
+        self.ocr_gpu = QCheckBox("run OCR on the GPU (DirectML)")
+        self.ocr_gpu.setToolTip(
+            "Faster for large areas (a full frame read in half the time); slower than the CPU on a small "
+            "subtitle strip. Any DirectX 12 graphics card."
+        )
+        form.addRow("", self.ocr_gpu)
         self.source_lang = QLineEdit()
         self.source_lang.setPlaceholderText("default: same as OCR language")
         form.addRow("Source language", self.source_lang)
@@ -164,13 +178,13 @@ class SettingsDialog(QDialog):
         form.addRow("Target language", self.target_lang)
         self.translator = QComboBox()
         self.translator.addItems(TRANSLATORS)
-        self.translator.setToolTip("deepl needs a key in the DEEPL_AUTH_KEY environment variable (free tier available)")
+        self.translator.setToolTip("deepl and claude need their API key entered below (DeepL has a free tier)")
         form.addRow("Translator", self.translator)
         self.draft = QComboBox()
         self.draft.addItems(["none", "offline", "deepl"])
         self.draft.setToolTip(
             "Show a fast draft, replaced when the translator answers: "
-            "offline needs the downloaded model, deepl needs DEEPL_AUTH_KEY."
+            "offline needs the downloaded model, deepl needs its key."
         )
         self.download_btn = QPushButton("Download offline model")
         self.download_btn.clicked.connect(self.download_model)
@@ -181,6 +195,26 @@ class SettingsDialog(QDialog):
         self.use_cache_file = QCheckBox("remember translations per game on disk")
         form.addRow("", self.use_cache_file)
         column.addLayout(form)
+
+        keys = QGroupBox("API keys (kept in Windows Credential Manager, never in profiles)")
+        form = QFormLayout(keys)
+        self.key_edits: dict[str, QLineEdit] = {}
+        self.key_labels: dict[str, QLabel] = {}
+        for name, label in ((DEEPL_KEY, "DeepL key"), (ANTHROPIC_KEY, "Anthropic key")):
+            edit = QLineEdit()
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+            edit.setPlaceholderText("paste the key, then Save (Apply saves it too)")
+            save = QPushButton("Save")
+            save.clicked.connect(lambda _checked=False, n=name: self.save_key(n))
+            clear = QPushButton("Clear")
+            clear.clicked.connect(lambda _checked=False, n=name: self.clear_key(n))
+            status = QLabel("")
+            self.key_edits[name] = edit
+            self.key_labels[name] = status
+            form.addRow(label, _row(edit, save, clear))
+            form.addRow("", status)
+        column.addWidget(keys)
+        self._refresh_key_status()
 
         claude = QGroupBox("Claude")
         form = QFormLayout(claude)
@@ -311,6 +345,33 @@ class SettingsDialog(QDialog):
         if path:
             self.glossary_path.setText(path)
 
+    # -- API keys ---------------------------------------------------------------
+
+    def save_key(self, name: str) -> None:
+        """Store what was typed for `name` and blank the field, so the key
+        stays in a widget no longer than needed."""
+        value = self.key_edits[name].text().strip()
+        if not value:
+            return
+        self.secrets.set(name, value)
+        self.key_edits[name].clear()
+        self._refresh_key_status()
+
+    def save_typed_keys(self) -> None:
+        for name in self.key_edits:
+            self.save_key(name)
+
+    def clear_key(self, name: str) -> None:
+        self.secrets.delete(name)
+        self.key_edits[name].clear()
+        self._refresh_key_status()
+
+    def _refresh_key_status(self) -> None:
+        for name, label in self.key_labels.items():
+            label.setText(key_status(name, self.secrets))
+
+    # -- settings <-> widgets -------------------------------------------------------
+
     def load_settings(self, s: Settings) -> None:
         self.window_combo.setEditText(s.window_match)
         self.game.setText(s.game)
@@ -320,6 +381,7 @@ class SettingsDialog(QDialog):
         self.include_frame.setChecked(s.include_frame)
         self.hide_when_unfocused.setChecked(s.hide_when_unfocused)
         self.lang.setEditText(s.lang)
+        self.ocr_gpu.setChecked(s.ocr_gpu)
         self.source_lang.setText(s.source_lang)
         self.target_lang.setText(s.target_lang)
         self.translator.setCurrentText(s.translator)
@@ -354,6 +416,7 @@ class SettingsDialog(QDialog):
         s.include_frame = self.include_frame.isChecked()
         s.hide_when_unfocused = self.hide_when_unfocused.isChecked()
         s.lang = self.lang.currentText().strip() or "en"
+        s.ocr_gpu = self.ocr_gpu.isChecked()
         s.source_lang = self.source_lang.text().strip()
         s.target_lang = self.target_lang.text().strip() or "tr"
         s.translator = self.translator.currentText()
@@ -379,9 +442,11 @@ class SettingsDialog(QDialog):
         return s
 
     def apply(self) -> None:
+        self.save_typed_keys()
         self.applied.emit(self.to_settings(), self.selected_hwnd())
 
     def save_profile(self) -> None:
+        self.save_typed_keys()
         settings = self.to_settings()
         name = self.profile_name.text().strip() or settings.game or settings.window_match or "game"
         self.store.save(name, settings)

@@ -19,8 +19,10 @@ and `gametl-cli.exe` (the same app with a console, for command-line use and
 `gametl-cli pretranslate ...`). Copy the folder anywhere and run
 `gametl.exe`. The OCR models (about 20 MB) download on first run into
 `%APPDATA%\gametl\models`, as does the offline model when you press
-"Download offline model" in the settings window. API keys are read from the
-`DEEPL_AUTH_KEY` and `ANTHROPIC_API_KEY` user environment variables.
+"Download offline model" in the settings window. API keys are entered on
+the Translation tab and kept in Windows Credential Manager, never in a
+profile file (the `DEEPL_AUTH_KEY` and `ANTHROPIC_API_KEY` environment
+variables still work if you set them that way).
 
 ## Using it
 
@@ -63,11 +65,12 @@ Default global hotkeys (changeable in the Hotkeys tab):
 
 ### Which translator
 
-- **DeepL** (recommended for Turkish and other European languages): put a
-  key in the `DEEPL_AUTH_KEY` environment variable (free tier: 500k
-  characters a month) and choose Translator `deepl`. Measured for English to
-  Turkish: median 0.2 s per line with natural wording.
-- **Claude** (the default, needs `ANTHROPIC_API_KEY`): about 0.9 s per line
+- **DeepL** (recommended for Turkish and other European languages): get a
+  key from deepl.com (free tier: 500k characters a month), paste it into the
+  DeepL key field on the Translation tab, and choose Translator `deepl`.
+  Measured for English to Turkish: median 0.2 s per line with natural
+  wording.
+- **Claude** (the default; paste an Anthropic key on the same tab): about 0.9 s per line
   with Haiku 5.5. Choose it when you need a glossary, tone notes, context
   between lines, or a language DeepL lacks. `claude-opus-5-5` is the quality
   option.
@@ -95,9 +98,17 @@ waits up to ten minutes; `--wait 0` submits and exits, and `--resume JOBFILE`
 collects later; `--sync` uses the normal API at once. The `--game` name must
 match the one the overlay runs with, since it names the cache file.
 
-OCR sometimes reads a number or a symbol out of background detail. Ignore
-patterns (Game tab, one regular expression per line, case-insensitive) drop
-such lines: `^[^a-z]+$` drops every line without a letter.
+OCR sometimes reads a number or a symbol out of background detail. Every
+new profile therefore starts with one ignore pattern that drops any line
+without a letter (in any script). Ignore patterns live on the Game tab, one
+regular expression per line, case-insensitive; remove the default one if a
+game really shows letter-less lines you want translated.
+
+OCR runs on the CPU by default, which reads a subtitle strip in about 50 ms.
+"Run OCR on the GPU (DirectML)" on the Translation tab uses any DirectX 12
+graphics card instead: measured on an RTX 3080 Ti, a full 1280x720 frame
+drops from 204 ms to 105 ms, but a subtitle strip goes from 54 ms to 71 ms,
+so turn it on only for large areas or in-place mode over the whole window.
 
 ## Command line
 
@@ -114,7 +125,7 @@ useful ones:
 
 - `--target-lang de` / `--source-lang ja` change the pair (`--lang` picks the
   OCR model: `en`, `japan`, `ch`, `korean`, `de`, ...; the source language
-  defaults to it).
+  defaults to it); `--ocr-gpu` runs OCR through DirectML.
 - `--translator deepl|claude|offline`, `--draft offline|deepl`,
   `--model claude-opus-5-5`, `--effort low|medium|high`, `--thinking adaptive`
   (off by default: measured no gain), `--structured` (server-side structured
@@ -126,8 +137,7 @@ useful ones:
   client area); `--render inplace`, `--subtitle-font 30`,
   `--subtitle-color "#FFEE00"`, `--subtitle-position bottom`.
 - `--ignore 0,0,0.5,0.1` (repeatable) never translates text in that zone;
-  `--ignore-pattern "^[^a-z]+$"` (repeatable) drops OCR lines matching a
-  pattern.
+  `--ignore-pattern REGEX` (repeatable) replaces the ignore patterns.
 - `--translator uppercase` runs the whole pipeline without any API calls;
   `--translator verbose` doubles every line to exercise wrapping.
 - `--debug` outlines every tracked block and prints per-frame stats;
@@ -166,6 +176,33 @@ uv run ruff check src tests scripts
 uv run ruff format src tests scripts
 ```
 
+### How it fits together
+
+One frame goes through these steps, about ten times a second, on the
+pipeline thread (`app/pipeline.py`):
+
+1. `capture/` grabs the game window with Windows Graphics Capture and
+   hands over a BGR frame plus the window's screen rectangle.
+2. `ocr/` reads the selected area (or the whole client area) and returns
+   text lines with pixel boxes.
+3. `tracking/filters.py` drops lines in ignore zones or matching ignore
+   patterns; `tracking/blocks.py` groups lines into blocks and matches them
+   to the blocks seen in earlier frames, so each block keeps its id, a
+   stability count and a few frames of grace when OCR misses it.
+4. `translate/service.py` answers from the per-game cache at once and sends
+   new text to the translator on a worker thread (with an optional faster
+   draft translator); the pipeline never waits for a reply.
+5. `layout/` decides how a translation is drawn: `style.py` keeps size and
+   colours consistent across lines in the same band, `fit.py` wraps and
+   sizes text, `colors.py` samples the background and text colours.
+6. `overlay/window.py` draws the result in a click-through window glued
+   to the game, in subtitle mode (one pill centred in the area) or in place.
+
+`app/controller.py` builds this chain from a `Settings` object and owns it
+while it runs; `app/tray.py`, `app/settings_dialog.py` and `app/main.py`
+are the three ways of driving the controller (tray menu and hotkeys, the
+settings window, the command line). `app/credentials.py` finds API keys.
+
 `scripts/spike_capture_ocr.py` is a diagnostic that captures a window and
 prints what OCR sees, with timings, without the overlay:
 
@@ -186,7 +223,7 @@ src/gametl/
   translate/  Translator interface, Claude / DeepL / offline backends, cache, service
   layout/     fitting text into the source box, colour sampling, consistent styling
   overlay/    transparent click-through window, area selector
-  app/        controller, pipeline thread, tray icon, settings window, hotkeys, profiles
+  app/        controller, pipeline thread, tray icon, settings window, hotkeys, profiles, API keys
 scripts/      fake game, diagnostics, build, model conversion
 tests/
 ```

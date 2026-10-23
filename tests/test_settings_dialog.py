@@ -12,6 +12,7 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 from PySide6.QtWidgets import QApplication
 
 from gametl.app.config import ProfileStore, Settings
+from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
 from gametl.app.main import build_parser, settings_from_args
 from gametl.app.settings_dialog import SettingsDialog
 
@@ -30,6 +31,7 @@ def test_dialog_round_trips_settings(qapp: QApplication, tmp_path: Path) -> None
         ignore_zones=["0,0,0.5,0.1"],
         ignore_patterns=[r"^\d+$"],
         lang="en",
+        ocr_gpu=True,
         target_lang="tr",
         translator="uppercase",
         model="claude-sonnet-5-5",
@@ -50,7 +52,7 @@ def test_dialog_round_trips_settings(qapp: QApplication, tmp_path: Path) -> None
         hide_when_unfocused=False,
         hotkeys={"toggle": "ctrl+alt+t"},
     )
-    dialog = SettingsDialog(original, store)
+    dialog = SettingsDialog(original, store, MemorySecretStore())
     result = dialog.to_settings()
     assert result == Settings.from_dict(original.to_dict())
 
@@ -61,6 +63,27 @@ def test_dialog_round_trips_settings(qapp: QApplication, tmp_path: Path) -> None
     assert saved == ["my-game"]
     assert store.load("my-game").translator == "uppercase"
     assert store.last_profile == "my-game"
+    dialog.close()
+
+
+def test_keys_go_to_the_secret_store_not_the_profile(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This machine may have real keys in its environment: hide them from the test.
+    monkeypatch.delenv(DEEPL_KEY, raising=False)
+    monkeypatch.setattr("gametl.app.credentials.user_environment_variable", lambda name: None)
+    secrets = MemorySecretStore()
+    dialog = SettingsDialog(Settings(), ProfileStore(tmp_path), secrets)
+    assert dialog.key_labels[DEEPL_KEY].text() == "not set"
+    dialog.key_edits[DEEPL_KEY].setText("abc:fx")
+    dialog.apply()  # Apply saves a typed key as well as the explicit Save button
+    assert secrets.get(DEEPL_KEY) == "abc:fx"
+    assert dialog.key_edits[DEEPL_KEY].text() == ""  # the field is blanked once stored
+    assert dialog.key_labels[DEEPL_KEY].text() == "set (memory)"
+    assert "abc:fx" not in str(dialog.to_settings().to_dict())
+    dialog.clear_key(DEEPL_KEY)
+    assert secrets.get(DEEPL_KEY) is None
+    assert dialog.key_labels[DEEPL_KEY].text() == "not set"
     dialog.close()
 
 

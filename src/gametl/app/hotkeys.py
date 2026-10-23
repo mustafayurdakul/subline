@@ -91,6 +91,7 @@ class GlobalHotkeys(QAbstractNativeEventFilter):
         return list(self._names)
 
     def nativeEventFilter(self, event_type, message):
+        # WM_HOTKEY arrives on this thread's message queue; wParam is the id we registered.
         if event_type == b"windows_generic_MSG":
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == WM_HOTKEY:

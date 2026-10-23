@@ -62,10 +62,12 @@ class TranslationCache:
     def get(self, text: str, target_lang: str) -> str | None:
         key = self.key(text)
         with self._lock:
+            # 1. The same text, after whitespace and case normalisation.
             hit = self._entries.get(key, {}).get(target_lang)
             if hit is not None:
                 return hit
 
+            # 2. The same text with other numbers: swap them into the cached translation.
             template, numbers = numeric_template(key)
             if numbers:
                 cached = self._templates.get((template, target_lang))
@@ -74,6 +76,7 @@ class TranslationCache:
                     if swapped is not None:
                         return swapped
 
+            # 3. A near-identical line seen recently (OCR noise such as l/1).
             for recent_key in reversed(self._recent):
                 candidate = self._entries.get(recent_key, {}).get(target_lang)
                 if candidate is not None and text_similarity(key, recent_key) >= self.fuzzy_ratio:

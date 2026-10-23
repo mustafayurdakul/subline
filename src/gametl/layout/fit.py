@@ -94,11 +94,14 @@ def fit_text(
         line_h = px * line_spacing
         return lines, line_h, len(lines) * line_h
 
+    # 1. Keep the size and wrap, when the box may grow enough to hold the lines.
     if prefer_grow:
         lines, line_h, total = layout_at(base_px)
         if total <= limit:
             return TextLayout(lines, base_px, line_h, math.ceil(total), total > height, False)
 
+    # 2. Shrink a little, one pixel at a time; remember the largest size that
+    #    would fit if the box grew.
     grow: tuple[list[str], int, float, float] | None = None
     for px in range(base_px, floor_px - 1, -1):
         lines, line_h, total = layout_at(px)
@@ -106,15 +109,18 @@ def fit_text(
             return TextLayout(lines, px, line_h, math.ceil(total), False, False)
         if grow is None and total <= limit:
             grow = (lines, px, line_h, total)
+    # 3. Grow the box at that size.
     if grow is not None:
         lines, px, line_h, total = grow
         return TextLayout(lines, px, line_h, math.ceil(total), True, False)
 
+    # 4. Shrink further, down to the minimum size.
     for px in range(floor_px - 1, min_px - 1, -1):
         lines, line_h, total = layout_at(px)
         if total <= limit:
             return TextLayout(lines, px, line_h, math.ceil(total), total > height, False)
 
+    # 5. Still too tall: keep the lines that fit and end them with an ellipsis.
     lines, line_h, total = layout_at(min_px)
     n_fit = max(1, int(limit // line_h))
     if len(lines) > n_fit:

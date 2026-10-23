@@ -21,6 +21,14 @@ from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
 from ..translate.service import TranslationService
 from .config import ProfileStore, Settings, slug
+from .credentials import (
+    DEEPL_KEY,
+    SecretStore,
+    WindowsCredentialStore,
+    anthropic_api_key,
+    has_anthropic_credentials,
+    resolve_key,
+)
 from .pipeline import PipelineConfig, PipelineThread
 
 Box = tuple[int, int, int, int]
@@ -84,33 +92,7 @@ def capture_area(hwnd: int, include_frame: bool) -> tuple[Box, Box | None]:
     return frame, (None if include_frame else client)
 
 
-# -- credentials and screenshots -----------------------------------------------------
-
-
-def load_user_env(name: str) -> str | None:
-    """The variable from this process, else from the Windows user environment
-    (set after the process started), copied into os.environ."""
-    value = os.environ.get(name)
-    if value:
-        return value
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            value, _ = winreg.QueryValueEx(key, name)
-    except OSError:
-        return None
-    if value:
-        os.environ[name] = str(value)
-        return str(value)
-    return None
-
-
-def ensure_anthropic_credentials() -> bool:
-    """True when the SDK will find credentials."""
-    if load_user_env("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        return True
-    return (Path.home() / ".config" / "anthropic").exists()
+# -- screenshots ---------------------------------------------------------------------
 
 
 def grab_screen_region(rect: Box, path: str) -> None:
@@ -131,23 +113,24 @@ def build_offline_translator(settings: Settings, store: ProfileStore) -> Transla
     return OfflineTranslator.from_models_dir(store.models_dir, settings.effective_source_lang, settings.target_lang)
 
 
-def build_deepl_translator() -> Translator:
+def build_deepl_translator(secrets: SecretStore) -> Translator:
     from ..translate.deepl import DeepLTranslator
 
-    return DeepLTranslator(auth_key=load_user_env("DEEPL_AUTH_KEY"))
+    found = resolve_key(DEEPL_KEY, secrets)
+    return DeepLTranslator(auth_key=found[0] if found else None)
 
 
-def build_draft_translator(settings: Settings, store: ProfileStore) -> Translator | None:
+def build_draft_translator(settings: Settings, store: ProfileStore, secrets: SecretStore) -> Translator | None:
     if not settings.draft or settings.draft == settings.translator:
         return None
     if settings.draft == "offline":
         return build_offline_translator(settings, store)
     if settings.draft == "deepl":
-        return build_deepl_translator()
+        return build_deepl_translator(secrets)
     return None
 
 
-def build_translator(settings: Settings, game: str, store: ProfileStore) -> Translator:
+def build_translator(settings: Settings, game: str, store: ProfileStore, secrets: SecretStore) -> Translator:
     if settings.translator == "uppercase":
         return UppercaseTranslator()
     if settings.translator == "verbose":
@@ -157,7 +140,7 @@ def build_translator(settings: Settings, game: str, store: ProfileStore) -> Tran
     if settings.translator == "offline":
         return build_offline_translator(settings, store)
     if settings.translator == "deepl":
-        return build_deepl_translator()
+        return build_deepl_translator(secrets)
     from ..translate.claude import ClaudeTranslator
 
     glossary = None
@@ -174,6 +157,7 @@ def build_translator(settings: Settings, game: str, store: ProfileStore) -> Tran
         tone=settings.tone or None,
         source_lang=settings.effective_source_lang,
         target_lang=settings.target_lang,
+        api_key=anthropic_api_key(secrets),
     )
 
 
@@ -191,9 +175,10 @@ class OverlayController(QObject):
     paused_changed = Signal(bool)
     area_selected = Signal(str)  # zone spec 'x,y,w,h' as fractions of the client area
 
-    def __init__(self, store: ProfileStore | None = None, parent=None) -> None:
+    def __init__(self, store: ProfileStore | None = None, secrets: SecretStore | None = None, parent=None) -> None:
         super().__init__(parent)
         self.store = store or ProfileStore()
+        self.secrets: SecretStore = secrets if secrets is not None else WindowsCredentialStore()
         self.settings: Settings | None = None
         self.hwnd: int | None = None
         self.title = ""
@@ -203,7 +188,7 @@ class OverlayController(QObject):
         self.translator: Translator | None = None
         self.cache: TranslationCache | None = None
         self.cache_path: Path | None = None
-        self._engines: dict[str, RapidOcrEngine] = {}
+        self._engines: dict[tuple[str, bool], RapidOcrEngine] = {}  # by (language, gpu)
         self._selector: AreaSelector | None = None
         self._selection_hwnd: int | None = None
 
@@ -234,16 +219,20 @@ class OverlayController(QObject):
             info = find_window(settings.window_match)
         return (info.hwnd, info.title) if info else None
 
-    def engine(self, lang: str, frame_w: int = 1280, frame_h: int = 720) -> RapidOcrEngine:
-        engine = self._engines.get(lang)
+    def engine(self, lang: str, gpu: bool, frame_w: int = 1280, frame_h: int = 720) -> RapidOcrEngine:
+        """One warmed-up OCR engine per language and device, kept for the
+        life of the controller (loading takes a second or two)."""
+        engine = self._engines.get((lang, gpu))
         if engine is None:
-            self._say(f"loading OCR model ({lang})... first use downloads it")
-            engine = RapidOcrEngine(lang=lang, model_root_dir=str(self.store.models_dir / "ocr"))
+            device = "GPU" if gpu else "CPU"
+            self._say(f"loading OCR model ({lang}, {device})... first use downloads it")
+            engine = RapidOcrEngine(lang=lang, use_dml=gpu, model_root_dir=str(self.store.models_dir / "ocr"))
             engine.warm_up(frame_w, frame_h)
-            self._engines[lang] = engine
+            self._engines[(lang, gpu)] = engine
         return engine
 
     def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> bool:
+        # 1. The window.
         if self.running:
             self.stop()
         resolved = self.resolve_window(settings, hwnd, wait)
@@ -254,12 +243,13 @@ class OverlayController(QObject):
         self.settings = settings.copy()
         game = settings.game or self.title or "game"
 
-        if settings.translator == "claude" and not ensure_anthropic_credentials():
-            self._say("no Anthropic credentials: set ANTHROPIC_API_KEY in your user environment variables")
+        # 2. The translators: the main one and the optional draft.
+        if settings.translator == "claude" and not has_anthropic_credentials(self.secrets):
+            self._say("no Anthropic key: enter one in Settings > Translation")
             return False
         try:
-            self.translator = build_translator(settings, game, self.store)
-            draft = build_draft_translator(settings, self.store)
+            self.translator = build_translator(settings, game, self.store, self.secrets)
+            draft = build_draft_translator(settings, self.store, self.secrets)
         except (OSError, ValueError, RuntimeError) as exc:
             self._say(f"translator setup failed: {exc}")
             return False
@@ -267,9 +257,11 @@ class OverlayController(QObject):
             if getattr(translator, "kind", None):
                 self._say(f"offline model: {translator.kind} ({translator.model_dir})")  # type: ignore[union-attr]
 
+        # 3. The translation service, the OCR engine, the overlay window and the
+        #    pipeline thread that connects them.
         frame, client = capture_area(self.hwnd, settings.include_frame)
         self.service = self._build_service(settings, game, draft)
-        engine = self.engine(settings.lang, frame[2], frame[3])
+        engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3])
         self.overlay = OverlayWindow(
             self.hwnd,
             hide_when_unfocused=settings.hide_when_unfocused,
@@ -281,6 +273,7 @@ class OverlayController(QObject):
         self.worker.status.connect(self._say)
         self.overlay.target_lost.connect(self._on_target_lost)
 
+        # 4. Go.
         self.overlay.start()
         self.worker.start()
         self.running_changed.emit(True)

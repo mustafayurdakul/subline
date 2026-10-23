@@ -180,13 +180,16 @@ class BlockTracker:
         """Feed one frame's OCR lines. `scanned` is the frame region that was
         read; blocks outside it are left untouched (neither matched nor
         counted missing). None means the whole frame. Returns the live blocks."""
+        # 1. This frame's lines become candidate blocks; only known blocks inside
+        #    the read region take part in matching.
         groups = group_lines(lines, self.gap_factor)
         group_boxes = [union([line.bbox for line in group]) for group in groups]
         candidates = [b for b in self.blocks if scanned is None or intersects(b.bbox, scanned)]
         prior_boxes = [b.bbox for b in self.blocks]
 
-        # Match groups to blocks by IoU, or when one box lies mostly inside
-        # the other (the detector split or merged a line between frames).
+        # 2. Score every (group, block) pair by overlap, or by containment when
+        #    one box lies mostly inside the other (the detector split or merged
+        #    a line between frames).
         pairs: list[tuple[float, int, TextBlock]] = []
         for index, box in enumerate(group_boxes):
             for block in candidates:
@@ -197,6 +200,7 @@ class BlockTracker:
                     pairs.append((score, index, block))
         pairs.sort(key=lambda pair: -pair[0])
 
+        # 3. Greedy one-to-one assignment, best pair first; a match refreshes the block.
         matched_groups: set[int] = set()
         matched_blocks: set[int] = set()
         for _score, index, block in pairs:
@@ -206,13 +210,15 @@ class BlockTracker:
             matched_blocks.add(block.id)
             self._refresh(block, groups[index], group_boxes[index])
 
+        # 4. Known blocks that were in the read region but not seen age one frame;
+        #    after max_missing frames they are dropped.
         for block in candidates:
             if block.id not in matched_blocks:
                 block.missing_frames += 1
         self.blocks = [b for b in self.blocks if b.missing_frames <= self.max_missing]
 
-        # Unmatched groups become new blocks, unless they are a fragment of a
-        # block that exists (or existed a moment ago at that spot).
+        # 5. Unmatched groups become new blocks, unless they are a fragment of a
+        #    block that exists (or existed a moment ago at that spot).
         for index, group in enumerate(groups):
             if index in matched_groups:
                 continue
@@ -252,6 +258,7 @@ class BlockTracker:
         block.confidence = min(line.confidence for line in group)
         block.missing_frames = 0
 
+        # Same text as before (within OCR jitter): one frame more stable.
         if text_similarity(text, block.text) >= self.same_text_ratio:
             block.stable_frames += 1
             block.pending_text = None
@@ -262,6 +269,7 @@ class BlockTracker:
                 block.bbox = bbox
             return
 
+        # Different text: count the frames in a row this new reading has been seen.
         if block.pending_text is not None and text_similarity(text, block.pending_text) >= self.same_text_ratio:
             block.pending_frames += 1
         else:
@@ -270,6 +278,7 @@ class BlockTracker:
         block.translation = None
         block.draft = False
 
+        # Seen often enough: the new reading replaces the old one.
         if block.pending_frames >= self.confirm_frames:
             block.text = block.pending_text
             block.stable_frames = block.pending_frames

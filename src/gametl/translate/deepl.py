@@ -3,8 +3,9 @@ languages including Turkish, free tier of 500k characters a month with an
 API key from deepl.com. Usable as the main translator or as the draft tier
 in front of Claude.
 
-Key: the DEEPL_AUTH_KEY environment variable. Keys ending in ":fx" are free
-tier and go to the free endpoint.
+Key: handed in by the app (settings window, Credential Manager) or the
+DEEPL_AUTH_KEY environment variable. Keys ending in ":fx" are free tier and
+go to the free endpoint.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ class DeepLTranslator:
     def __init__(self, auth_key: str | None = None, timeout: float = 15.0, session: Any = None) -> None:
         self.auth_key = auth_key or os.environ.get("DEEPL_AUTH_KEY") or ""
         if not self.auth_key:
-            raise TranslationError("DeepL needs an API key in the DEEPL_AUTH_KEY environment variable")
+            raise TranslationError("DeepL needs an API key: enter it in Settings > Translation")
         self.url = FREE_URL if self.auth_key.endswith(":fx") else PRO_URL
         self.timeout = timeout
         if session is None:

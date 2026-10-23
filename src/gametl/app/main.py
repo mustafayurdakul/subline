@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     lang.add_argument("--lang", help="OCR model language (en, ch, japan, korean, de, ...); default en")
     lang.add_argument("--source-lang", help="source language for the translator; default: same as --lang")
     lang.add_argument("--target-lang", help="target language code; default tr")
+    lang.add_argument("--ocr-gpu", action="store_true", default=None, help="run OCR on the GPU (DirectML)")
 
     tr = p.add_argument_group("translation")
     tr.add_argument("--translator", choices=["claude", "deepl", "offline", "uppercase", "echo", "verbose"])
@@ -150,6 +151,7 @@ _FLAG_OPTIONS = {
     "no_hide_unfocused": ("hide_when_unfocused", False),
     "capturable": ("exclude_from_capture", False),
     "debug": ("debug", True),
+    "ocr_gpu": ("ocr_gpu", True),
 }
 
 

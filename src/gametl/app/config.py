@@ -24,6 +24,11 @@ DEFAULT_HOTKEYS: dict[str, str] = {
     "settings": "ctrl+shift+s",  # open the settings window
 }
 
+# OCR sometimes reads a number or a symbol out of background detail; a line
+# with no letter in any script is never a subtitle. \W matches non-word
+# characters, \d digits, _ the one word character that is not a letter.
+NO_LETTERS_PATTERN = r"^[\W\d_]*$"
+
 
 @dataclass
 class Settings:
@@ -42,6 +47,7 @@ class Settings:
     subtitle_hide_source: bool = True  # cover the original line when the subtitle is drawn elsewhere
     # languages and OCR
     lang: str = "en"  # OCR model language
+    ocr_gpu: bool = False  # run OCR on the GPU through DirectML (any DirectX 12 card)
     source_lang: str = ""  # translator source; default: same as lang
     target_lang: str = "tr"
     # translation
@@ -58,7 +64,7 @@ class Settings:
     style: str = "auto"
     font: str = "Segoe UI"
     ignore_zones: list[str] = field(default_factory=list)
-    ignore_patterns: list[str] = field(default_factory=list)
+    ignore_patterns: list[str] = field(default_factory=lambda: [NO_LETTERS_PATTERN])
     # pipeline
     fps: float = 10.0
     full_scan_every: int = 0  # with a zone: also sweep the rest of the area every N frames (0 = never)

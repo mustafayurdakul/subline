@@ -78,6 +78,7 @@ class AreaSelector(QWidget):
         if self._origin is None or self._current is None:
             return None
         rect = QRect(self._origin, self._current).normalized()
+        # Mirrored: the far edge sits as far from the centre line as the near one.
         if self.mirror_x:
             half = max(abs(rect.left() - self.center_x), abs(rect.right() + 1 - self.center_x))
             rect = QRect(self.center_x - half, rect.top(), 2 * half, rect.height())

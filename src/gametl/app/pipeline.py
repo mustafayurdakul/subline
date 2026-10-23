@@ -250,6 +250,8 @@ class PipelineThread(QThread):
                 pill=self.cfg.subtitle_pill,
                 hide_source=self.cfg.subtitle_hide_source,
             )
+        # In-place mode: patch the original out in its own colours, or use a pill
+        # where a flat patch would show (busy background, low contrast).
         style = self.cfg.style
         if style == "auto":
             busy = memory.busy(block.bbox, default=block.busy)

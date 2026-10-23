@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from gametl.app.config import NO_LETTERS_PATTERN
 from gametl.ocr.base import TextLine
 from gametl.tracking.filters import LineFilter
 
@@ -30,3 +31,10 @@ def test_patterns_drop_matching_text() -> None:
     timer = line("12:45", 0, 0, 50, 20)
     prompt = line("Press A to continue", 0, 0, 50, 20)
     assert f.apply([keep, timer, prompt]) == [keep]
+
+
+def test_default_pattern_drops_lines_without_letters() -> None:
+    f = LineFilter.compile(patterns=[NO_LETTERS_PATTERN])
+    dropped = [line("12:45", 0, 0, 50, 20), line("87/100", 0, 0, 50, 20), line("- -", 0, 0, 50, 20)]
+    kept = [line("Press A", 0, 0, 50, 20), line("5 dakika", 0, 0, 50, 20), line("こんにちは", 0, 0, 50, 20)]
+    assert f.apply(dropped + kept) == kept

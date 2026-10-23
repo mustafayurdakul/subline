@@ -122,7 +122,7 @@ class TrayApp(QObject):
 
     def open_settings(self) -> None:
         if self.dialog is None:
-            self.dialog = SettingsDialog(self.settings, self.store)
+            self.dialog = SettingsDialog(self.settings, self.store, self.controller.secrets)
             self.dialog.applied.connect(self.apply)
             self.dialog.profile_saved.connect(self._on_profile_saved)
             self.dialog.select_area_requested.connect(self._select_area_from_dialog)
@@ -143,6 +143,7 @@ class TrayApp(QObject):
         self.controller.start(settings, hwnd)
 
     def apply_hotkeys(self, settings: Settings) -> None:
+        """Register every hotkey afresh; a combination another program holds is reported, not fatal."""
         self.hotkeys.unregister_all()
         bindings = {
             "toggle": self.toggle,

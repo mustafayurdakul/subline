@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gametl.app.config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
+from gametl.app.config import DEFAULT_HOTKEYS, NO_LETTERS_PATTERN, ProfileStore, Settings, slug
 
 
 def test_settings_round_trip_and_unknown_keys_ignored() -> None:
@@ -24,6 +24,13 @@ def test_hotkeys_fill_in_defaults() -> None:
 def test_zone_only_is_the_default() -> None:
     assert Settings().full_scan_every == 0
     assert Settings().roi == ""
+    assert Settings().ignore_patterns == [NO_LETTERS_PATTERN]  # drops OCR phantoms such as a stray digit
+    assert Settings().ocr_gpu is False
+
+
+def test_saved_profiles_keep_their_own_patterns() -> None:
+    assert Settings.from_dict({"ignore_patterns": []}).ignore_patterns == []
+    assert Settings.from_dict({}).ignore_patterns == [NO_LETTERS_PATTERN]
 
 
 def test_effective_source_lang() -> None:

@@ -8,7 +8,7 @@ dependencies = [
     # capture and OCR
     "windows-capture",
     "rapidocr>=3.0",
-    "onnxruntime>=1.19",
+    "onnxruntime-directml>=1.19",  # CPU and DirectML (any DirectX 12 GPU) providers in one package
     "opencv-python-headless>=4.9",
     "numpy",
     "pillow>=10",
@@ -20,9 +20,6 @@ dependencies = [
     "ctranslate2>=4.0",
     "sentencepiece>=0.2",
 ]
-
-# GPU OCR (any vendor, through DirectML) is opt-in and conflicts with the CPU
-# onnxruntime package: `uv pip uninstall onnxruntime && uv pip install onnxruntime-directml`.
 
 [project.scripts]
 gametl = "gametl.app.main:main"

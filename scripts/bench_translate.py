@@ -12,7 +12,7 @@ import statistics
 import sys
 import time
 
-from gametl.app.controller import ensure_anthropic_credentials
+from gametl.app.credentials import anthropic_api_key, has_anthropic_credentials
 from gametl.translate.base import TranslationRequest
 from gametl.translate.claude import ClaudeTranslator, estimate_cost_usd
 
@@ -37,7 +37,7 @@ def main() -> int:
     p.add_argument("--configs", nargs="*", default=list(CONFIGS), choices=list(CONFIGS))
     args = p.parse_args()
 
-    if not ensure_anthropic_credentials():
+    if not has_anthropic_credentials():
         print("no Anthropic credentials")
         return 2
 
@@ -45,7 +45,13 @@ def main() -> int:
     for name in args.configs:
         cfg = CONFIGS[name]
         translator = ClaudeTranslator(
-            model=args.model, effort=args.effort, game="Fake Game", source_lang="en", target_lang="tr", **cfg
+            model=args.model,
+            effort=args.effort,
+            game="Fake Game",
+            source_lang="en",
+            target_lang="tr",
+            api_key=anthropic_api_key(),
+            **cfg,
         )
         latencies: list[float] = []
         print(f"== {name} ({args.model}, effort {args.effort})")

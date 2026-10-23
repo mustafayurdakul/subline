@@ -101,6 +101,7 @@ class TranslationService:
         batch: list[str] = []
         draft_batch: list[str] = []
         with self._lock:
+            # Per text: does it need a draft request, a final request, both, or neither?
             seen: set[str] = set()
             for text in texts:
                 key = self.cache.key(text)
@@ -121,6 +122,7 @@ class TranslationService:
                 if numbers:
                     self._inflight_templates.add(template)
                 batch.append(text)
+            # One request per tier. The draft goes without context: speed over consistency.
             if draft_batch:
                 self._futures.append(self._pool.submit(self._run, "draft", draft_batch, []))
             if batch:

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from gametl.app.config import ProfileStore, slug
-from gametl.app.controller import ensure_anthropic_credentials
+from gametl.app.credentials import anthropic_api_key, has_anthropic_credentials
 from gametl.translate.cache import TranslationCache
 from gametl.translate.claude import ClaudeTranslator
 from gametl.translate.pretranslate import BatchJob, load_lines, pretranslate_sync, submit_batch, wait_for_batch
@@ -45,8 +45,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.resume and (not args.script or not args.game):
         p.error("a script file and --game are required (or --resume JOBFILE)")
-    if not ensure_anthropic_credentials():
-        say("no Anthropic credentials: set ANTHROPIC_API_KEY in your user environment variables")
+    if not has_anthropic_credentials():
+        say("no Anthropic key: enter one in the app (Settings > Translation) or set ANTHROPIC_API_KEY")
         return 2
 
     store = ProfileStore(args.data_dir)
@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         tone=args.tone,
         source_lang=args.source_lang,
         target_lang=args.target_lang,
+        api_key=anthropic_api_key(),
     )
     say(f"{len(lines)} lines from {args.script}; cache {cache_path} ({len(cache)} entries)")
 

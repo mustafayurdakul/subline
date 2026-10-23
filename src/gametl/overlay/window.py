@@ -299,6 +299,7 @@ class OverlayWindow(QWidget):
         the free room when the translation needs more lines."""
         layout = self.layout_for(block)
         x0, y0, x1, y1 = block.bbox
+        # Extra lines push the box up or down into the free room reported by the pipeline.
         up, down = _split_growth(max(0, layout.height - (y1 - y0)), block.room_above, block.room_below)
         top, bottom = y0 - up, y1 + down
         rect = _padded((x0, top, x1, bottom), pad_x, pad)
@@ -335,6 +336,7 @@ class OverlayWindow(QWidget):
         font_px = block.font_px or source_font_px(y1 - y0, block.source_lines)
         margin = max(12, font_px // 2)
         width = max(50, (zx1 - zx0) - 2 * margin)
+        # Lay the text out at the fixed size, wrapping within the zone when it is long.
         key = ("subtitle", tuple(block.lines), width, font_px, zy1 - zy0)
         layout = self._cached_layout(
             key,
@@ -351,9 +353,12 @@ class OverlayWindow(QWidget):
         # metrics_at registers the font even when the wrapper never measured (a one-word line).
         metrics = self.metrics_at(layout.font_px)
         text_w = min(width, max(metrics.horizontalAdvance(line) for line in layout.lines))
+        # Where the text goes, and the pill around it.
         rect = subtitle_rect(block.zone, (y0 + y1) // 2, text_w, layout.height, block.position, margin)  # type: ignore[arg-type]
         pill = rect.adjusted(-font_px // 2, -font_px // 5, font_px // 2, font_px // 5)
 
+        # Background: one shape when the pill overlaps the source line, otherwise a
+        # band over the source line plus the pill.
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(PILL_COLOR)
         if block.pill and pill.intersects(source):

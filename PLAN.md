@@ -884,3 +884,39 @@ A review of the whole codebase with no functional change intended:
 - **README**: rewritten around how the app is used today (area selection,
   subtitle mode, which translator to pick, the ignore pattern for phantom
   numbers), with development notes at the end.
+
+## 22. Keys in the app, default ignore pattern, GPU OCR (2026-10-23)
+
+- **API keys in the settings window** (`app/credentials.py`): the
+  Translation tab has a DeepL and an Anthropic key field (password echo,
+  Save and Clear buttons, a status line that says where the key comes from
+  and never shows it). Keys go into Windows Credential Manager through the
+  Win32 CredWrite/CredRead functions (no extra package), under
+  `gametl/<NAME>`; profile files never contain them. Lookup order is
+  Credential Manager, then the process environment, then the user
+  environment in the registry, so keys set the old way keep working. The
+  Claude backend takes the key as a parameter instead of relying on the
+  SDK's environment lookup.
+- **Default ignore pattern**: new profiles start with `^[\W\d_]*$`, which
+  drops any OCR line without a letter in any script (the phantom numbers
+  seen in play). Profiles that saved an empty list keep it.
+- **GPU OCR through DirectML**: the dependency is now
+  `onnxruntime-directml`, which ships the CPU and DirectML providers in one
+  package (rapidocr does not pin the CPU package, so nothing conflicts);
+  the "run OCR on the GPU" switch (`ocr_gpu`, `--ocr-gpu`) puts the
+  DirectML provider first and rapidocr falls back to the CPU with a warning
+  where DirectML is unavailable. Measured on this machine (RTX 3080 Ti,
+  PP-OCRv6 small, median of 8 runs):
+
+  | Region                     | CPU    | DirectML |
+  | -------------------------- | ------ | -------- |
+  | subtitle strip (1282x210)  | 54 ms  | 71 ms    |
+  | full frame (1282x752)      | 204 ms | 105 ms   |
+
+  The GPU halves a full-frame read but loses on a small strip, where the
+  dispatch overhead outweighs the work, so the default stays CPU and the
+  tooltip says when to switch.
+- **Readability**: short step comments in the dense functions (tracker
+  update, text fitting, the translation service, the pipeline frame step,
+  the subtitle painter) and a "How it fits together" walkthrough in the
+  README.

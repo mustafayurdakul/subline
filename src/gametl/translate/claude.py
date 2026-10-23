@@ -99,6 +99,7 @@ class ClaudeTranslator:
         max_tokens: int = 2048,
         timeout: float = 20.0,
         structured: bool = False,  # True: server-side structured output (measured ~0.5 s slower per call)
+        api_key: str | None = None,  # None: the SDK reads ANTHROPIC_API_KEY itself
         client: Any = None,
     ) -> None:
         self.model = model
@@ -119,7 +120,7 @@ class ClaudeTranslator:
         if client is None:
             import anthropic
 
-            client = anthropic.Anthropic(timeout=timeout, max_retries=1)
+            client = anthropic.Anthropic(api_key=api_key, timeout=timeout, max_retries=1)
         self._client = client
 
     # -- prompt ----------------------------------------------------------------
@@ -203,6 +204,7 @@ class ClaudeTranslator:
         source_lang = request.source_lang or self.source_lang
         target_lang = request.target_lang or self.target_lang
 
+        # The request: cached system prompt, one user message with the items.
         kwargs: dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -230,6 +232,7 @@ class ClaudeTranslator:
                 raise TranslationError(f"{type(exc).__name__}: {exc}") from exc
             raise
 
+        # Token accounting for the cost estimate, then the stop reasons that mean failure.
         self.calls += 1
         self.last_usage = usage = getattr(response, "usage", None)
         if usage is not None:
@@ -251,6 +254,7 @@ class ClaudeTranslator:
         else:
             batch = self._parse_text_json(response)
 
+        # Back into input order; a missing or blank item stays None (retried later).
         out: list[str | None] = [None] * len(request.texts)
         for item in batch.items:
             if 0 <= item.id < len(out) and item.text.strip():
