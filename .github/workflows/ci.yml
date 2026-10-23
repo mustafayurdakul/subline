@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync
+      - name: Lint and format
+        run: |
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+      - name: Tests
+        # The overlay, selector, settings-window and hotkey tests need an
+        # interactive desktop session, which hosted runners do not provide.
+        run: >
+          uv run pytest -q
+          --ignore=tests/test_overlay_window.py
+          --ignore=tests/test_selector.py
+          --ignore=tests/test_settings_dialog.py
+          --ignore=tests/test_hotkeys.py

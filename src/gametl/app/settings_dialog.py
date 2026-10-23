@@ -154,6 +154,8 @@ class SettingsDialog(QDialog):
         form.addRow("", self.include_frame)
         self.hide_when_unfocused = QCheckBox("hide the overlay when the game is not in front")
         form.addRow("", self.hide_when_unfocused)
+        self.exclude_from_capture = QCheckBox("keep the overlay out of screen recordings, streams and screenshots")
+        form.addRow("", self.exclude_from_capture)
         self.refresh_windows()
         return page
 
@@ -380,6 +382,7 @@ class SettingsDialog(QDialog):
         self.ignore_patterns.setPlainText("\n".join(s.ignore_patterns))
         self.include_frame.setChecked(s.include_frame)
         self.hide_when_unfocused.setChecked(s.hide_when_unfocused)
+        self.exclude_from_capture.setChecked(s.exclude_from_capture)
         self.lang.setEditText(s.lang)
         self.ocr_gpu.setChecked(s.ocr_gpu)
         self.source_lang.setText(s.source_lang)
@@ -415,6 +418,7 @@ class SettingsDialog(QDialog):
         s.ignore_patterns = _lines(self.ignore_patterns)
         s.include_frame = self.include_frame.isChecked()
         s.hide_when_unfocused = self.hide_when_unfocused.isChecked()
+        s.exclude_from_capture = self.exclude_from_capture.isChecked()
         s.lang = self.lang.currentText().strip() or "en"
         s.ocr_gpu = self.ocr_gpu.isChecked()
         s.source_lang = self.source_lang.text().strip()

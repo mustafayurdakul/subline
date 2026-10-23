@@ -50,6 +50,7 @@ def test_dialog_round_trips_settings(qapp: QApplication, tmp_path: Path) -> None
         font="Arial",
         fps=8.0,
         hide_when_unfocused=False,
+        exclude_from_capture=True,
         hotkeys={"toggle": "ctrl+alt+t"},
     )
     dialog = SettingsDialog(original, store, MemorySecretStore())
@@ -89,7 +90,9 @@ def test_keys_go_to_the_secret_store_not_the_profile(
 
 def test_cli_options_override_profile_only_when_given() -> None:
     base = Settings(window_match="Fake Game", target_lang="de", translator="uppercase", fps=5.0)
-    args = build_parser().parse_args(["--target-lang", "tr", "--ignore", "0,0,1,0.1", "--no-hide-unfocused"])
+    args = build_parser().parse_args(
+        ["--target-lang", "tr", "--ignore", "0,0,1,0.1", "--no-hide-unfocused", "--exclude-from-capture"]
+    )
     s = settings_from_args(args, base)
     assert s.window_match == "Fake Game"  # kept from the profile
     assert s.translator == "uppercase"

@@ -920,3 +920,25 @@ A review of the whole codebase with no functional change intended:
   update, text fitting, the translation service, the pipeline frame step,
   the subtitle painter) and a "How it fits together" walkthrough in the
   README.
+
+## 23. Ready for GitHub (2026-10-23)
+
+- The user's Alan Wake 2 recording showed only the game's English
+  subtitles: the overlay excluded itself from screen capture by default
+  (`exclude_from_capture`), so window-capture recorders never saw it. The
+  exclusion is now a checkbox on the Game tab and off by default, so
+  recordings, streams and screenshots include the translations
+  (`--exclude-from-capture` turns it on). Window-capture recorders still
+  record the game window alone; a display capture records both.
+- `scripts/render_demo.py` renders the overlay onto a recorded video with
+  the live app's own pipeline (OCR, tracking, translation service, subtitle
+  painter): the pipeline's frame step is now split into `track_frame()` and
+  `render_blocks()`, and the overlay exposes `paint_blocks()` for any paint
+  device. The README demo (`docs/demo.gif`) is a clip of that recording
+  rendered this way with DeepL; the tool also lets a game be tried from a
+  recording.
+- Repository: MIT licence, project metadata in `pyproject.toml`, a GitHub
+  Actions workflow (ruff, format check, tests minus the four that need an
+  interactive desktop), ignore rules for caches and logs, README rewritten
+  for a first-time reader. The tracked files contain no keys or
+  machine-specific paths.

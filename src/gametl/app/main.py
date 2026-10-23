@@ -103,7 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="keep the overlay up when the game is not in front",
     )
     run.add_argument(
-        "--capturable", action="store_true", default=None, help="do not exclude the overlay from screen capture"
+        "--exclude-from-capture",
+        action="store_true",
+        default=None,
+        help="keep the overlay out of screen recordings, streams and screenshots",
     )
     run.add_argument("--run-for", type=float, default=0.0, help="quit after N seconds (0 = until the window closes)")
     run.add_argument("--screenshot", help="with --run-for: save a screenshot of the game area before quitting")
@@ -149,7 +152,7 @@ _FLAG_OPTIONS = {
     "structured": ("structured", True),
     "no_cache_file": ("use_cache_file", False),
     "no_hide_unfocused": ("hide_when_unfocused", False),
-    "capturable": ("exclude_from_capture", False),
+    "exclude_from_capture": ("exclude_from_capture", True),
     "debug": ("debug", True),
     "ocr_gpu": ("ocr_gpu", True),
 }

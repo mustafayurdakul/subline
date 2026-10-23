@@ -71,7 +71,7 @@ class Settings:
     stable_frames: int = 1
     max_missing: int = 3
     hide_when_unfocused: bool = True
-    exclude_from_capture: bool = True
+    exclude_from_capture: bool = False  # hide the overlay from screen recordings, streams and screenshots
     # app
     hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
     # debugging (command line only)

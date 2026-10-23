@@ -2,9 +2,11 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
 out/
 *.egg-info/
 dist/
 dist-*/
 build/
 *.spec.bak
+*.log

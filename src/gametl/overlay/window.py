@@ -213,8 +213,7 @@ class OverlayWindow(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         try:
-            for block in self._blocks:
-                self._paint_block(painter, block)
+            self.paint_blocks(painter, self._blocks)
         except Exception:
             # A paint bug must never leave the painter open: Qt faults later if it does.
             self.paint_errors += 1
@@ -279,6 +278,11 @@ class OverlayWindow(QWidget):
         )
 
     # -- painting ----------------------------------------------------------------
+
+    def paint_blocks(self, p: QPainter, blocks: list[RenderBlock]) -> None:
+        """Draw blocks with `p`, which may target this window or any image."""
+        for block in blocks:
+            self._paint_block(p, block)
 
     def _paint_block(self, p: QPainter, block: RenderBlock) -> None:
         pad = self.padding

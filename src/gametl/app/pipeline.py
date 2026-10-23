@@ -119,22 +119,13 @@ class PipelineThread(QThread):
         self.blocks_ready.emit([])
 
     def _process(self, frame: Frame) -> list[RenderBlock]:
-        """OCR one frame, update the tracker, fill in translations, and
-        return what the overlay should draw."""
+        """One frame: OCR and tracking, then translations and what to draw."""
         cfg = self.cfg
-        self.frames += 1
         t0 = time.perf_counter()
-        lines, scanned = self._ocr(frame)
+        blocks, lines = self.track_frame(frame)
         ocr_ms = (time.perf_counter() - t0) * 1000
         self.ocr_ms.append(ocr_ms)
-
-        if cfg.line_filter:
-            lines = cfg.line_filter.apply(lines)
-        blocks = self._tracker.update(lines, scanned)
-        self._translate_ready(blocks, frame)
-
-        area = cfg.area or (0, 0, frame.width, frame.height)
-        render = [self._to_render(b, blocks, area) for b in blocks if b.translation is not None]
+        render = self.render_blocks(blocks, frame)
         if cfg.debug:
             render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
             detail = " ".join(f"#{b.id}{b.bbox}{'*' if b.translation else ''}" for b in blocks)
@@ -144,6 +135,22 @@ class PipelineThread(QThread):
         if cfg.dump_dir:
             self._dump(frame, lines, blocks)
         return render
+
+    def track_frame(self, frame: Frame) -> tuple[list[TextBlock], list[TextLine]]:
+        """OCR the frame and fold the lines into the tracked blocks. Returns
+        the live blocks and the lines that were read."""
+        self.frames += 1
+        lines, scanned = self._ocr(frame)
+        if self.cfg.line_filter:
+            lines = self.cfg.line_filter.apply(lines)
+        return self._tracker.update(lines, scanned), lines
+
+    def render_blocks(self, blocks: list[TextBlock], frame: Frame) -> list[RenderBlock]:
+        """Fill in the translations that are ready (queueing the rest) and
+        return what the overlay should draw for them."""
+        self._translate_ready(blocks, frame)
+        area = self.cfg.area or (0, 0, frame.width, frame.height)
+        return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None]
 
     def _ocr_region(self, frame: Frame, box: Box) -> list[TextLine]:
         x0, y0, x1, y1 = box
