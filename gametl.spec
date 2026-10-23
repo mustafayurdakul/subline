@@ -4,9 +4,66 @@
 #   gametl-cli.exe  console build of the same entry point, for command-line
 #                   use and `gametl-cli pretranslate ...`
 # Models are not bundled; they download on first run into %APPDATA%\gametl\models.
+# The licence, the third-party notices and every bundled component's licence
+# text go next to the executables (LICENSE, THIRD_PARTY_NOTICES.md, licenses/).
 # Build with:  uv run --group build python scripts/build.py
 
+import re
+from importlib import metadata
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
+
+RUNTIME_DEPENDENCIES = [
+    "windows-capture", "rapidocr", "onnxruntime-directml", "opencv-python-headless", "numpy", "pillow",
+    "pyside6", "anthropic", "requests", "ctranslate2", "sentencepiece", "cryptography",
+]  # fmt: skip
+
+
+def runtime_distributions() -> list[metadata.Distribution]:
+    """Every installed distribution the app depends on, transitively."""
+    seen: dict[str, metadata.Distribution] = {}
+    todo = list(RUNTIME_DEPENDENCIES)
+    while todo:
+        name = todo.pop()
+        key = name.lower().replace("_", "-")
+        if key in seen:
+            continue
+        try:
+            dist = metadata.distribution(name)
+        except metadata.PackageNotFoundError:
+            continue
+        seen[key] = dist
+        for requirement in dist.requires or []:
+            if "extra ==" in requirement:
+                continue  # optional extras are not installed
+            todo.append(re.split(r"[\s;<>=!~\[(]", requirement, maxsplit=1)[0])
+    return sorted(seen.values(), key=lambda d: d.metadata["Name"].lower())
+
+
+def licence_files() -> list[tuple[str, str]]:
+    """(source, destination folder) pairs: each component's licence texts
+    from its dist-info, plus texts the wheels do not carry."""
+    pairs: list[tuple[str, str]] = []
+    for dist in runtime_distributions():
+        folder = f"licenses/{dist.metadata['Name']}"
+        for file in dist.files or []:
+            parts = file.parts
+            if ".dist-info" not in parts[0]:
+                continue
+            name = parts[-1].lower()
+            inside_licenses = len(parts) > 2 and parts[1] == "licenses"
+            if inside_licenses or name.startswith(("license", "licence", "copying", "notice")):
+                pairs.append((str(dist.locate_file(file)), folder))
+    pairs += [
+        (str(path), f"licenses/{path.parent.name}") for path in Path("licenses").glob("*/*")
+    ]
+    onnxruntime = Path(metadata.distribution("onnxruntime-directml").locate_file("onnxruntime"))
+    for name in ("LICENSE", "ThirdPartyNotices.txt"):
+        if (onnxruntime / name).exists():
+            pairs.append((str(onnxruntime / name), "licenses/onnxruntime-directml"))
+    return pairs
+
 
 # config.yaml, default_models.yaml, fonts; not the models a dev install has
 # downloaded into the package (they download on first run into %APPDATA%).
@@ -15,6 +72,8 @@ datas = [
     for src, dst in collect_data_files("rapidocr")
     if "/models/" not in src.replace("\\", "/")
 ]
+datas += [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
+datas += licence_files()
 binaries = collect_dynamic_libs("ctranslate2") + collect_dynamic_libs("onnxruntime")
 hiddenimports = (
     collect_submodules("rapidocr")
@@ -33,7 +92,7 @@ excludes = [
     "PySide6.QtWebSockets", "PySide6.QtDesigner", "PySide6.QtHelp", "PySide6.QtUiTools",
     "PySide6.QtPrintSupport", "PySide6.QtConcurrent", "PySide6.QtDBus", "PySide6.QtGraphs",
     "PySide6.QtSpatialAudio", "PySide6.QtSerialBus",
-]
+]  # fmt: skip
 
 a = Analysis(
     ["src/gametl/app/main.py"],

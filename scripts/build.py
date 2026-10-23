@@ -4,7 +4,8 @@
   uv run --group build python scripts/build.py --clean  # wipe build/ and dist/ first
 
 Generates the app icon from the same drawing the tray uses, runs the spec,
-and prints the size of the result.
+moves the licence files up next to the executables, and prints the size of
+the result.
 """
 
 from __future__ import annotations
@@ -30,6 +31,19 @@ def make_ico(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not icon.pixmap(256, 256).save(str(path), "ICO"):
         raise SystemExit(f"could not write {path}")
+
+
+def relocate_licences(dist: Path) -> None:
+    """PyInstaller puts every data file under _internal; the licence, the
+    notices and the licenses folder belong next to the executables."""
+    for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "licenses"):
+        source, target = dist / "_internal" / name, dist / name
+        if source.exists():
+            if target.is_dir():
+                shutil.rmtree(target)
+            elif target.exists():
+                target.unlink()
+            shutil.move(str(source), str(target))
 
 
 def folder_size(path: Path) -> int:
@@ -65,6 +79,7 @@ def main() -> int:
         return result.returncode
 
     dist = ROOT / args.distpath / "gametl"
+    relocate_licences(dist)
     exes = sorted(p.name for p in dist.glob("*.exe"))
     print(f"\nbuilt {dist}: {folder_size(dist) / 1_000_000:.0f} MB, executables: {', '.join(exes)}")
     return 0

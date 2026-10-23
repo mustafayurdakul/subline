@@ -2,8 +2,10 @@
 
 gametl is proprietary software (see LICENSE). It bundles the open-source
 components below, each of which stays under its own licence. The full
-licence texts ship in the `_internal` folder of the packaged build, in each
-component's `*.dist-info` directory.
+licence texts ship in the `licenses` folder of the packaged build, one
+subfolder per component (the Qt LGPL and GPL texts under `licenses/qt`).
+In the source tree, `licenses/` holds only the texts the wheels do not
+carry; the build collects the rest from the installed packages.
 
 | Component | Used for | Licence |
 | --- | --- | --- |
@@ -31,8 +33,7 @@ PySide6 and Qt are used under the GNU Lesser General Public License,
 version 3. The Qt libraries ship as separate DLL files in the packaged
 build, so you can replace them with your own build of the same Qt version
 by copying it over the files in `_internal/PySide6`. The LGPL text is in
-`_internal/PySide6-*.dist-info`. Qt source code is available from
-[qt.io](https://www.qt.io/).
+`licenses/qt`. Qt source code is available from [qt.io](https://www.qt.io/).
 
 ## Models downloaded at run time (not bundled)
 
