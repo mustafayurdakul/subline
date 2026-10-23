@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from .config import ProfileStore, Settings
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
+from .license import license_status
 from .settings_dialog import SettingsDialog
 
 
@@ -93,6 +94,7 @@ class TrayApp(QObject):
 
         self.apply_hotkeys(settings)
         self._refresh_labels()
+        self._on_status(license_status(controller.secrets, store).text)
         self.tray.show()
 
     # -- actions ---------------------------------------------------------------

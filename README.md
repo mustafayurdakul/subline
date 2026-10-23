@@ -1,5 +1,8 @@
 # gametl
 
+Copyright (c) 2026 Mustafa Yurdakul. Proprietary software: free to try for
+14 days, then a licence key is needed (see [Licence](#licence)).
+
 Real-time translation of in-game subtitles for Windows. gametl captures a
 game window, reads the subtitle area with local OCR, translates each line
 (DeepL, Claude, or an offline model), and draws the translation over the
@@ -42,15 +45,17 @@ pipeline the live overlay uses (see [Recording a demo](#recording-a-demo)).*
 
 ## Install
 
-**Packaged build:** download the release folder, unzip it anywhere and run
-`gametl.exe`. The OCR models (about 20 MB) download on first run into
-`%APPDATA%\gametl\models`. To build the folder yourself from a checkout:
+**Packaged build:** unzip the release folder anywhere and run `gametl.exe`.
+The OCR models (about 20 MB) download on first run into
+`%APPDATA%\gametl\models`. The app runs as a 14-day trial until a licence
+key is entered on the Licence tab. To build the folder yourself from a
+checkout:
 
 ```
 uv run --group build python scripts/build.py
 ```
 
-**From source** (needs [uv](https://docs.astral.sh/uv/)):
+**From source**, for licensed use (needs [uv](https://docs.astral.sh/uv/)):
 
 ```
 git clone https://github.com/YOUR_GITHUB_USER/yurdakuls-gameclt.git
@@ -74,6 +79,11 @@ uv run gametl
    then on, and the area is saved with the profile.
 
 Next time, start the game from the tray's Profiles menu.
+
+The **Licence** tab shows how many trial days are left; paste your key
+there and press Activate. The key is kept in Windows Credential Manager.
+From the command line, `gametl --activate KEY` stores a key and
+`gametl --license-status` prints the state.
 
 Default hotkeys (changeable on the Hotkeys tab):
 
@@ -217,6 +227,8 @@ uv run gametl --window "Fake Game" --translator verbose --roi 0,0.75,1,0.25
 `scripts/spike_capture_ocr.py` captures a window and prints what OCR sees,
 with timings, without the overlay. `scripts/bench_translate.py` measures
 Claude request latency per configuration (real API calls).
+`scripts/make_license.py` issues licence keys; it needs the private signing
+key, which is not in the repository.
 
 ## Acknowledgements
 
@@ -229,6 +241,11 @@ Claude request latency per configuration (real API calls).
 [PySide6](https://doc.qt.io/qtforpython-6/), and the DeepL and Anthropic
 APIs.
 
-## License
+## Licence
 
-[MIT](LICENSE).
+gametl is proprietary software, copyright (c) 2026 Mustafa Yurdakul. It may
+be used for a 14-day trial, after which a licence key bought from the
+author is required; see [LICENSE](LICENSE) for the terms. The open-source
+components it bundles are listed with their licences in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licence enquiries:
+mustafa@yurdakul.dev.

@@ -942,3 +942,23 @@ A review of the whole codebase with no functional change intended:
   interactive desktop), ignore rules for caches and logs, README rewritten
   for a first-time reader. The tracked files contain no keys or
   machine-specific paths.
+
+## 24. Proprietary licence and licence keys (2026-10-23)
+
+Decision: the app is sold, not open-sourced. The MIT licence is replaced by
+an end-user licence (LICENSE), the bundled open-source components are
+listed in THIRD_PARTY_NOTICES.md (Qt under the LGPL, with its libraries
+kept as separate files), and the repository is meant to stay private.
+
+Licence keys (`app/license.py`): a key is the licensee's name, email,
+issue date, optional expiry and seat count, signed with Ed25519; the app
+holds only the public key and verifies offline, so no server is needed and
+forging a key would need the private key. `scripts/make_license.py`
+creates the key pair once and issues keys; the private key lives outside
+the repository (`~/Documents/gametl-license/`) and must be backed up. The
+key goes into Windows Credential Manager through the existing secret
+store. Without a key the app runs a 14-day trial counted from first start,
+stored both in config.json and in Credential Manager (the earliest copy
+wins). The controller refuses to start when neither a valid key nor trial
+days remain; the Licence tab, `--activate` and `--license-status` manage
+the key. The commit authors were rewritten to Mustafa Yurdakul.

@@ -1,21 +1,52 @@
-MIT License
+gametl End-User Licence Agreement
 
-Copyright (c) 2026 Bugs
+Copyright (c) 2026 Mustafa Yurdakul. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software ("gametl") is licensed, not sold. By installing or using it
+you accept these terms.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Trial. You may use gametl without a licence key for 14 days from its
+   first start, to decide whether to buy it.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Licence. A licence key bought from Mustafa Yurdakul grants you a
+   personal, non-exclusive, non-transferable right to install and use
+   gametl on computers you own or control, up to the number of seats the
+   key states, for as long as the key is valid.
+
+3. Restrictions. You may not copy gametl except for backup, distribute,
+   sell, rent, lease, lend or sublicense it, share or publish a licence
+   key, remove or alter its licence check or copyright notices, or use it
+   to build a competing product. Reverse engineering is permitted only to
+   the extent applicable law allows it despite this clause.
+
+4. Source code. If the source code of gametl is made available to you, it
+   is for reading and for building the software for your own licensed use.
+   It is not open source; the restrictions above apply to it as well.
+
+5. Third-party components. gametl bundles open-source components listed in
+   THIRD_PARTY_NOTICES.md. Each remains under its own licence, which may
+   grant you more rights to that component than this agreement does. The
+   Qt libraries (PySide6) are used under the LGPL version 3 and ship as
+   separate files so that you can replace them.
+
+6. Services. Translation through DeepL or Anthropic uses your own account
+   with those services, under their terms. gametl sends them only the text
+   it reads from the game. gametl does not collect or transmit anything
+   else.
+
+7. No warranty. gametl is provided "as is", without warranty of any kind,
+   express or implied, including merchantability, fitness for a particular
+   purpose and non-infringement. OCR and machine translation make
+   mistakes; you use the output at your own risk.
+
+8. Limitation of liability. To the extent permitted by law, Mustafa
+   Yurdakul is not liable for any damages arising from the use of or
+   inability to use gametl, and total liability is limited to the amount
+   you paid for your licence.
+
+9. Termination. This licence ends automatically if you breach it. On
+   termination you must stop using gametl and delete your copies.
+
+10. Changes. Updates to gametl are covered by the terms shipped with them.
+
+Contact: mustafa@yurdakul.dev

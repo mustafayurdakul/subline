@@ -3,12 +3,13 @@ name = "gametl"
 version = "0.1.0"
 description = "Real-time in-game text translation overlay for Windows"
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
-authors = [{ name = "Bugs" }]
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "Mustafa Yurdakul", email = "mustafa@yurdakul.dev" }]
 keywords = ["translation", "overlay", "ocr", "games", "subtitles", "windows"]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "License :: Other/Proprietary License",
     "Environment :: Win32 (MS Windows)",
     "Operating System :: Microsoft :: Windows :: Windows 10",
     "Operating System :: Microsoft :: Windows :: Windows 11",
@@ -31,6 +32,8 @@ dependencies = [
     "requests>=2.31",
     "ctranslate2>=4.0",
     "sentencepiece>=0.2",
+    # licence keys (Ed25519 signatures)
+    "cryptography>=42",
 ]
 
 [project.scripts]

@@ -31,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--download-model", action="store_true", help="download the offline model for the language pair and exit"
     )
+    mode.add_argument("--activate", metavar="KEY", help="store a licence key and exit")
+    mode.add_argument("--license-status", action="store_true", help="print the licence or trial state and exit")
 
     target = p.add_argument_group("target")
     target.add_argument("--window", help="title substring of the game window")
@@ -203,6 +205,23 @@ def utf8_console() -> None:
         faulthandler.enable(all_threads=True)
 
 
+def license_command(key: str | None, store: ProfileStore) -> int:
+    """Store a key when one is given, then print the licence or trial state."""
+    from gametl.app.credentials import WindowsCredentialStore
+    from gametl.app.license import LicenseError, activate, license_status
+
+    secrets = WindowsCredentialStore()
+    if key:
+        try:
+            licence = activate(key, secrets)
+        except LicenseError as exc:
+            print(f"key rejected: {exc}")
+            return 2
+        print(f"activated: licensed to {licence.name}")
+    print(license_status(secrets, store).text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -224,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     store = ProfileStore(args.data_dir)
+    if args.activate or args.license_status:
+        return license_command(args.activate, store)
     profile_name = args.profile
     if profile_name:
         if not store.exists(profile_name):

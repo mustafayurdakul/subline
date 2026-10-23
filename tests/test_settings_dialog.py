@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from gametl.app.config import ProfileStore, Settings
 from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
+from gametl.app.license import make_key
 from gametl.app.main import build_parser, settings_from_args
 from gametl.app.settings_dialog import SettingsDialog
 
@@ -85,6 +86,37 @@ def test_keys_go_to_the_secret_store_not_the_profile(
     dialog.clear_key(DEEPL_KEY)
     assert secrets.get(DEEPL_KEY) is None
     assert dialog.key_labels[DEEPL_KEY].text() == "not set"
+    dialog.close()
+
+
+def test_license_tab_activates_and_removes_a_key(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import date
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    pem = private.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    monkeypatch.setattr("gametl.app.license.PUBLIC_KEY_HEX", private.public_key().public_bytes_raw().hex())
+    secrets = MemorySecretStore()
+    dialog = SettingsDialog(Settings(), ProfileStore(tmp_path), secrets)
+    assert dialog.license_label.text().startswith("trial: ")
+    dialog.license_key.setText("GAMETL-nonsense.x")
+    dialog.activate_license()
+    assert dialog.license_label.text().startswith("key rejected")
+    dialog.license_key.setText(make_key(pem, "Ada Lovelace", "ada@example.com", date.today()))
+    dialog.activate_license()
+    assert dialog.license_label.text() == "licensed to Ada Lovelace"
+    assert dialog.license_key.text() == ""
+    assert secrets.get(
+        "LICENSE_KEY",
+    ).startswith("GAMETL-")
+    dialog.remove_license()
+    assert dialog.license_label.text().startswith("trial: ")
     dialog.close()
 
 

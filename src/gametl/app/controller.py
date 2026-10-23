@@ -29,6 +29,7 @@ from .credentials import (
     has_anthropic_credentials,
     resolve_key,
 )
+from .license import license_status
 from .pipeline import PipelineConfig, PipelineThread
 
 Box = tuple[int, int, int, int]
@@ -232,6 +233,12 @@ class OverlayController(QObject):
         return engine
 
     def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> bool:
+        # 0. The licence (or the trial).
+        licence = license_status(self.secrets, self.store)
+        if not licence.may_run:
+            self._say(f"{licence.text}: enter one in Settings > Licence")
+            return False
+
         # 1. The window.
         if self.running:
             self.stop()

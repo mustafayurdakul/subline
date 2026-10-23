@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ..capture.windows import list_windows
 from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
+from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
 
 # fmt: off
 OCR_LANGS = [
@@ -104,6 +105,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._translation_tab(), "Translation")
         tabs.addTab(self._appearance_tab(), "Appearance")
         tabs.addTab(self._hotkeys_tab(), "Hotkeys")
+        tabs.addTab(self._license_tab(), "Licence")
 
         self.profile_name = QLineEdit()
         self.profile_name.setPlaceholderText("profile name (default: game name)")
@@ -305,6 +307,35 @@ class SettingsDialog(QDialog):
         form.addRow("", QLabel("Combinations like ctrl+shift+t, alt+f5. Changes apply on Apply."))
         return page
 
+    def _license_tab(self) -> QWidget:
+        page = QWidget()
+        column = QVBoxLayout(page)
+        self.license_label = QLabel("")
+        self.license_label.setWordWrap(True)
+        column.addWidget(self.license_label)
+        form = QFormLayout()
+        self.license_key = QLineEdit()
+        self.license_key.setPlaceholderText("paste your licence key (GAMETL-...)")
+        activate_btn = QPushButton("Activate")
+        activate_btn.clicked.connect(self.activate_license)
+        remove_btn = QPushButton("Remove")
+        remove_btn.clicked.connect(self.remove_license)
+        form.addRow("Licence key", _row(self.license_key, activate_btn, remove_btn))
+        column.addLayout(form)
+        note = QLabel(
+            f"Without a key gametl runs for a {TRIAL_DAYS}-day trial. "
+            "The key is kept in Windows Credential Manager, never in a profile."
+        )
+        note.setWordWrap(True)
+        column.addWidget(note)
+        if PURCHASE_URL:
+            link = QLabel(f'<a href="{PURCHASE_URL}">Buy a licence</a>')
+            link.setOpenExternalLinks(True)
+            column.addWidget(link)
+        column.addStretch(1)
+        self._refresh_license_status()
+        return page
+
     # -- actions ---------------------------------------------------------------
 
     def refresh_windows(self) -> None:
@@ -371,6 +402,28 @@ class SettingsDialog(QDialog):
     def _refresh_key_status(self) -> None:
         for name, label in self.key_labels.items():
             label.setText(key_status(name, self.secrets))
+
+    # -- licence ----------------------------------------------------------------
+
+    def activate_license(self) -> None:
+        key = self.license_key.text().strip()
+        if not key:
+            return
+        try:
+            activate(key, self.secrets)
+        except LicenseError as exc:
+            self.license_label.setText(f"key rejected: {exc}")
+            return
+        self.license_key.clear()
+        self._refresh_license_status()
+
+    def remove_license(self) -> None:
+        deactivate(self.secrets)
+        self.license_key.clear()
+        self._refresh_license_status()
+
+    def _refresh_license_status(self) -> None:
+        self.license_label.setText(license_status(self.secrets, self.store).text)
 
     # -- settings <-> widgets -------------------------------------------------------
 
