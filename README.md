@@ -8,10 +8,11 @@ game window, reads the subtitle area with local OCR, translates each line
 (DeepL, Claude, or an offline model), and draws the translation over the
 game in place of the original, about half a second after a line appears.
 
-![Alan Wake 2 with its English subtitles replaced by Turkish ones](docs/demo.gif)
+![Alan Wake 2: the game's English subtitle above, the same moment with gametl's Turkish subtitle below](docs/demo.gif)
 
-*Alan Wake 2, English to Turkish. Rendered from a recording with the same
-pipeline the live overlay uses (see [Recording a demo](#recording-a-demo)).*
+*Alan Wake 2, English to Turkish: the game above, gametl below. Rendered
+from a recording with the same pipeline the live overlay uses (see
+[Recording a demo](#recording-a-demo)).*
 
 ## What it does
 
