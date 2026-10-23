@@ -53,6 +53,8 @@ uv run --group build python scripts/build.py
 **From source** (needs [uv](https://docs.astral.sh/uv/)):
 
 ```
+git clone https://github.com/YOUR_GITHUB_USER/yurdakuls-gameclt.git
+cd yurdakuls-gameclt
 uv python install 3.12
 uv sync
 uv run gametl
