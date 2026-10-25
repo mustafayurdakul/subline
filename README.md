@@ -141,6 +141,12 @@ the one the overlay runs with.
   card. Measured on an RTX 3080 Ti, a full 1280x720 frame drops from 204 ms
   to 105 ms, but a subtitle strip goes from 54 ms to 71 ms, so leave it off
   for a strip and turn it on for large areas.
+- **Skip unchanged frames below** (Appearance tab, `--diff-threshold`): OCR
+  runs only when the read area has changed since the frame last read (mean
+  difference of a small grey thumbnail, 0-255; default 1). A static screen
+  costs no OCR. Lower it if a subtitle change is ever missed; 0 reads every
+  frame. `--autosave-seconds` (default 10) says how soon new translations
+  reach the cache file.
 - **Keep the overlay out of screen recordings** (Game tab): off by default,
   so recordings, streams and screenshots include the translations. Turn it
   on if a capture tool should not see the overlay.

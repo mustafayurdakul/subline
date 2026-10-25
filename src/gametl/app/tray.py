@@ -14,9 +14,9 @@ from .license import license_status
 from .settings_dialog import SettingsDialog
 
 
-def make_icon(running: bool, paused: bool = False) -> QIcon:
-    """A rounded square with a 'T', with a status dot: drawn in code so the
-    app needs no image assets."""
+def make_icon(running: bool, paused: bool = False, starting: bool = False) -> QIcon:
+    """A rounded square with a 'T', with a status dot (green running, amber
+    paused, blue starting): drawn in code so the app needs no image assets."""
     pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
     p = QPainter(pixmap)
@@ -29,9 +29,12 @@ def make_icon(running: bool, paused: bool = False) -> QIcon:
     font.setBold(True)
     p.setFont(font)
     p.drawText(pixmap.rect().adjusted(0, -2, 0, -2), Qt.AlignmentFlag.AlignCenter, "T")
-    if running:
+    if running or starting:
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(250, 200, 60) if paused else QColor(80, 220, 120))
+        if starting:
+            p.setBrush(QColor(80, 160, 250))
+        else:
+            p.setBrush(QColor(250, 200, 60) if paused else QColor(80, 220, 120))
         p.drawEllipse(42, 42, 16, 16)
     p.end()
     return QIcon(pixmap)
@@ -89,6 +92,7 @@ class TrayApp(QObject):
 
         controller.status.connect(self._on_status)
         controller.running_changed.connect(self._on_running)
+        controller.starting_changed.connect(self._on_starting)
         controller.paused_changed.connect(self._on_paused)
         controller.area_selected.connect(self._on_area_selected)
 
@@ -176,7 +180,7 @@ class TrayApp(QObject):
         self._on_status(f"profile {name} loaded")
 
     def quit(self) -> None:
-        self.controller.stop()
+        self.controller.close()
         self.hotkeys.unregister_all()
         self.tray.hide()
         self.app.quit()
@@ -195,6 +199,9 @@ class TrayApp(QObject):
     def _on_running(self, running: bool) -> None:
         self._refresh_labels()
 
+    def _on_starting(self, starting: bool) -> None:
+        self._refresh_labels()
+
     def _on_paused(self, paused: bool) -> None:
         self.pause_action.setChecked(paused)
         self._refresh_labels()
@@ -204,11 +211,13 @@ class TrayApp(QObject):
         self._on_status(f"profile {name} saved")
 
     def _refresh_labels(self) -> None:
-        running = self.controller.running
-        self.start_action.setText("Stop overlay" if running else "Start overlay")
+        running, starting = self.controller.running, self.controller.starting
+        # While the models load on their thread, the same action abandons the start.
+        label = "Cancel start" if starting else ("Stop overlay" if running else "Start overlay")
+        self.start_action.setText(label)
         self.pause_action.setEnabled(running)
         self.rescan_action.setEnabled(running)
-        self.tray.setIcon(make_icon(running, self.controller.paused))
+        self.tray.setIcon(make_icon(running, self.controller.paused, starting))
 
     def _rebuild_profiles_menu(self) -> None:
         self.profiles_menu.clear()

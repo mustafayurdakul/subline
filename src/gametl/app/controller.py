@@ -236,6 +236,7 @@ class OverlayController(QObject):
 
     status = Signal(str)
     running_changed = Signal(bool)
+    starting_changed = Signal(bool)  # True while start() is being prepared on its thread
     paused_changed = Signal(bool)
     start_failed = Signal(str)
     area_selected = Signal(str)  # zone spec 'x,y,w,h' as fractions of the client area
@@ -322,6 +323,7 @@ class OverlayController(QObject):
             self.stop()
         self._generation += 1
         self._starting = True
+        self.starting_changed.emit(True)
         worker = _StartWorker(self, self._generation, settings.copy(), hwnd, wait)
         worker.progress.connect(self._say)
         worker.prepared.connect(self._on_prepared)
@@ -373,10 +375,16 @@ class OverlayController(QObject):
             raise StartError(f"OCR engine failed to load: {type(exc).__name__}: {exc}") from exc
         return Prepared(generation, hwnd, title, settings, game, translator, draft, engine, config)
 
+    def _settled(self) -> None:
+        """The start in progress has reached its outcome, whichever it is."""
+        if self._starting:
+            self._starting = False
+            self.starting_changed.emit(False)
+
     def _on_prepared(self, prepared: Prepared) -> None:
         if prepared.generation != self._generation or self.running:
             return  # a later start() or stop() superseded this one
-        self._starting = False
+        self._settled()
         try:
             self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
             self.translator = prepared.translator
@@ -410,7 +418,7 @@ class OverlayController(QObject):
     def _on_start_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
             return
-        self._starting = False
+        self._settled()
         self._fail(message)
 
     def _fail(self, message: str) -> None:
@@ -448,6 +456,7 @@ class OverlayController(QObject):
             source_lang=settings.effective_source_lang,
             on_status=self._say,
             draft_translator=draft,
+            autosave_seconds=settings.autosave_seconds,
         )
 
     @staticmethod
@@ -467,6 +476,7 @@ class OverlayController(QObject):
             full_scan_every=settings.full_scan_every,
             stable_frames=settings.stable_frames,
             max_missing=settings.max_missing,
+            diff_threshold=settings.diff_threshold,
             style=settings.style,
             line_filter=LineFilter.compile(ignore_zones, patterns) if (ignore_zones or patterns) else None,
             render=settings.render,
@@ -486,7 +496,7 @@ class OverlayController(QObject):
     def stop(self) -> None:
         """End the session; a start() still being prepared is abandoned."""
         self._generation += 1
-        self._starting = False
+        self._settled()
         worker, overlay, service = self.worker, self.overlay, self.service
         self.worker = None
         if worker is not None:
@@ -502,6 +512,13 @@ class OverlayController(QObject):
         self.running_changed.emit(False)
         self.paused_changed.emit(False)
         self._say("stopped")
+
+    def close(self, wait_ms: int = 5000) -> None:
+        """stop(), then let any start still being prepared run out, so the
+        process does not tear down a thread that is loading a model."""
+        self.stop()
+        for worker in list(self._start_workers):
+            worker.wait(wait_ms)
 
     def toggle(self, settings: Settings) -> None:
         if self.running or self.starting:

@@ -99,6 +99,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stable-frames", type=int)
     run.add_argument("--max-missing", type=int)
     run.add_argument(
+        "--diff-threshold",
+        type=float,
+        metavar="N",
+        help="skip OCR while the read area changes less than N (thumbnail difference, 0-255; default 1; 0 = never)",
+    )
+    run.add_argument(
+        "--autosave-seconds",
+        type=float,
+        metavar="S",
+        help="write new translations to the cache file within S seconds (default 10)",
+    )
+    run.add_argument(
         "--no-hide-unfocused",
         action="store_true",
         default=None,
@@ -139,6 +151,8 @@ _VALUE_OPTIONS = {
     "full_scan_every": "full_scan_every",
     "stable_frames": "stable_frames",
     "max_missing": "max_missing",
+    "diff_threshold": "diff_threshold",
+    "autosave_seconds": "autosave_seconds",
     "render": "render",
     "subtitle_font": "subtitle_font_px",
     "subtitle_color": "subtitle_color",
@@ -319,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rc = app.exec()
     stats = controller.stats_text()
-    controller.stop()
+    controller.close()
     if stats:
         print(stats)
     return rc
