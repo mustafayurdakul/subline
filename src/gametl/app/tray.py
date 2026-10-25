@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Qt, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
+from .cleanup import remove_all_data
 from .config import ProfileStore, Settings
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
@@ -132,6 +133,7 @@ class TrayApp(QObject):
             self.dialog.applied.connect(self.apply)
             self.dialog.profile_saved.connect(self._on_profile_saved)
             self.dialog.select_area_requested.connect(self._select_area_from_dialog)
+            self.dialog.remove_all_data_requested.connect(self.remove_all_data)
         else:
             self.dialog.load_settings(self.settings)
         self.dialog.show()
@@ -178,6 +180,19 @@ class TrayApp(QObject):
         if self.dialog is not None:
             self.dialog.load_settings(self.settings)
         self._on_status(f"profile {name} loaded")
+
+    def remove_all_data(self) -> None:
+        """Wipe everything gametl keeps on this computer, then quit. The
+        settings window has already asked for confirmation."""
+        self.controller.close()
+        self.hotkeys.unregister_all()
+        if self.dialog is not None:
+            self.dialog.close()
+        report = remove_all_data(self.store, self.controller.secrets)
+        if not report.complete:
+            QMessageBox.warning(None, "gametl", "Some data could not be removed:\n" + "\n".join(report.failed))
+        self.tray.hide()
+        self.app.quit()
 
     def quit(self) -> None:
         self.controller.close()
