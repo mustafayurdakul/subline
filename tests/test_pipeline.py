@@ -157,6 +157,107 @@ def test_diff_disabled_reads_every_frame() -> None:
         thread.service.shutdown()
 
 
+def show_text(thread: PipelineThread, engine: FakeEngine, lines: list[TextLine], frames: int = 60):
+    """Make the engine read `lines` and process frames until a translation
+    of the first line's text is drawn; returns the render."""
+    engine.lines = lines
+    wanted = lines[0].text.upper()
+    for _ in range(frames):
+        render = thread._process(frame())
+        if any(wanted in b.lines for b in render):
+            return render
+        time.sleep(0.02)
+    raise AssertionError(f"{wanted!r} never rendered")
+
+
+def test_subtitle_zone_keeps_one_font_size_across_lines_of_different_box_heights() -> None:
+    engine = FakeEngine()
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    try:
+        sizes = []
+        # Boxes 40, 36 and 44 px tall (descenders, none, a tall glyph), then an odd 48 px one.
+        for text, height in (("First line here.", 40), ("Second line.", 36), ("Third one!", 44), ("Fourth.", 48)):
+            (block,) = show_text(thread, engine, [line(text, 300, 30, 700, 30 + height)])
+            sizes.append(block.font_px)
+        assert thread.zone_style.locked and thread.zone_style.line_height == 40
+        assert sizes[2] == sizes[3] == 32  # locked at 0.8 * 40; the 48 px box does not move it
+        assert sizes[0] in (32,) and 28 <= sizes[1] <= 32  # while learning: the running median, never the odd box
+        assert block.position == "bottom" and block.background == "pill"
+    finally:
+        thread.service.shutdown()
+
+
+def test_subtitle_text_colour_is_sampled_unless_set() -> None:
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        assert block.fg == tuple(int(v) for v in frame().image[0, 0][::-1])  # the frame's colour, as RGB
+    finally:
+        thread.service.shutdown()
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0, subtitle_color=(255, 230, 0))
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        assert block.fg == (255, 230, 0)
+    finally:
+        thread.service.shutdown()
+
+
+def test_off_centre_text_in_the_zone_is_not_a_subtitle() -> None:
+    prompt = line("Hold F to open", 20, 30, 220, 60)  # a prompt at the left edge of the strip
+    subtitle = line("Stay close.", 300, 20, 700, 60)  # centred in the 1000 px wide strip
+    engine = FakeEngine([prompt, subtitle])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    try:
+        render = process_until(thread, lambda r: bool(r))
+        for _ in range(5):
+            render = thread._process(frame())
+        assert [b.lines for b in render] == [["STAY CLOSE."]]
+        assert thread.service.stats["items"] == 1  # the prompt was never sent for translation
+    finally:
+        thread.service.shutdown()
+    # Tolerance 0 turns the rule off.
+    engine = FakeEngine([prompt, subtitle])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0, subtitle_center_tolerance=0)
+    try:
+        render = process_until(thread, lambda r: len(r) == 2)
+        assert sorted(b.lines[0] for b in render) == ["HOLD F TO OPEN", "STAY CLOSE."]
+    finally:
+        thread.service.shutdown()
+
+
+def test_text_of_another_size_is_not_a_subtitle_once_the_size_is_known() -> None:
+    engine = FakeEngine()
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    try:
+        for text in ("First line here.", "Second line.", "Third one!"):
+            show_text(thread, engine, [line(text, 300, 30, 700, 70)])  # 40 px lines: the size locks
+        small = line("Objective updated", 350, 10, 650, 24)  # 14 px: HUD text, centred
+        engine.lines = [small]
+        for _ in range(8):
+            render = thread._process(frame())
+            time.sleep(0.02)
+        assert render == []
+        assert not any(b.text == small.text and b.translation for b in thread._tracker.blocks)
+    finally:
+        thread.service.shutdown()
+
+
+def test_short_texts_need_a_second_stable_frame() -> None:
+    # Far enough apart vertically that the tracker keeps them as two blocks.
+    engine = FakeEngine([line("Ok", 450, 2, 550, 22), line("Stay close.", 300, 60, 700, 95)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0, subtitle_size_tolerance=0)
+    try:
+        thread._process(frame())  # first sighting
+        thread._process(frame())  # stable_frames 1: the long line is submitted, the short one is not
+        assert thread.service.stats["items"] == 1
+        thread._process(frame())  # stable_frames 2: now the short one goes too
+        assert thread.service.stats["items"] == 2
+    finally:
+        thread.service.shutdown()
+
+
 def test_rescan_forgets_blocks_and_the_last_thumbnail() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
     thread = pipeline(engine, roi=STRIP)

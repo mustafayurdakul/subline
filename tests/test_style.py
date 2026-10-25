@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gametl.layout.style import StyleMemory
+from gametl.layout.style import StyleMemory, ZoneStyle
 
 
 def test_font_size_uses_the_band_median_once_enough_seen() -> None:
@@ -26,6 +26,35 @@ def test_colors_and_busy_are_majorities() -> None:
     mem.observe(box, 1, (90, 90, 90), (200, 200, 200), True)  # one odd sample
     assert mem.colors(box) == ((12, 11, 10), (250, 250, 250))
     assert mem.busy(box, default=True) is False
+
+
+def test_zone_style_locks_after_a_few_lines_and_holds() -> None:
+    zone = ZoneStyle(lock_after=3, window=6, drift=0.15)
+    white = (255, 255, 255)
+    assert zone.font_px(fallback=30) == 30 and zone.fg is None  # nothing seen: the caller's value
+    zone.observe(40, white)
+    assert zone.font_px(fallback=30) == 32 and not zone.locked  # running median while learning
+    zone.observe(36, (250, 250, 250))
+    zone.observe(44, white)
+    assert zone.locked and zone.line_height == 40
+    assert zone.font_px(fallback=30) == 32
+    assert zone.fg == (250, 250, 255) or zone.fg == (255, 255, 255)
+    # A box with descenders, a two-line block measured per line, a short word: all render at 32 px.
+    for height in (46, 38, 30, 50, 41):
+        zone.observe(height, white)
+        assert zone.font_px(fallback=30) == 32
+
+
+def test_zone_style_follows_a_real_size_change_only_over_a_full_window() -> None:
+    zone = ZoneStyle(lock_after=2, window=4, drift=0.15)
+    for _ in range(2):
+        zone.observe(40, (255, 255, 255))
+    assert zone.line_height == 40
+    zone.observe(60, (255, 255, 255))  # one odd reading: ignored
+    assert zone.line_height == 40
+    for _ in range(3):
+        zone.observe(60, (255, 255, 255))  # the game really changed its size: the window is all 60 now
+    assert zone.line_height == 60
 
 
 def test_other_bands_do_not_mix() -> None:

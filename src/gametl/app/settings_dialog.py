@@ -39,6 +39,7 @@ OCR_LANGS = [
 ]
 # fmt: on
 TRANSLATORS = ["claude", "deepl", "offline", "uppercase", "echo", "verbose"]
+BOTTOM_STRIP = "0,0.75,1,0.25"  # the area preset most games' subtitles fall in
 CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
 HOTKEY_LABELS = {
     "toggle": "Start / stop overlay",
@@ -159,9 +160,15 @@ class SettingsDialog(QDialog):
         self.roi = QLineEdit()
         self.roi.setPlaceholderText("x,y,w,h as fractions, e.g. 0,0.75,1,0.25; empty = whole window")
         select_btn = QPushButton("Select on screen")
-        select_btn.setToolTip("Drag a rectangle over the game (also the Select hotkey)")
+        select_btn.setToolTip(
+            "Drag a rectangle over the game (also the Select hotkey). Arrow keys nudge it, Enter confirms, "
+            "Shift while dragging toggles centring."
+        )
         select_btn.clicked.connect(self.select_area_requested.emit)
-        form.addRow("Area to translate", _row(self.roi, select_btn))
+        self.strip_btn = QPushButton("Bottom strip")
+        self.strip_btn.setToolTip("The bottom quarter of the window, where most games draw subtitles")
+        self.strip_btn.clicked.connect(lambda: self.roi.setText(BOTTOM_STRIP))
+        form.addRow("Area to translate", _row(self.roi, select_btn, self.strip_btn))
         self.ignore_zones = QPlainTextEdit()
         self.ignore_zones.setPlaceholderText("one zone per line, x,y,w,h as fractions of the client area")
         self.ignore_zones.setFixedHeight(70)
@@ -172,6 +179,16 @@ class SettingsDialog(QDialog):
         )
         self.ignore_patterns.setFixedHeight(70)
         form.addRow("Ignore patterns", self.ignore_patterns)
+        self.short_line_confidence = QDoubleSpinBox()
+        self.short_line_confidence.setRange(0.0, 1.0)
+        self.short_line_confidence.setDecimals(2)
+        self.short_line_confidence.setSingleStep(0.05)
+        self.short_line_confidence.setSpecialValueText("off")
+        self.short_line_confidence.setToolTip(
+            "A line of one or two letters is as often an OCR fragment or a HUD glyph as a word; it is kept only "
+            "when OCR is at least this sure of it."
+        )
+        form.addRow("Short lines need OCR confidence", self.short_line_confidence)
         self.include_frame = QCheckBox("read the title bar and window frame too")
         form.addRow("", self.include_frame)
         self.hide_when_unfocused = QCheckBox("hide the overlay when the game is not in front")
@@ -298,20 +315,52 @@ class SettingsDialog(QDialog):
         self.subtitle_font_px = QSpinBox()
         self.subtitle_font_px.setRange(0, 200)
         self.subtitle_font_px.setSpecialValueText("game's own size")
+        self.subtitle_font_px.setToolTip(
+            "0: learned from the game's first subtitle lines and then held for the session"
+        )
         form.addRow("Font size (px)", self.subtitle_font_px)
         self.subtitle_color = QLineEdit()
-        self.subtitle_color.setPlaceholderText("#FFFFFF")
+        self.subtitle_color.setPlaceholderText("empty: the game's own colour, or #RRGGBB")
         form.addRow("Text colour", self.subtitle_color)
+        self.subtitle_bold = QCheckBox("bold text")
+        form.addRow("", self.subtitle_bold)
         self.subtitle_background = QComboBox()
-        self.subtitle_background.addItems(["pill", "none"])
+        self.subtitle_background.addItems(["pill", "shadow", "none"])
+        self.subtitle_background.setToolTip(
+            "pill: a dark box; shadow: a soft drop shadow like the game's own; none: outline"
+        )
         form.addRow("Background", self.subtitle_background)
+        self.subtitle_pill_alpha = QSpinBox()
+        self.subtitle_pill_alpha.setRange(0, 255)
+        form.addRow("Pill opacity (0-255)", self.subtitle_pill_alpha)
         self.subtitle_position = QComboBox()
-        self.subtitle_position.addItems(["source", "bottom", "center"])
-        self.subtitle_position.setToolTip("source: where the game drew the line; bottom / center: of the selected area")
+        self.subtitle_position.addItems(["bottom", "source", "center"])
+        self.subtitle_position.setToolTip(
+            "bottom: a steady baseline at the bottom of the area; source: where the game drew the line; "
+            "center: of the area"
+        )
         form.addRow("Position", self.subtitle_position)
         self.subtitle_hide_source = QCheckBox("hide the original line when the subtitle is drawn elsewhere")
         form.addRow("", self.subtitle_hide_source)
-        self.center_zone = QCheckBox("keep a selected area centred horizontally")
+        self.subtitle_center_tolerance = QSpinBox()
+        self.subtitle_center_tolerance.setRange(0, 50)
+        self.subtitle_center_tolerance.setSuffix(" %")
+        self.subtitle_center_tolerance.setSpecialValueText("off")
+        self.subtitle_center_tolerance.setToolTip(
+            "Only text centred in the area is a subtitle: drop text whose centre is further than this share of "
+            "the area's width from its centre (prompts, objectives). 0 keeps everything."
+        )
+        form.addRow("Only centred text, tolerance", self.subtitle_center_tolerance)
+        self.subtitle_size_tolerance = QSpinBox()
+        self.subtitle_size_tolerance.setRange(0, 100)
+        self.subtitle_size_tolerance.setSuffix(" %")
+        self.subtitle_size_tolerance.setSpecialValueText("off")
+        self.subtitle_size_tolerance.setToolTip(
+            "Only text about the learned subtitle size is a subtitle: drop lines whose height differs more than "
+            "this. 0 keeps everything."
+        )
+        form.addRow("Only subtitle-sized text, tolerance", self.subtitle_size_tolerance)
+        self.center_zone = QCheckBox("keep a selected area centred horizontally (Shift while dragging inverts)")
         form.addRow("", self.center_zone)
         column.addWidget(subtitle)
 
@@ -519,9 +568,14 @@ class SettingsDialog(QDialog):
         self.render.setCurrentText(s.render)
         self.subtitle_font_px.setValue(s.subtitle_font_px)
         self.subtitle_color.setText(s.subtitle_color)
+        self.subtitle_bold.setChecked(s.subtitle_bold)
         self.subtitle_background.setCurrentText(s.subtitle_background)
+        self.subtitle_pill_alpha.setValue(s.subtitle_pill_alpha)
         self.subtitle_position.setCurrentText(s.subtitle_position)
         self.subtitle_hide_source.setChecked(s.subtitle_hide_source)
+        self.subtitle_center_tolerance.setValue(s.subtitle_center_tolerance)
+        self.subtitle_size_tolerance.setValue(s.subtitle_size_tolerance)
+        self.short_line_confidence.setValue(s.short_line_confidence)
         self.center_zone.setChecked(s.center_zone)
         self.font.setText(s.font)
         self.fps.setValue(s.fps)
@@ -557,10 +611,15 @@ class SettingsDialog(QDialog):
         s.style = self.style.currentText()
         s.render = self.render.currentText()
         s.subtitle_font_px = self.subtitle_font_px.value()
-        s.subtitle_color = self.subtitle_color.text().strip() or "#FFFFFF"
+        s.subtitle_color = self.subtitle_color.text().strip()  # empty: the game's own colour
+        s.subtitle_bold = self.subtitle_bold.isChecked()
         s.subtitle_background = self.subtitle_background.currentText()
+        s.subtitle_pill_alpha = self.subtitle_pill_alpha.value()
         s.subtitle_position = self.subtitle_position.currentText()
         s.subtitle_hide_source = self.subtitle_hide_source.isChecked()
+        s.subtitle_center_tolerance = self.subtitle_center_tolerance.value()
+        s.subtitle_size_tolerance = self.subtitle_size_tolerance.value()
+        s.short_line_confidence = round(self.short_line_confidence.value(), 2)
         s.center_zone = self.center_zone.isChecked()
         s.font = self.font.text().strip() or "Segoe UI"
         s.fps = float(self.fps.value())

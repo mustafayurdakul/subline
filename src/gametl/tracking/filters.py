@@ -1,6 +1,7 @@
 """Drop OCR lines the user never wants translated: lines inside ignore zones
-(minimap, HUD corners) and lines matching text patterns (pure numbers,
-timers, button prompts)."""
+(minimap, HUD corners), lines matching text patterns (pure numbers,
+timers, button prompts), and one- or two-letter lines OCR is not sure
+about (fragments of a word, HUD glyphs read as a letter)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..ocr.base import TextLine
+from ..textutil import letter_count
 
 Box = tuple[int, int, int, int]
 
@@ -16,15 +18,22 @@ Box = tuple[int, int, int, int]
 class LineFilter:
     zones: list[Box] = field(default_factory=list)  # frame pixels
     patterns: list[re.Pattern[str]] = field(default_factory=list)
+    # A line of one or two letters is as often an OCR fragment or a HUD glyph
+    # as a word ("No.", "Go!"): it passes only when OCR is sure of it.
+    short_letters: int = 2
+    short_confidence: float = 0.9  # 0 = off
 
     def __bool__(self) -> bool:
-        return bool(self.zones or self.patterns)
+        return bool(self.zones or self.patterns or self.short_confidence > 0)
 
     @staticmethod
-    def compile(zones: list[Box] | None = None, patterns: list[str] | None = None) -> LineFilter:
+    def compile(
+        zones: list[Box] | None = None, patterns: list[str] | None = None, short_confidence: float = 0.9
+    ) -> LineFilter:
         return LineFilter(
             zones=list(zones or []),
             patterns=[re.compile(p, re.IGNORECASE) for p in (patterns or [])],
+            short_confidence=short_confidence,
         )
 
     def ignores(self, line: TextLine) -> bool:
@@ -33,6 +42,12 @@ class LineFilter:
         for zx0, zy0, zx1, zy1 in self.zones:
             if zx0 <= cx < zx1 and zy0 <= cy < zy1:
                 return True
+        if (
+            self.short_confidence > 0
+            and letter_count(line.text) <= self.short_letters
+            and line.confidence < self.short_confidence
+        ):
+            return True
         return any(p.search(line.text) for p in self.patterns)
 
     def apply(self, lines: list[TextLine]) -> list[TextLine]:

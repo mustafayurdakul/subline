@@ -73,3 +73,63 @@ class StyleMemory:
             return default
         votes = sum(1 for s in samples if s.busy)
         return votes * 2 > len(samples)
+
+
+class ZoneStyle:
+    """One style for the whole subtitle zone, locked once enough has been
+    seen.
+
+    Per-band medians still wobble: a one-line box, a two-line box and a line
+    with descenders measure differently, so the size would change from line
+    to line. A subtitle zone has one font, so one line height and one text
+    colour are learned from the first `lock_after` readings and then held.
+    The lock moves only when the median of a full window of later readings
+    drifts by more than `drift` (the game changed its subtitle size), never
+    line by line.
+    """
+
+    def __init__(self, lock_after: int = 3, window: int = 20, drift: float = 0.15) -> None:
+        self.lock_after = lock_after
+        self.drift = drift
+        self._heights: deque[float] = deque(maxlen=window)
+        self._fgs: deque[BGR] = deque(maxlen=window)
+        self.line_height: float | None = None  # the locked value
+        self._fg: BGR | None = None
+
+    @property
+    def locked(self) -> bool:
+        return self.line_height is not None
+
+    def observe(self, line_height: float, fg: BGR) -> None:
+        self._heights.append(line_height)
+        self._fgs.append(fg)
+        current = median(self._heights)
+        if self.line_height is None:
+            if len(self._heights) >= self.lock_after:
+                self.line_height, self._fg = current, self._median_fg()
+        elif (
+            len(self._heights) == self._heights.maxlen
+            and abs(current - self.line_height) > self.drift * self.line_height
+        ):
+            self.line_height, self._fg = current, self._median_fg()
+
+    def _median_fg(self) -> BGR:
+        return tuple(int(median(c[i] for c in self._fgs)) for i in range(3))  # type: ignore[return-value]
+
+    def font_px(self, fallback: int, factor: float = 0.8) -> int:
+        """Font size from the locked line height; before the lock, from the
+        running median of what was seen, else `fallback`."""
+        if self.line_height is not None:
+            height = self.line_height
+        elif self._heights:
+            height = median(self._heights)
+        else:
+            return fallback
+        return max(6, int(height * factor))
+
+    @property
+    def fg(self) -> BGR | None:
+        """The locked text colour, else the median so far, else None."""
+        if self._fg is not None:
+            return self._fg
+        return self._median_fg() if self._fgs else None

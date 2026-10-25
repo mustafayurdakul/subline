@@ -98,9 +98,12 @@ uv run gametl
 3. On the **Game** tab, pick the game window from the list (Refresh after
    launching the game), then **Apply and run** and **Save profile**.
 4. With the game in front, press **Ctrl+Shift+A** and drag a rectangle over
-   the subtitle area. The rectangle stays centred while you drag, so one
-   edge and the height are enough. Translations appear in that area from
-   then on, and the area is saved with the profile.
+   the subtitle area. Arrow keys nudge it (Shift: 10 px, Ctrl: resize),
+   Enter confirms, Esc cancels; holding Shift while dragging keeps the
+   rectangle centred, so one edge and the height are enough. The **Bottom
+   strip** button on the Game tab sets the bottom quarter of the window
+   without any dragging. Translations appear in that area from then on,
+   and the area is saved with the profile.
 
 Next time, start the game from the tray's Profiles menu.
 
@@ -113,7 +116,7 @@ Default hotkeys (changeable on the Hotkeys tab):
 
 | Hotkey | Action |
 | --- | --- |
-| Ctrl+Shift+A | select the area to translate (Esc cancels) |
+| Ctrl+Shift+A | select the area to translate (drag, arrows nudge, Enter confirms, Esc cancels) |
 | Ctrl+Shift+T | start / stop the overlay |
 | Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
 | Ctrl+Shift+R | rescan: forget tracked lines and read the screen afresh |
@@ -156,10 +159,23 @@ the one the overlay runs with.
   case-insensitive. Every new profile starts with one that drops any OCR
   line without a letter, which removes the stray digits OCR sometimes
   reads out of background detail. **Ignore zones** exclude rectangles.
-- **Render** (Appearance tab): `subtitle` draws one pill centred in the
-  selected area; `inplace` puts each translation on its own OCR box in the
-  game's own colours. Font size, colour, background and position of the
-  subtitle are below it.
+  **Short lines need OCR confidence** (default 0.9) drops one- and
+  two-letter lines OCR is unsure about, the fragments that would otherwise
+  be translated on their own; texts under four letters also need a second
+  stable frame.
+- **Render** (Appearance tab): `subtitle` draws every line in one style
+  centred in the selected area; `inplace` puts each translation on its own
+  OCR box in the game's own colours. In subtitle mode the font size and
+  the text colour are learned from the game's first lines and then held
+  for the session (set a size or a `#RRGGBB` colour to override), the text
+  sits on a steady baseline at the bottom of the area (**Position**
+  `bottom`; `source` follows the game's own line), and the background is a
+  `pill` (opacity below it), a `shadow` like the game's own text, or
+  `none`. **Only centred text** and **Only subtitle-sized text** keep HUD
+  prompts and objectives that share the area out of the subtitles: text
+  whose centre is more than 10 % of the area's width off centre, or whose
+  line height differs more than 35 % from the learned size, is left alone.
+  Set either to 0 for games that left-align their subtitles.
 - **Run OCR on the GPU** (Translation tab): DirectML on any DirectX 12
   card. Measured on an RTX 3080 Ti, a full 1280x720 frame drops from 204 ms
   to 105 ms, but a subtitle strip goes from 54 ms to 71 ms, so leave it off
@@ -216,8 +232,9 @@ pipeline thread (`app/pipeline.py`):
    loses nothing; a cache file that cannot be read is set aside as `.bad`
    and the game starts with an empty one.
 5. `layout/` decides how a translation is drawn: `style.py` keeps size and
-   colours consistent across lines in the same band, `fit.py` wraps and
-   sizes text, `colors.py` samples the background and text colours.
+   colours consistent (per band in place; one locked style for the whole
+   subtitle zone), `fit.py` wraps and sizes text, `colors.py` samples the
+   background and text colours.
 6. `overlay/window.py` draws the result in a click-through window glued to
    the game, in subtitle mode or in place.
 

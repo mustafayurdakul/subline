@@ -18,9 +18,10 @@ from PySide6.QtCore import QThread, Signal
 from ..capture.base import Frame
 from ..capture.wgc import WgcWindowCapture
 from ..layout.colors import analyze_colors, bgr_to_rgb
-from ..layout.style import StyleMemory
+from ..layout.style import StyleMemory, ZoneStyle
 from ..ocr.base import OcrEngine, TextLine
 from ..overlay.window import RenderBlock
+from ..textutil import letter_count
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
 from ..tracking.filters import LineFilter
 from ..translate.service import TranslationService
@@ -41,11 +42,21 @@ class PipelineConfig:
     line_filter: LineFilter | None = None  # ignore zones and patterns
     # subtitle mode (needs a roi): one fixed style, centred in the zone
     render: str = "subtitle"  # "subtitle" | "inplace"
-    subtitle_font_px: int = 0  # 0 = the median source line height
-    subtitle_color: RGB = (255, 255, 255)
-    subtitle_pill: bool = True
-    subtitle_position: str = "source"
+    subtitle_font_px: int = 0  # 0 = the zone's learned line height (locked after a few lines)
+    subtitle_color: RGB | None = None  # None = the game's own subtitle colour, sampled
+    subtitle_background: str = "pill"  # "pill" | "shadow" | "none"
+    subtitle_pill_alpha: int = 230
+    subtitle_bold: bool = False
+    subtitle_position: str = "bottom"  # "bottom" | "source" | "center"
     subtitle_hide_source: bool = True
+    # Which blocks in the zone are subtitles rather than HUD text: centred in the
+    # zone (within a fraction of its width) and about the learned line height.
+    subtitle_center_tolerance: float = 0.10  # 0 = off
+    subtitle_size_tolerance: float = 0.35  # 0 = off
+    # A text with fewer letters than this is a fragment as often as a word: it
+    # must hold for `short_text_frames` frames before it is translated.
+    short_text_letters: int = 4
+    short_text_frames: int = 2
     grow_margin: int = 4  # px kept between a grown box and its neighbours
     # Frame diff: OCR is skipped while the read region looks the same as the
     # last frame read (mean absolute difference of a 1/8-scale grey thumbnail,
@@ -75,6 +86,7 @@ class PipelineThread(QThread):
         self.cfg = config or PipelineConfig()
         self.paused = False  # keep capturing, show nothing, translate nothing
         self.style_memory = StyleMemory()
+        self.zone_style = ZoneStyle()  # subtitle mode: one size and colour for the zone
         self.frames = 0  # frames read with OCR
         self.skipped = 0  # frames the diff judged unchanged
         self.ocr_ms: deque[float] = deque(maxlen=2000)  # bounded: a long session must not grow memory
@@ -128,6 +140,7 @@ class PipelineThread(QThread):
         self._last_thumb = None
         if reset_style:
             self.style_memory = StyleMemory()
+            self.zone_style = ZoneStyle()
         self.blocks_ready.emit([])
 
     def _process(self, frame: Frame) -> list[RenderBlock]:
@@ -205,7 +218,40 @@ class PipelineThread(QThread):
         return what the overlay should draw for them."""
         self._translate_ready(blocks, frame)
         area = self.cfg.area or (0, 0, frame.width, frame.height)
-        return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None]
+        return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
+
+    # -- subtitle zone ------------------------------------------------------------
+
+    @property
+    def subtitle_mode(self) -> bool:
+        return self.cfg.render == "subtitle" and self.cfg.roi is not None
+
+    def _centered(self, block: TextBlock) -> bool:
+        """The block's centre lies within the tolerance of the zone's centre."""
+        assert self.cfg.roi is not None
+        tolerance = self.cfg.subtitle_center_tolerance
+        if tolerance <= 0:
+            return True
+        zx0, _, zx1, _ = self.cfg.roi
+        offset = abs((block.bbox[0] + block.bbox[2]) / 2 - (zx0 + zx1) / 2)
+        return offset <= tolerance * max(1, zx1 - zx0)
+
+    def _line_height(self, block: TextBlock) -> float:
+        return (block.bbox[3] - block.bbox[1]) / max(1, len(block.line_texts))
+
+    def is_subtitle(self, block: TextBlock) -> bool:
+        """In subtitle mode, whether a block looks like a subtitle rather than
+        HUD text sharing the zone: centred, and about the learned size once
+        that is known. Elsewhere every block counts."""
+        if not self.subtitle_mode:
+            return True
+        if not self._centered(block):
+            return False
+        tolerance = self.cfg.subtitle_size_tolerance
+        locked = self.zone_style.line_height
+        if tolerance <= 0 or locked is None:
+            return True
+        return abs(self._line_height(block) - locked) <= tolerance * locked
 
     def _ocr_region(self, frame: Frame, box: Box) -> list[TextLine]:
         x0, y0, x1, y1 = box
@@ -232,7 +278,10 @@ class PipelineThread(QThread):
         self.service.drain()
         misses: list[str] = []
         for block in blocks:
-            if block.stable_frames < self.cfg.stable_frames:
+            needed = self.cfg.stable_frames
+            if letter_count(block.text) < self.cfg.short_text_letters:
+                needed = max(needed, self.cfg.short_text_frames)  # a fragment rarely survives a second look
+            if block.stable_frames < needed or not self.is_subtitle(block):
                 continue
             if block.translation is not None and not block.draft:
                 continue  # final translation in place
@@ -255,6 +304,8 @@ class PipelineThread(QThread):
         block.busy = sample.busy
         block.contrast = sample.contrast
         self.style_memory.observe(block.bbox, max(1, len(block.line_texts)), sample.bg, sample.fg, sample.busy)
+        if self.subtitle_mode and self._centered(block):
+            self.zone_style.observe(self._line_height(block), sample.fg)
 
     def _room(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> tuple[int, int]:
         """Free pixels below and above a block before the next block that
@@ -294,19 +345,25 @@ class PipelineThread(QThread):
         memory = self.style_memory
         # Lines that appear in the same place share one size, colour and style.
         bg, fg = memory.colors(block.bbox) or block.colors or ((0, 0, 0), (255, 255, 255))
-        if self.cfg.render == "subtitle" and self.cfg.roi is not None:
+        if self.subtitle_mode:
+            cfg = self.cfg
+            # One size and one colour for the whole zone, so lines never jump.
+            font_px = cfg.subtitle_font_px or self.zone_style.font_px(memory.font_px(block.bbox, n_lines))
+            text_rgb = cfg.subtitle_color or bgr_to_rgb(self.zone_style.fg or fg)
             return RenderBlock(
                 bbox=block.bbox,
                 lines=block.translation.split("\n"),
                 bg=bgr_to_rgb(bg),
-                fg=self.cfg.subtitle_color,
+                fg=text_rgb,
                 style="subtitle",
                 source_lines=n_lines,
-                font_px=self.cfg.subtitle_font_px or memory.font_px(block.bbox, n_lines),
-                zone=self.cfg.roi,
-                position=self.cfg.subtitle_position,
-                pill=self.cfg.subtitle_pill,
-                hide_source=self.cfg.subtitle_hide_source,
+                font_px=font_px,
+                zone=cfg.roi,
+                position=cfg.subtitle_position,
+                background=cfg.subtitle_background,
+                pill_alpha=cfg.subtitle_pill_alpha,
+                bold=cfg.subtitle_bold,
+                hide_source=cfg.subtitle_hide_source,
             )
         # In-place mode: patch the original out in its own colours, or use a pill
         # where a flat patch would show (busy background, low contrast).

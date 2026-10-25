@@ -7,9 +7,9 @@ from gametl.ocr.base import TextLine
 from gametl.tracking.filters import LineFilter
 
 
-def line(text: str, x0: int, y0: int, x1: int, y1: int) -> TextLine:
+def line(text: str, x0: int, y0: int, x1: int, y1: int, confidence: float = 0.9) -> TextLine:
     quad = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
-    return TextLine(text, quad, 0.9)
+    return TextLine(text, quad, confidence)
 
 
 def test_empty_filter_passes_everything() -> None:
@@ -31,6 +31,17 @@ def test_patterns_drop_matching_text() -> None:
     timer = line("12:45", 0, 0, 50, 20)
     prompt = line("Press A to continue", 0, 0, 50, 20)
     assert f.apply([keep, timer, prompt]) == [keep]
+
+
+def test_short_lines_need_confidence() -> None:
+    f = LineFilter.compile()  # the short-line rule is on by default
+    assert f  # so the filter is never a no-op
+    fragment = line("l", 0, 0, 20, 20, confidence=0.6)  # a stroke read as a letter
+    glyph = line("Go!", 0, 0, 40, 20, confidence=0.5)  # two letters, unsure
+    sure = line("No.", 0, 0, 40, 20, confidence=0.95)
+    word = line("Hey", 0, 0, 40, 20, confidence=0.5)  # three letters: the rule does not apply
+    assert f.apply([fragment, glyph, sure, word]) == [sure, word]
+    assert LineFilter.compile(short_confidence=0).apply([fragment, glyph]) == [fragment, glyph]  # off
 
 
 def test_default_pattern_drops_lines_without_letters() -> None:
