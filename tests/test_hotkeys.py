@@ -12,7 +12,7 @@ def test_parse_combo_letters_function_and_named_keys() -> None:
     assert parse_combo("f12") == (0, 0x7B)
 
 
-@pytest.mark.parametrize("bad", ["", "ctrl+", "ctrl+shift", "meta+x", "ctrl+hyper", "ctrl+f99"])
+@pytest.mark.parametrize("bad", ["", "ctrl+", "ctrl+shift", "meta+x", "ctrl+hyper", "ctrl+f99", "ctrl+ş", "alt+٣"])
 def test_parse_combo_rejects_nonsense(bad: str) -> None:
     with pytest.raises(ValueError):
         parse_combo(bad)
@@ -27,3 +27,16 @@ def test_register_and_unregister_round_trip() -> None:
     assert hotkeys.register("bad", "nope+", lambda: None) is False
     hotkeys.unregister_all()
     assert hotkeys.registered == []
+
+
+def test_a_bad_rebind_keeps_the_working_hotkey() -> None:
+    hotkeys = GlobalHotkeys()
+    try:
+        assert hotkeys.register("test", "ctrl+alt+shift+f11", lambda: None) is True
+        assert hotkeys.register("test", "ctrl+hyper", lambda: None) is False  # typo
+        assert hotkeys.registered == ["test"]  # the old binding survives
+        assert hotkeys.register("test", "ctrl+alt+shift+f11", lambda: None) is True  # same keys again: fine
+        assert hotkeys.register("test", "ctrl+alt+shift+f12", lambda: None) is True  # moved
+        assert hotkeys.registered == ["test"]
+    finally:
+        hotkeys.unregister_all()

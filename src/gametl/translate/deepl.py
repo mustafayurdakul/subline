@@ -28,12 +28,20 @@ _CODES = {
     "sk": "SK", "sl": "SL", "sv": "SV", "bg": "BG", "et": "ET", "lt": "LT", "lv": "LV", "vi": "VI",
 }
 # fmt: on
+# DeepL no longer accepts the bare codes as targets: a variant must be named.
+_TARGET_VARIANTS = {"EN": "EN-US", "PT": "PT-PT"}
 
 
-def deepl_code(lang: str | None) -> str | None:
+def deepl_code(lang: str | None, target: bool = False) -> str | None:
+    """Our code -> DeepL code. A code with a region ("en-GB") passes through
+    upper-cased; as a `target`, plain English and Portuguese get a default
+    variant since DeepL requires one there."""
     if not lang:
         return None
-    return _CODES.get(lang.lower(), lang[:2].upper())
+    code = lang.upper() if "-" in lang else _CODES.get(lang.lower(), lang[:2].upper())
+    if target:
+        code = _TARGET_VARIANTS.get(code, code)
+    return code
 
 
 class DeepLTranslator:
@@ -58,7 +66,7 @@ class DeepLTranslator:
             return []
         body: dict[str, Any] = {
             "text": list(request.texts),
-            "target_lang": deepl_code(request.target_lang),
+            "target_lang": deepl_code(request.target_lang, target=True),
             "preserve_formatting": True,
         }
         source = deepl_code(request.source_lang)

@@ -53,6 +53,7 @@ class MemorySecretStore:
 _CRED_TYPE_GENERIC = 1
 _CRED_PERSIST_LOCAL_MACHINE = 2
 _ERROR_NOT_FOUND = 1168
+_ENCODING_COMMENT = "utf-16-le"  # written into the entry's Comment so reading never has to guess
 
 
 class _CREDENTIAL(ctypes.Structure):
@@ -91,7 +92,9 @@ _advapi32.CredFree.restype = None
 class WindowsCredentialStore:
     """Generic credentials named '<prefix>/<name>' in the user's vault. The
     secret is stored as UTF-16, the convention PowerShell and keyring use,
-    so the entries are readable from those tools as well."""
+    so the entries are readable from those tools as well. Entries written
+    here carry the encoding in their Comment; for entries other tools wrote
+    the blob length decides (UTF-16 is always an even number of bytes)."""
 
     description = "Windows Credential Manager"
 
@@ -110,9 +113,12 @@ class WindowsCredentialStore:
             if not size:
                 return None
             blob = ctypes.string_at(credential.contents.CredentialBlob, size)
+            comment = credential.contents.Comment
         finally:
             _advapi32.CredFree(credential)
-        return blob.decode("utf-16-le") if size % 2 == 0 else blob.decode("utf-8", errors="replace")
+        if comment == _ENCODING_COMMENT or (not comment and size % 2 == 0):
+            return blob.decode("utf-16-le", errors="replace")
+        return blob.decode("utf-8", errors="replace")
 
     def set(self, name: str, value: str) -> None:
         blob = value.encode("utf-16-le")
@@ -120,6 +126,7 @@ class WindowsCredentialStore:
         credential = _CREDENTIAL()
         credential.Type = _CRED_TYPE_GENERIC
         credential.TargetName = self._target(name)
+        credential.Comment = _ENCODING_COMMENT
         credential.CredentialBlobSize = len(blob)
         credential.CredentialBlob = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte))
         credential.Persist = _CRED_PERSIST_LOCAL_MACHINE

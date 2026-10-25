@@ -127,3 +127,13 @@ def test_batch_submit_save_and_collect(tmp_path: Path) -> None:
     assert (ended, added, failed) == (True, 3, 0)
     assert cache.get("Run!", "tr") == "TR Run!"
     assert submit_batch(["Run!"], translator, cache, "tr", client=client) is None  # all cached
+
+
+def test_batch_goes_through_the_translators_own_client_by_default(tmp_path: Path) -> None:
+    """The translator's client carries the app's key (Credential Manager);
+    a fresh anthropic.Anthropic() would only see the environment."""
+    batches = StubBatches()
+    client = SimpleNamespace(messages=SimpleNamespace(batches=batches))
+    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr")
+    job = submit_batch(["Stay close."], translator, TranslationCache(tmp_path / "c.json"), "tr")
+    assert job is not None and [r["custom_id"] for r in batches.requests] == ["chunk-00000"]

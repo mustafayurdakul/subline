@@ -25,6 +25,30 @@ def test_fuzzy_never_crosses_different_lines() -> None:
     assert cache.get("Go west at the bridge.", "tr") is None
 
 
+def test_fuzzy_needs_a_long_line_and_the_same_word_count() -> None:
+    cache = TranslationCache()
+    cache.put("Yes, sir.", "tr", "Evet, efendim.")
+    assert cache.get("Yet, sir.", "tr") is None  # short: one character is a different word
+    cache.put("Stay close, and keep your voice down.", "tr", "X")
+    assert cache.get("Stay close, and keep your voice down now.", "tr") is None  # an added word
+    assert cache.get("Stay close, and keep your vo1ce down.", "tr") == "X"  # OCR slip, same words
+
+
+def test_damaged_cache_file_is_set_aside_and_the_cache_starts_empty(tmp_path: Path) -> None:
+    path = tmp_path / "game.tr.json"
+    path.write_text('{"version": 1, "entries": {"hello": ', encoding="utf-8")  # truncated
+    cache = TranslationCache(path)
+    assert len(cache) == 0
+    assert cache.load_error is not None and "JSONDecodeError" in cache.load_error
+    assert not path.exists() and (tmp_path / "game.tr.json.bad").exists()
+    cache.put("Hello", "tr", "Merhaba")
+    assert cache.save() is True
+    assert TranslationCache(path).get("Hello", "tr") == "Merhaba"
+
+    path.write_text('{"version": 1, "entries": ["not", "a", "dict"]}', encoding="utf-8")  # wrong shape
+    assert TranslationCache(path).load_error is not None
+
+
 def test_numbers_are_swapped_into_a_cached_translation() -> None:
     cache = TranslationCache()
     cache.put("HP 87/100   Ammo 24   9s", "tr", "Can 87/100   Mühimmat 24   9sn")

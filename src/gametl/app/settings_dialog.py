@@ -3,6 +3,8 @@ ignores and hotkeys; apply at once or save as a per-game profile."""
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -47,6 +50,17 @@ HOTKEY_LABELS = {
 
 def _lines(widget: QPlainTextEdit) -> list[str]:
     return [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
+
+
+def invalid_pattern(patterns: list[str]) -> str | None:
+    """One line naming the first ignore pattern that is not a valid regular
+    expression, or None when all compile."""
+    for pattern in patterns:
+        try:
+            re.compile(pattern, re.IGNORECASE)
+        except re.error as exc:
+            return f"Ignore pattern {pattern!r} is not a valid regular expression: {exc}"
+    return None
 
 
 def _row(*widgets: QWidget) -> QHBoxLayout:
@@ -94,6 +108,10 @@ class SettingsDialog(QDialog):
         self.store = store
         self.secrets: SecretStore = secrets if secrets is not None else WindowsCredentialStore()
         self._download: ModelDownloadThread | None = None
+        # The settings last loaded: fields without a widget (command-line
+        # only: stable_frames, max_missing, debug, ...) are carried over from
+        # it, so Apply and Save never reset them.
+        self._base: Settings = settings
         self._build()
         self.load_settings(settings)
 
@@ -428,6 +446,7 @@ class SettingsDialog(QDialog):
     # -- settings <-> widgets -------------------------------------------------------
 
     def load_settings(self, s: Settings) -> None:
+        self._base = s
         self.window_combo.setEditText(s.window_match)
         self.game.setText(s.game)
         self.roi.setText(s.roi)
@@ -463,7 +482,9 @@ class SettingsDialog(QDialog):
             edit.setText(s.hotkeys.get(name, DEFAULT_HOTKEYS[name]))
 
     def to_settings(self, base: Settings | None = None) -> Settings:
-        s = (base or Settings()).copy()
+        """The widgets' values on top of `base` (default: the settings last
+        loaded), so fields the dialog does not show keep their values."""
+        s = (base if base is not None else self._base).copy()
         s.window_match = self.window_combo.currentText().strip()
         s.game = self.game.text().strip()
         s.roi = self.roi.text().strip()
@@ -498,11 +519,25 @@ class SettingsDialog(QDialog):
         s.hotkeys = {name: (edit.text().strip() or DEFAULT_HOTKEYS[name]) for name, edit in self.hotkey_edits.items()}
         return s
 
+    def report_problem(self, text: str) -> None:
+        QMessageBox.warning(self, "gametl", text)
+
+    def _valid(self) -> bool:
+        problem = invalid_pattern(_lines(self.ignore_patterns))
+        if problem:
+            self.report_problem(problem)
+            return False
+        return True
+
     def apply(self) -> None:
+        if not self._valid():
+            return
         self.save_typed_keys()
         self.applied.emit(self.to_settings(), self.selected_hwnd())
 
     def save_profile(self) -> None:
+        if not self._valid():
+            return
         self.save_typed_keys()
         settings = self.to_settings()
         name = self.profile_name.text().strip() or settings.game or settings.window_match or "game"

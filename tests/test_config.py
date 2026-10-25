@@ -41,6 +41,15 @@ def test_effective_source_lang() -> None:
 def test_slug() -> None:
     assert slug("Fake Game: The Sequel!") == "fake-game-the-sequel"
     assert slug("") == "game"
+    assert slug("my_game v2") == "my-game-v2"
+
+
+def test_slug_keeps_non_latin_titles_apart() -> None:
+    assert slug("ゲーム") == "ゲーム"
+    assert slug("Ведьмак 3") == "ведьмак-3"
+    assert slug("Ölüm Oyunu") == "ölüm-oyunu"
+    assert slug("ゲームA") != slug("ゲームB")
+    assert slug("＋＋") == "game"  # symbols only: still the fallback
 
 
 def test_profile_store_save_load_list_match_delete(tmp_path: Path) -> None:

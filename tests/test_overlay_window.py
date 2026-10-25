@@ -11,7 +11,7 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
 from PySide6.QtWidgets import QApplication, QWidget
 
-from gametl.capture.windows import enable_per_monitor_dpi_awareness, window_rect
+from gametl.capture.windows import enable_per_monitor_dpi_awareness, find_window, list_windows, window_rect
 from gametl.overlay.window import (
     WS_EX_LAYERED,
     WS_EX_NOACTIVATE,
@@ -86,6 +86,13 @@ def test_overlay_native_styles_and_following(qapp: QApplication, target: QWidget
     finally:
         overlay.close()
         qapp.processEvents()
+
+
+def test_own_windows_are_not_listed_as_capture_targets(qapp: QApplication, target: QWidget) -> None:
+    """A typed title must never match gametl's own settings window."""
+    assert "gametl test target" not in [w.title for w in list_windows()]
+    assert "gametl test target" in [w.title for w in list_windows(include_own=True)]
+    assert find_window("gametl test target") is None
 
 
 def test_in_place_layout_fits_the_width(qapp: QApplication, target: QWidget) -> None:

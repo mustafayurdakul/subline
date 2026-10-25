@@ -23,6 +23,15 @@ def say(text: str) -> None:
     print(text, flush=True)
 
 
+def anthropic_client():
+    """An Anthropic client with the key the app knows (Credential Manager
+    first, then the environment); the SDK alone would only read the
+    environment."""
+    import anthropic
+
+    return anthropic.Anthropic(api_key=anthropic_api_key())
+
+
 def main(argv: list[str] | None = None) -> int:
     from gametl.app.main import utf8_console
 
@@ -55,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         job = BatchJob.load(Path(args.resume))
         game = Path(args.resume).stem.split(".")[0]
         cache = TranslationCache(store.cache_dir / f"{game}.{job.target_lang}.claude.json")
-        ended, added, failed = wait_for_batch(job, cache, args.wait, progress=say)
+        ended, added, failed = wait_for_batch(job, cache, args.wait, client=anthropic_client(), progress=say)
         if not ended:
             say("batch still running; run --resume again later")
             return 3
@@ -84,7 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"added {added} lines; tokens {totals['input']} in / {totals['output']} out over {translator.calls} calls")
         return 0
 
-    job = submit_batch(lines, translator, cache, args.target_lang, args.chunk_size)
+    client = translator._client  # carries the app's key; the batch calls reuse it
+    job = submit_batch(lines, translator, cache, args.target_lang, args.chunk_size, client=client)
     if job is None:
         say("every line is already in the cache")
         return 0
@@ -94,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.wait <= 0:
         say(f'collect later with: gametl-pretranslate --resume "{job_path}"')
         return 0
-    ended, added, failed = wait_for_batch(job, cache, args.wait, progress=say)
+    ended, added, failed = wait_for_batch(job, cache, args.wait, client=client, progress=say)
     if not ended:
         say(f'still running after {args.wait:.0f}s; collect later with: gametl-pretranslate --resume "{job_path}"')
         return 3

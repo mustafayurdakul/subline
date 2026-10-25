@@ -27,8 +27,21 @@ class StubSession:
 def test_codes() -> None:
     assert deepl_code("en") == "EN" and deepl_code("tr") == "TR"
     assert deepl_code("japan") == "JA" and deepl_code("ch") == "ZH"
-    assert deepl_code("xx-unknown") == "XX"
+    assert deepl_code("xx") == "XX"
     assert deepl_code(None) is None
+
+
+def test_target_codes_name_a_variant_where_deepl_requires_one() -> None:
+    assert deepl_code("en", target=True) == "EN-US" and deepl_code("pt", target=True) == "PT-PT"
+    assert deepl_code("tr", target=True) == "TR"
+    assert deepl_code("en-GB", target=True) == "EN-GB"  # a chosen variant passes through
+    assert deepl_code("en-GB") == "EN-GB"
+    session = StubSession()
+    DeepLTranslator(auth_key="k", session=session).translate(
+        TranslationRequest(["Merhaba"], source_lang="tr", target_lang="en")
+    )
+    assert session.calls[0]["json"]["target_lang"] == "EN-US"
+    assert session.calls[0]["json"]["source_lang"] == "TR"
 
 
 def test_free_and_pro_endpoints_and_request_shape() -> None:
