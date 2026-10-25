@@ -56,21 +56,16 @@ checkout:
 uv run --group build python scripts/build.py
 ```
 
-**Releases** are built by GitHub Actions (`.github/workflows/release.yml`):
-set the version in `pyproject.toml`, then
-
-```
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-builds `dist/gametl` on a Windows runner and attaches
-`gametl-v0.1.0-win64.zip` to a release for the tag (a tag such as
-`v0.2.0-beta1` becomes a pre-release). The same can be done from the
-Actions tab: "Run workflow" on the Release action with a tag name creates
-the tag at the chosen commit and publishes the release; with the tag left
-empty it builds without releasing and keeps the zip as a seven-day
-artifact.
+**Releases** are built by GitHub Actions (`.github/workflows/release.yml`).
+Bump `version` in `pyproject.toml` and merge to `main`: the workflow sees
+a version with no tag yet, builds `dist/gametl` on a Windows runner,
+creates the tag `v0.1.0` at the merge commit and attaches
+`gametl-v0.1.0-win64.zip` to its release. A merge whose version is already
+tagged builds nothing. Pushing a tag by hand (`git tag v0.2.0-beta1 &&
+git push origin v0.2.0-beta1`; a dash makes a pre-release) or "Run
+workflow" on the Release action with a tag name does the same; with the
+tag left empty, "Run workflow" builds without releasing and keeps the zip
+as a seven-day artifact. The tag must match the `pyproject.toml` version.
 The releases of a private repository are visible to its collaborators
 only; for buyers, publish the zip elsewhere or from a public repository.
 The executables are not code-signed, so Windows warns about an unknown
