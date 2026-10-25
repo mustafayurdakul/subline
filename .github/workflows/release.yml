@@ -1,0 +1,75 @@
+# Build the packaged folder on a Windows runner and publish it.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#       builds dist/gametl, zips it and attaches the zip to a GitHub release
+#       for the tag (a tag with a dash, v0.2.0-beta1, becomes a pre-release)
+#   Actions > Release > Run workflow
+#       builds without a tag and keeps the zip as a workflow artifact, to try
+#       the build before releasing
+#
+# The tag must match the version in pyproject.toml. The executables are not
+# code-signed here: Windows shows "unknown publisher" for them until a
+# signing step (a cloud signing service) is added.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen # the app icon is rendered with Qt during the build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --group build
+
+      - name: Check that the tag matches the project version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (uv version --short).Trim()
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "tag ${{ github.ref_name }} does not match pyproject.toml version $version"
+          }
+
+      - name: Build
+        run: uv run --group build python scripts/build.py --clean
+
+      - name: Name the archive
+        id: name
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref_name }}"
+          $label = if ("${{ github.ref }}".StartsWith("refs/tags/")) { $ref } else { "${{ github.sha }}".Substring(0, 7) }
+          "zip=gametl-$label-win64.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Zip
+        shell: pwsh
+        run: 7z a -mx=5 "${{ steps.name.outputs.zip }}" ./dist/gametl
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.name.outputs.zip }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Keep the build as an artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.zip }}
+          path: ${{ steps.name.outputs.zip }}
+          retention-days: 7
