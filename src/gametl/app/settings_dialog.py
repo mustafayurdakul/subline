@@ -279,6 +279,16 @@ class SettingsDialog(QDialog):
         self.fps.setRange(1.0, 60.0)
         self.fps.setDecimals(0)
         form.addRow("Capture rate (fps)", self.fps)
+        self.diff_threshold = QDoubleSpinBox()
+        self.diff_threshold.setRange(0.0, 50.0)
+        self.diff_threshold.setDecimals(1)
+        self.diff_threshold.setSingleStep(0.5)
+        self.diff_threshold.setSpecialValueText("off: read every frame")
+        self.diff_threshold.setToolTip(
+            "OCR is skipped while the read area looks the same as the frame last read (mean difference of a small "
+            "grey thumbnail, 0-255). Lower it if a subtitle change is ever missed; 0 reads every frame."
+        )
+        form.addRow("Skip unchanged frames below", self.diff_threshold)
         column.addLayout(form)
 
         subtitle = QGroupBox("Subtitle mode (with an area selected)")
@@ -478,6 +488,7 @@ class SettingsDialog(QDialog):
         self.center_zone.setChecked(s.center_zone)
         self.font.setText(s.font)
         self.fps.setValue(s.fps)
+        self.diff_threshold.setValue(s.diff_threshold)
         for name, edit in self.hotkey_edits.items():
             edit.setText(s.hotkeys.get(name, DEFAULT_HOTKEYS[name]))
 
@@ -516,6 +527,7 @@ class SettingsDialog(QDialog):
         s.center_zone = self.center_zone.isChecked()
         s.font = self.font.text().strip() or "Segoe UI"
         s.fps = float(self.fps.value())
+        s.diff_threshold = float(self.diff_threshold.value())
         s.hotkeys = {name: (edit.text().strip() or DEFAULT_HOTKEYS[name]) for name, edit in self.hotkey_edits.items()}
         return s
 

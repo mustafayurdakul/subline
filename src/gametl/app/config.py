@@ -71,6 +71,8 @@ class Settings:
     full_scan_every: int = 0  # with a zone: also sweep the rest of the area every N frames (0 = never)
     stable_frames: int = 1
     max_missing: int = 3
+    diff_threshold: float = 1.0  # skip OCR while the read area looks unchanged (thumbnail diff, 0..255); 0 = never
+    autosave_seconds: float = 10.0  # how soon new translations reach the cache file
     hide_when_unfocused: bool = True
     exclude_from_capture: bool = False  # hide the overlay from screen recordings, streams and screenshots
     # app

@@ -143,10 +143,12 @@ def controller(qapp: QApplication, fakes, tmp_path) -> OverlayController:
     c.status.connect(c.messages.append)  # type: ignore[attr-defined]
     c.running_log: list[bool] = []  # type: ignore[attr-defined]
     c.running_changed.connect(c.running_log.append)  # type: ignore[attr-defined]
+    c.starting_log: list[bool] = []  # type: ignore[attr-defined]
+    c.starting_changed.connect(c.starting_log.append)  # type: ignore[attr-defined]
     c.failures: list[str] = []  # type: ignore[attr-defined]
     c.start_failed.connect(c.failures.append)  # type: ignore[attr-defined]
     yield c
-    c.stop()
+    c.close()  # also waits for a start still on its thread, as quitting the app does
     qapp.processEvents()
 
 
@@ -162,6 +164,9 @@ def test_start_runs_on_a_thread_then_translations_reach_the_overlay(qapp, contro
     assert not controller.starting
     assert controller.hwnd == HWND and controller.title == TITLE
     assert controller.running_log == [True]
+    assert controller.starting_log == [True, False]
+    assert controller.worker is not None and controller.worker.cfg.diff_threshold == 1.0
+    assert controller.service is not None and controller.service.autosave_seconds == 10.0
     assert any(m.startswith("running on 'Fake Game'") for m in controller.messages)
     assert len(FakeEngine.created) == 1
 
@@ -217,6 +222,7 @@ def test_start_failures_are_reported_not_raised(qapp, controller) -> None:
     wait_for(qapp, lambda: controller.failures)
     assert controller.failures == ["no visible window matching 'Other Game'"]
     assert not controller.running and not controller.starting
+    assert controller.starting_log == [True, False]
 
     controller.failures.clear()
     controller.start(settings(ignore_patterns=["(unclosed"]))
@@ -242,6 +248,7 @@ def test_stop_during_start_abandons_the_preparation(qapp, controller) -> None:
         time.sleep(0.01)
     assert not controller.running and FakeOverlay.instances == []
     assert controller.running_log == [False]  # only stop()'s own notice
+    assert controller.starting_log == [True, False]
 
 
 def test_newer_start_supersedes_an_older_one(qapp, controller) -> None:
@@ -264,6 +271,8 @@ def test_toggle_cancels_a_start_in_progress(qapp, controller) -> None:
     assert controller.starting
     controller.toggle(settings())
     assert not controller.starting and not controller.running
+    controller.close()  # waits for the abandoned preparation to run out
+    assert all(not w.isRunning() for w in controller._start_workers)
 
 
 def test_trial_over_refuses_to_start(qapp, fakes, tmp_path) -> None:
