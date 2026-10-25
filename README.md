@@ -66,8 +66,11 @@ git push origin v0.1.0
 
 builds `dist/gametl` on a Windows runner and attaches
 `gametl-v0.1.0-win64.zip` to a release for the tag (a tag such as
-`v0.2.0-beta1` becomes a pre-release). "Run workflow" on the Release
-action builds without a tag and keeps the zip as a seven-day artifact.
+`v0.2.0-beta1` becomes a pre-release). The same can be done from the
+Actions tab: "Run workflow" on the Release action with a tag name creates
+the tag at the chosen commit and publishes the release; with the tag left
+empty it builds without releasing and keeps the zip as a seven-day
+artifact.
 The releases of a private repository are visible to its collaborators
 only; for buyers, publish the zip elsewhere or from a public repository.
 The executables are not code-signed, so Windows warns about an unknown
