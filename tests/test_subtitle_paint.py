@@ -54,7 +54,8 @@ def test_line_height_comes_from_the_font_so_descenders_fit(overlay: OverlayWindo
     assert placed.layout.line_height >= metrics.height()  # ascent + descent + leading, not a flat 1.15
     assert placed.text.height() >= metrics.height()
     assert placed.pill.bottom() >= placed.text.bottom() + 2  # room below the descenders
-    assert overlay.spacing_ratio() > 1.15
+    # The ratio is whatever the font engine reports (1.0 on a runner without real fonts), never below it.
+    assert overlay.spacing_ratio() >= metrics.height() / placed.layout.font_px - 1e-9
 
     two = overlay.place_subtitle(subtitle(["first line", "second line"]))
     assert two.layout.line_height * 2 <= two.text.height() + 1
