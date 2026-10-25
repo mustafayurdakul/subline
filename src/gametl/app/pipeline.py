@@ -6,10 +6,13 @@ The UI thread never waits on OCR or translation.
 
 from __future__ import annotations
 
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
 
+import cv2
+import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from ..capture.base import Frame
@@ -44,6 +47,11 @@ class PipelineConfig:
     subtitle_position: str = "source"
     subtitle_hide_source: bool = True
     grow_margin: int = 4  # px kept between a grown box and its neighbours
+    # Frame diff: OCR is skipped while the read region looks the same as the
+    # last frame read (mean absolute difference of a 1/8-scale grey thumbnail,
+    # 0..255, below the threshold) and every tracked block is settled.
+    diff_threshold: float = 1.0  # 0 = OCR every frame
+    max_skipped: int = 20  # frames skipped in a row before OCR runs regardless
     debug: bool = False  # also emit outlines of every tracked block and per-frame stats
     dump_dir: str | None = None  # debug: save each frame with OCR lines and block boxes drawn
 
@@ -67,11 +75,14 @@ class PipelineThread(QThread):
         self.cfg = config or PipelineConfig()
         self.paused = False  # keep capturing, show nothing, translate nothing
         self.style_memory = StyleMemory()
-        self.frames = 0
+        self.frames = 0  # frames read with OCR
+        self.skipped = 0  # frames the diff judged unchanged
         self.ocr_ms: deque[float] = deque(maxlen=2000)  # bounded: a long session must not grow memory
         self._stop = False
         self._reset = False
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
+        self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
+        self._skip_run = 0
 
     def stop(self) -> None:
         self._stop = True
@@ -114,13 +125,22 @@ class PipelineThread(QThread):
 
     def _forget_blocks(self, reset_style: bool) -> None:
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
+        self._last_thumb = None
         if reset_style:
             self.style_memory = StyleMemory()
         self.blocks_ready.emit([])
 
     def _process(self, frame: Frame) -> list[RenderBlock]:
-        """One frame: OCR and tracking, then translations and what to draw."""
+        """One frame: OCR and tracking (unless the frame is unchanged), then
+        translations and what to draw."""
         cfg = self.cfg
+        if self.unchanged(frame):
+            self.skipped += 1
+            blocks = list(self._tracker.blocks)
+            render = self.render_blocks(blocks, frame)
+            if cfg.debug:
+                render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
+            return render
         t0 = time.perf_counter()
         blocks, lines = self.track_frame(frame)
         ocr_ms = (time.perf_counter() - t0) * 1000
@@ -130,11 +150,46 @@ class PipelineThread(QThread):
             render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
             detail = " ".join(f"#{b.id}{b.bbox}{'*' if b.translation else ''}" for b in blocks)
             self.status.emit(
-                f"frame {self.frames}: ocr {ocr_ms:.0f}ms lines={len(lines)} blocks={len(blocks)} {detail}"
+                f"frame {self.frames}: ocr {ocr_ms:.0f}ms lines={len(lines)} blocks={len(blocks)} "
+                f"skipped={self.skipped} {detail}"
             )
         if cfg.dump_dir:
             self._dump(frame, lines, blocks)
         return render
+
+    # -- frame diff ------------------------------------------------------------
+
+    def _thumbnail(self, frame: Frame) -> np.ndarray:
+        x0, y0, x1, y1 = self.cfg.roi or self.cfg.area or (0, 0, frame.width, frame.height)
+        region = frame.image[y0:y1, x0:x1]
+        if region.size == 0:
+            return np.zeros((1, 1), dtype=np.uint8)
+        grey = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+        return cv2.resize(grey, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
+
+    def unchanged(self, frame: Frame) -> bool:
+        """True when the read region looks like the frame last read and no
+        tracked block is waiting for another sighting (a new reading to
+        confirm, a block not yet stable, or one that has just gone missing
+        and must age out). Then OCR has nothing new to say and is skipped;
+        translations that arrive meanwhile are still drawn."""
+        cfg = self.cfg
+        if cfg.diff_threshold <= 0:
+            return False
+        thumb = self._thumbnail(frame)
+        last = self._last_thumb
+        if last is None or last.shape != thumb.shape or self._skip_run >= cfg.max_skipped:
+            self._last_thumb, self._skip_run = thumb, 0
+            return False
+        settled = all(
+            b.pending_text is None and b.stable_frames >= cfg.stable_frames and b.missing_frames == 0
+            for b in self._tracker.blocks
+        )
+        if not settled or float(np.mean(cv2.absdiff(last, thumb))) >= cfg.diff_threshold:
+            self._last_thumb, self._skip_run = thumb, 0
+            return False
+        self._skip_run += 1
+        return True
 
     def track_frame(self, frame: Frame) -> tuple[list[TextBlock], list[TextLine]]:
         """OCR the frame and fold the lines into the tracked blocks. Returns
@@ -166,7 +221,7 @@ class PipelineThread(QThread):
 
         lines = self._ocr_region(frame, roi)
         every = self.cfg.full_scan_every
-        if every and self.frames % every == 1:
+        if every and (self.frames - 1) % every == 0:  # the first frame, then every N-th
             others = self._ocr_region(frame, full)
             lines += [line for line in others if not intersects(line.bbox, roi)]
             return lines, full
@@ -221,10 +276,6 @@ class PipelineThread(QThread):
         return max(0, below), max(0, above)
 
     def _dump(self, frame: Frame, lines: list[TextLine], blocks: list[TextBlock]) -> None:
-        import os
-
-        import cv2
-
         dump_dir = self.cfg.dump_dir or "."
         os.makedirs(dump_dir, exist_ok=True)
         image = frame.image.copy()

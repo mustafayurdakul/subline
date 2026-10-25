@@ -15,7 +15,7 @@ from gametl.app.config import ProfileStore, Settings
 from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
 from gametl.app.license import make_key
 from gametl.app.main import build_parser, settings_from_args
-from gametl.app.settings_dialog import SettingsDialog
+from gametl.app.settings_dialog import SettingsDialog, invalid_pattern
 
 
 @pytest.fixture(scope="module")
@@ -65,6 +65,43 @@ def test_dialog_round_trips_settings(qapp: QApplication, tmp_path: Path) -> None
     assert saved == ["my-game"]
     assert store.load("my-game").translator == "uppercase"
     assert store.last_profile == "my-game"
+    dialog.close()
+
+
+def test_fields_without_a_widget_survive_apply_and_save(qapp: QApplication, tmp_path: Path) -> None:
+    store = ProfileStore(tmp_path)
+    loaded = Settings(window_match="Fake Game", stable_frames=3, max_missing=7, full_scan_every=5, debug=True)
+    dialog = SettingsDialog(loaded, store, MemorySecretStore())
+    dialog.target_lang.setText("de")
+    applied: list = []
+    dialog.applied.connect(lambda s, hwnd: applied.append(s))
+    dialog.apply()
+    (result,) = applied
+    assert result.target_lang == "de"  # the widget's value
+    assert (result.stable_frames, result.max_missing, result.full_scan_every, result.debug) == (3, 7, 5, True)
+    dialog.profile_name.setText("kept")
+    dialog.save_profile()
+    assert store.load("kept").stable_frames == 3
+    # Loading other settings moves the base along with them.
+    dialog.load_settings(Settings(stable_frames=1))
+    assert dialog.to_settings().stable_frames == 1
+    dialog.close()
+
+
+def test_invalid_ignore_pattern_is_reported_and_blocks_apply(qapp: QApplication, tmp_path: Path) -> None:
+    assert invalid_pattern(["^a$", r"\d+"]) is None
+    problem = invalid_pattern(["^a$", "(unclosed"])
+    assert problem is not None and "(unclosed" in problem
+    dialog = SettingsDialog(Settings(), ProfileStore(tmp_path), MemorySecretStore())
+    reported: list[str] = []
+    dialog.report_problem = reported.append  # type: ignore[method-assign]
+    applied: list = []
+    dialog.applied.connect(lambda s, hwnd: applied.append(s))
+    dialog.ignore_patterns.setPlainText("^\\d+$\n(unclosed")
+    dialog.apply()
+    dialog.save_profile()
+    assert applied == [] and len(reported) == 2 and "(unclosed" in reported[0]
+    assert ProfileStore(tmp_path).list() == []
     dialog.close()
 
 

@@ -242,6 +242,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"0x{w.hwnd:08X} {w.width:5d}x{w.height:<5d} [{w.class_name}] {w.title}")
         return 0
 
+    try:
+        hwnd = int(args.hwnd, 0) if args.hwnd else None
+    except ValueError:
+        print(f"--hwnd {args.hwnd!r} is not a window handle (decimal or 0x hex)")
+        return 2
+
     store = ProfileStore(args.data_dir)
     if args.activate or args.license_status:
         return license_command(args.activate, store)
@@ -283,7 +289,6 @@ def main(argv: list[str] | None = None) -> int:
     controller = OverlayController(store)
     controller.status.connect(lambda s: print(s, flush=True))
 
-    hwnd = int(args.hwnd, 0) if args.hwnd else None
     tray_mode = args.tray or (not settings.window_match and hwnd is None)
 
     if tray_mode:
@@ -297,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if not controller.start(settings, hwnd, wait=args.wait):
             return 2
+        # The session starts on a thread: a failure to start, or the end of
+        # the session (window closed, pipeline error), ends the process.
+        controller.start_failed.connect(lambda _message: app.exit(2))
         controller.running_changed.connect(lambda running: None if running else app.quit())
 
     if args.run_for:

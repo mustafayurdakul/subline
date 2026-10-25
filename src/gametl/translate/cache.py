@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -41,16 +42,42 @@ def substitute_numbers(translation: str, old: list[str], new: list[str]) -> str 
 
 
 class TranslationCache:
-    def __init__(self, path: Path | str | None = None, fuzzy_ratio: float = 0.92, recent: int = 200) -> None:
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        fuzzy_ratio: float = 0.92,
+        fuzzy_min_len: int = 12,
+        recent: int = 200,
+    ) -> None:
         self.path = Path(path) if path else None
         self.fuzzy_ratio = fuzzy_ratio
+        # Below this length one changed character is a different word as often
+        # as an OCR slip ("Yes"/"Yet"), so short lines get exact matches only.
+        self.fuzzy_min_len = fuzzy_min_len
         self._entries: dict[str, dict[str, str]] = {}  # key -> {target_lang: translation}
         self._templates: dict[tuple[str, str], tuple[list[str], str]] = {}  # (template, lang) -> (numbers, translation)
         self._recent: deque[str] = deque(maxlen=recent)
         self._lock = threading.Lock()
         self._dirty = False
+        self.load_error: str | None = None  # set when the file on disk could not be read
         if self.path and self.path.exists():
-            self.load()
+            try:
+                self.load()
+            except (OSError, ValueError, AttributeError, TypeError) as exc:
+                # A damaged file must not stop the game from starting: keep it
+                # aside for inspection and begin with an empty cache.
+                self.load_error = f"{type(exc).__name__}: {exc}"
+                self._entries.clear()
+                self._templates.clear()
+                self._recent.clear()
+                self._dirty = False
+                self._quarantine()
+
+    def _quarantine(self) -> None:
+        assert self.path is not None
+        bad = self.path.with_suffix(self.path.suffix + ".bad")
+        with contextlib.suppress(OSError):
+            os.replace(self.path, bad)
 
     @staticmethod
     def key(text: str) -> str:
@@ -76,11 +103,17 @@ class TranslationCache:
                     if swapped is not None:
                         return swapped
 
-            # 3. A near-identical line seen recently (OCR noise such as l/1).
-            for recent_key in reversed(self._recent):
-                candidate = self._entries.get(recent_key, {}).get(target_lang)
-                if candidate is not None and text_similarity(key, recent_key) >= self.fuzzy_ratio:
-                    return candidate
+            # 3. A near-identical line seen recently (OCR noise such as l/1):
+            #    long enough to tell noise from a different word, and the same
+            #    number of words, so a dropped or added word never matches.
+            if len(key) >= self.fuzzy_min_len:
+                words = key.count(" ")
+                for recent_key in reversed(self._recent):
+                    if recent_key.count(" ") != words:
+                        continue
+                    candidate = self._entries.get(recent_key, {}).get(target_lang)
+                    if candidate is not None and text_similarity(key, recent_key) >= self.fuzzy_ratio:
+                        return candidate
         return None
 
     def put(self, text: str, target_lang: str, translation: str) -> None:
@@ -120,11 +153,11 @@ class TranslationCache:
         with self._lock:
             if not self._dirty:
                 return False
-            data = {"version": 1, "entries": self._entries}
+            # Serialised under the lock: a worker thread may `put` while we write.
+            text = json.dumps({"version": 1, "entries": self._entries}, ensure_ascii=False, indent=0)
             self._dirty = False
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=0)
+        tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, self.path)
         return True

@@ -114,14 +114,15 @@ def pretranslate_sync(
     todo = [ln for ln in lines if cache.get(ln, target_lang) is None]
     say(f"{len(lines)} lines, {len(todo)} to translate")
     added = 0
-    for i, chunk in enumerate(chunked(todo, chunk_size)):
+    chunks = chunked(todo, chunk_size)
+    for i, chunk in enumerate(chunks):
         results = translator.translate(TranslationRequest(chunk, translator.source_lang, target_lang))
         for source, translated in zip(chunk, results, strict=True):
             if translated:
                 cache.put(source, target_lang, translated)
                 added += 1
         cache.save()
-        say(f"chunk {i + 1}/{(len(todo) + chunk_size - 1) // chunk_size}: {added} translated")
+        say(f"chunk {i + 1}/{len(chunks)}: {added} translated")
     return added
 
 
@@ -176,7 +177,9 @@ def submit_batch(
     chunk_size: int = 20,
     client: Any = None,
 ) -> BatchJob | None:
-    """Create a batch for the lines not in the cache. None when nothing to do."""
+    """Create a batch for the lines not in the cache. None when nothing to do.
+    The request goes through the translator's own client (so a key from the
+    Credential Manager is used) unless another `client` is given."""
     if translator.structured:
         raise ValueError("batch pre-translation needs the plain-JSON reply mode (structured=False)")
     todo = [ln for ln in lines if cache.get(ln, target_lang) is None]
@@ -184,9 +187,7 @@ def submit_batch(
         return None
     requests, chunks = build_batch_requests(todo, translator, target_lang, chunk_size)
     if client is None:
-        import anthropic
-
-        client = anthropic.Anthropic()
+        client = translator._client
     batch = client.messages.batches.create(requests=requests)
     return BatchJob(batch.id, target_lang, chunks)
 
@@ -198,7 +199,9 @@ def collect_batch(
     progress: Callable[[str], None] | None = None,
 ) -> tuple[bool, int, int]:
     """Fetch a batch's results into the cache. Returns (ended, lines added,
-    failed chunks). When the batch has not ended, nothing is collected yet."""
+    failed chunks). When the batch has not ended, nothing is collected yet.
+    `client` is an Anthropic client; without one the SDK's own configuration
+    (ANTHROPIC_API_KEY) is used."""
     say = progress or (lambda _s: None)
     if client is None:
         import anthropic

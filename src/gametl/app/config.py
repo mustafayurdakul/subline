@@ -13,6 +13,7 @@ import dataclasses
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -100,7 +101,11 @@ class Settings:
 
 
 def slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-") or "game"
+    """File-name form of a game or profile name: lower case, letters and
+    digits of any script kept (a Japanese or Turkish title stays
+    distinguishable), everything else collapsed to one dash."""
+    text = unicodedata.normalize("NFKC", text or "").casefold()
+    return re.sub(r"[^\w]+|_+", "-", text).strip("-") or "game"
 
 
 def app_dir() -> Path:

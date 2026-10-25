@@ -14,12 +14,14 @@ at once and replaced when the final answer arrives.
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
+from typing import Any
 
 from .base import TranslationRequest, Translator
 from .cache import TranslationCache, numeric_template
@@ -34,6 +36,46 @@ class BatchResult:
     elapsed_ms: float
 
 
+class _DaemonPool:
+    """A fixed set of daemon worker threads behind `Future`s. Unlike
+    ThreadPoolExecutor's workers, daemon threads do not hold the process
+    open at exit: a translation request still waiting on the network when
+    the user quits ends with the process instead of delaying it by the
+    HTTP timeout."""
+
+    def __init__(self, workers: int, name: str) -> None:
+        self._queue: queue.SimpleQueue[tuple[Future, Callable[..., Any], tuple[Any, ...]] | None] = queue.SimpleQueue()
+        self._threads = [
+            threading.Thread(target=self._loop, name=f"{name}-{i}", daemon=True) for i in range(max(1, workers))
+        ]
+        for thread in self._threads:
+            thread.start()
+
+    def submit(self, fn: Callable[..., Any], *args: Any) -> Future:
+        future: Future = Future()
+        self._queue.put((future, fn, args))
+        return future
+
+    def _loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            future, fn, args = item
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn(*args))
+            except BaseException as exc:  # the future carries it to drain()
+                future.set_exception(exc)
+
+    def shutdown(self) -> None:
+        """Let each worker finish its current item and exit; queued items
+        after that are dropped."""
+        for _ in self._threads:
+            self._queue.put(None)
+
+
 class TranslationService:
     def __init__(
         self,
@@ -46,6 +88,8 @@ class TranslationService:
         retry_cooldown: float = 3.0,
         on_status: Callable[[str], None] | None = None,
         draft_translator: Translator | None = None,
+        autosave_seconds: float = 10.0,
+        max_drafts: int = 500,
     ) -> None:
         self.translator = translator
         self.draft_translator = draft_translator
@@ -55,15 +99,20 @@ class TranslationService:
         self.source_lang = source_lang
         self.retry_cooldown = retry_cooldown
         self.on_status = on_status
+        # New translations reach the disk this soon after arriving, so a
+        # crash or a killed process loses at most a few seconds of work.
+        self.autosave_seconds = autosave_seconds
+        self.max_drafts = max_drafts
 
         workers += 1 if draft_translator else 0
-        self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="translate")
+        self._pool = _DaemonPool(workers, "translate")
         self._lock = threading.Lock()
         self._inflight: set[str] = set()
         self._inflight_templates: set[str] = set()  # numeric templates of in-flight texts
         self._failed_until: dict[str, float] = {}
-        self._drafts: dict[str, str] = {}  # key -> draft translation (memory only)
+        self._drafts: dict[str, str] = {}  # key -> draft translation (memory only, oldest first)
         self._draft_inflight: set[str] = set()
+        self._last_save = time.monotonic()
         self._context: deque[tuple[str, str]] = deque(maxlen=context_lines)
         self._futures: list[Future[BatchResult]] = []
         self.stats = {"requests": 0, "items": 0, "translated": 0, "errors": 0, "cache_hits": 0, "drafts": 0}
@@ -101,6 +150,8 @@ class TranslationService:
         batch: list[str] = []
         draft_batch: list[str] = []
         with self._lock:
+            if self._failed_until:  # cooldowns that have passed are of no further use
+                self._failed_until = {key: until for key, until in self._failed_until.items() if until > now}
             # Per text: does it need a draft request, a final request, both, or neither?
             seen: set[str] = set()
             for text in texts:
@@ -145,16 +196,30 @@ class TranslationService:
             else:
                 translated += self._absorb_final(batch)
         self.stats["translated"] += translated
+        if translated:
+            self._autosave()
         return translated
+
+    def _autosave(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if force or now - self._last_save >= self.autosave_seconds:
+            try:
+                self.cache.save()
+            except OSError as exc:
+                self._report(f"could not save the translation cache: {exc}")
+            self._last_save = now
 
     def _absorb_draft(self, batch: BatchResult) -> None:
         with self._lock:
             for text, result in zip(batch.texts, batch.results, strict=True):
                 key = self.cache.key(text)
                 self._draft_inflight.discard(key)
-                if result:
-                    self._drafts[key] = result
-                    self.stats["drafts"] += 1
+                if not result or self.cache.get(text, self.target_lang) is not None:
+                    continue  # nothing, or the final answer overtook the draft: no use keeping it
+                self._drafts[key] = result
+                self.stats["drafts"] += 1
+                while len(self._drafts) > self.max_drafts:  # bounded: a long session must not grow memory
+                    self._drafts.pop(next(iter(self._drafts)))
             if batch.error is None:
                 self.draft_latencies_ms.append(batch.elapsed_ms)
         if batch.error is not None:
@@ -193,8 +258,8 @@ class TranslationService:
             return len(self._inflight)
 
     def shutdown(self) -> None:
-        self._pool.shutdown(wait=False, cancel_futures=True)
-        self.cache.save()
+        self._pool.shutdown()
+        self._autosave(force=True)
 
     # -- worker side -----------------------------------------------------------
 

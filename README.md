@@ -173,14 +173,19 @@ pipeline thread (`app/pipeline.py`):
    hands over a BGR frame plus the window's screen rectangle.
 2. `ocr/` reads the selected area (or the whole client area) with
    RapidOCR's PP-OCR models on ONNX Runtime and returns text lines with
-   pixel boxes.
+   pixel boxes. A frame whose area looks like the last one read (a
+   small grey thumbnail barely differs) and whose blocks are all settled
+   is not read at all: a static screen costs no OCR.
 3. `tracking/filters.py` drops lines in ignore zones or matching ignore
    patterns; `tracking/blocks.py` groups lines into blocks and matches them
    to the blocks seen in earlier frames, so each block keeps its id, a
    stability count and a few frames of grace when OCR misses it.
 4. `translate/service.py` answers from the per-game cache at once and sends
    new text to the translator on a worker thread (with an optional faster
-   draft translator); the pipeline never waits for a reply.
+   draft translator); the pipeline never waits for a reply. New
+   translations are written to the cache file within seconds, so a crash
+   loses nothing; a cache file that cannot be read is set aside as `.bad`
+   and the game starts with an empty one.
 5. `layout/` decides how a translation is drawn: `style.py` keeps size and
    colours consistent across lines in the same band, `fit.py` wraps and
    sizes text, `colors.py` samples the background and text colours.
@@ -189,7 +194,9 @@ pipeline thread (`app/pipeline.py`):
 
 `app/controller.py` builds this chain from a `Settings` object and owns it
 while it runs; the tray icon, the settings window and the command line are
-the three ways of driving it. `app/credentials.py` finds API keys.
+the three ways of driving it. The slow part of a start (waiting for the
+window, loading or downloading models) runs on a thread, so the tray and
+the settings window stay responsive. `app/credentials.py` finds API keys.
 
 ```
 src/gametl/

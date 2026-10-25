@@ -8,6 +8,7 @@ the process (call it before any window or Qt code).
 from __future__ import annotations
 
 import ctypes
+import os
 from ctypes import wintypes
 from dataclasses import dataclass
 
@@ -46,6 +47,8 @@ _user32.GetClientRect.restype = wintypes.BOOL
 _user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
 _user32.ClientToScreen.restype = wintypes.BOOL
 _user32.GetForegroundWindow.restype = wintypes.HWND
+_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 _user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
 _user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
 _dwmapi.DwmGetWindowAttribute.argtypes = [
@@ -140,10 +143,19 @@ def foreground_window() -> int:
     return int(_user32.GetForegroundWindow() or 0)
 
 
-def list_windows(min_size: int = 64) -> list[WindowInfo]:
+def window_process_id(hwnd: int) -> int:
+    pid = wintypes.DWORD(0)
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return int(pid.value)
+
+
+def list_windows(min_size: int = 64, include_own: bool = False) -> list[WindowInfo]:
     """Top-level windows a user would recognise: visible, titled, not cloaked,
-    at least `min_size` pixels in both directions."""
+    at least `min_size` pixels in both directions. gametl's own windows (the
+    settings window, whose title contains "game") are left out unless
+    `include_own`, so a typed title never matches the app itself."""
     found: list[WindowInfo] = []
+    own_pid = os.getpid()
 
     @_WNDENUMPROC
     def _enum(hwnd: int, _lparam: int) -> bool:
@@ -151,6 +163,8 @@ def list_windows(min_size: int = 64) -> list[WindowInfo]:
             return True
         title = window_title(hwnd)
         if not title:
+            return True
+        if not include_own and window_process_id(hwnd) == own_pid:
             return True
         if is_cloaked(hwnd):
             return True

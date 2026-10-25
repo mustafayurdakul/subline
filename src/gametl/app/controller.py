@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..capture.windows import client_rect_on_screen, find_window, window_rect, window_title
 from ..ocr.rapid import RapidOcrEngine
@@ -49,7 +52,9 @@ def parse_zone(spec: str | None, width: int, height: int) -> Box | None:
         return None
     if max(x, y, w, h) <= 1.0:
         x, y, w, h = x * width, y * height, w * width, h * height
-    return max(0, int(x)), max(0, int(y)), min(width, int(x + w)), min(height, int(y + h))
+    # Rounded, not truncated: fractions saved with four decimals land a hair
+    # under the pixel they came from, and truncation would lose that pixel.
+    return max(0, round(x)), max(0, round(y)), min(width, round(x + w)), min(height, round(y + h))
 
 
 def offset_zone(zone: Box, dx: int, dy: int) -> Box:
@@ -167,13 +172,72 @@ def _spread(values: Iterable[float]) -> str:
     return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
 
 
+class StartError(RuntimeError):
+    """A start that cannot go ahead, with a message fit for the status line."""
+
+
+@dataclass(slots=True)
+class Prepared:
+    """Everything start() needs that takes time to obtain, gathered off the
+    UI thread: the window, the translators, the OCR engine and the pipeline
+    configuration. `generation` tells a stale result from the current one."""
+
+    generation: int
+    hwnd: int
+    title: str
+    settings: Settings
+    game: str
+    translator: Translator
+    draft: Translator | None
+    engine: RapidOcrEngine
+    config: PipelineConfig
+
+
+class _StartWorker(QThread):
+    """Runs `OverlayController.prepare` away from the UI thread, so the tray
+    and the settings window stay responsive while the window is waited for
+    and the models load (or download, on first use)."""
+
+    progress = Signal(str)
+    prepared = Signal(object)  # Prepared
+    failed = Signal(int, str)  # generation, message
+
+    def __init__(
+        self, controller: OverlayController, generation: int, settings: Settings, hwnd: int | None, wait: float
+    ) -> None:
+        super().__init__(controller)
+        self.controller = controller
+        self.generation = generation
+        self.settings = settings
+        self.hwnd = hwnd
+        self.wait_seconds = wait
+
+    def run(self) -> None:
+        try:
+            result = self.controller.prepare(
+                self.settings, self.hwnd, self.wait_seconds, self.progress.emit, self.generation
+            )
+        except StartError as exc:
+            self.failed.emit(self.generation, str(exc))
+        except Exception as exc:  # anything unforeseen still reaches the status line
+            self.failed.emit(self.generation, f"start failed: {type(exc).__name__}: {exc}")
+        else:
+            self.prepared.emit(result)
+
+
 class OverlayController(QObject):
     """Owns the OCR engine, translation service, overlay window and pipeline
-    thread for one running session; start() tears down any previous one."""
+    thread for one running session; start() tears down any previous one.
+
+    start() returns at once: the slow part (waiting for the window, building
+    the translators, loading the OCR engine) runs on a thread, and the
+    session begins when it is done. `running_changed(True)` or
+    `start_failed(message)` reports the outcome."""
 
     status = Signal(str)
     running_changed = Signal(bool)
     paused_changed = Signal(bool)
+    start_failed = Signal(str)
     area_selected = Signal(str)  # zone spec 'x,y,w,h' as fractions of the client area
 
     def __init__(self, store: ProfileStore | None = None, secrets: SecretStore | None = None, parent=None) -> None:
@@ -190,6 +254,10 @@ class OverlayController(QObject):
         self.cache: TranslationCache | None = None
         self.cache_path: Path | None = None
         self._engines: dict[tuple[str, bool], RapidOcrEngine] = {}  # by (language, gpu)
+        self._engine_lock = threading.Lock()
+        self._generation = 0  # bumped by every start() and stop(); a preparation from before is ignored
+        self._start_workers: set[_StartWorker] = set()
+        self._starting = False
         self._selector: AreaSelector | None = None
         self._selection_hwnd: int | None = None
 
@@ -198,6 +266,11 @@ class OverlayController(QObject):
     @property
     def running(self) -> bool:
         return self.worker is not None
+
+    @property
+    def starting(self) -> bool:
+        """A start() is being prepared and has not yet become running or failed."""
+        return self._starting
 
     @property
     def paused(self) -> bool:
@@ -220,75 +293,147 @@ class OverlayController(QObject):
             info = find_window(settings.window_match)
         return (info.hwnd, info.title) if info else None
 
-    def engine(self, lang: str, gpu: bool, frame_w: int = 1280, frame_h: int = 720) -> RapidOcrEngine:
+    def engine(
+        self, lang: str, gpu: bool, frame_w: int = 1280, frame_h: int = 720, say: Callable[[str], None] | None = None
+    ) -> RapidOcrEngine:
         """One warmed-up OCR engine per language and device, kept for the
-        life of the controller (loading takes a second or two)."""
-        engine = self._engines.get((lang, gpu))
-        if engine is None:
-            device = "GPU" if gpu else "CPU"
-            self._say(f"loading OCR model ({lang}, {device})... first use downloads it")
-            engine = RapidOcrEngine(lang=lang, use_dml=gpu, model_root_dir=str(self.store.models_dir / "ocr"))
-            engine.warm_up(frame_w, frame_h)
-            self._engines[(lang, gpu)] = engine
+        life of the controller (loading takes a second or two). Safe to call
+        from a worker thread; two starts wanting the same engine load it once."""
+        say = say or self._say
+        with self._engine_lock:
+            engine = self._engines.get((lang, gpu))
+            if engine is None:
+                device = "GPU" if gpu else "CPU"
+                say(f"loading OCR model ({lang}, {device})... first use downloads it")
+                engine = RapidOcrEngine(lang=lang, use_dml=gpu, model_root_dir=str(self.store.models_dir / "ocr"))
+                engine.warm_up(frame_w, frame_h)
+                self._engines[(lang, gpu)] = engine
         return engine
 
     def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> bool:
-        # 0. The licence (or the trial).
+        """Begin a session on the window `settings` (or `hwnd`) names. False
+        when the licence forbids it; otherwise True, and the outcome arrives
+        as `running_changed(True)` or `start_failed(message)`."""
         licence = license_status(self.secrets, self.store)
         if not licence.may_run:
             self._say(f"{licence.text}: enter one in Settings > Licence")
             return False
-
-        # 1. The window.
         if self.running:
             self.stop()
+        self._generation += 1
+        self._starting = True
+        worker = _StartWorker(self, self._generation, settings.copy(), hwnd, wait)
+        worker.progress.connect(self._say)
+        worker.prepared.connect(self._on_prepared)
+        worker.failed.connect(self._on_start_failed)
+        worker.finished.connect(lambda: self._start_workers.discard(worker))
+        self._start_workers.add(worker)
+        target = f"window {hwnd:#x}" if hwnd else f"{settings.window_match!r}"
+        self._say(f"starting on {target}...")
+        worker.start()
+        return True
+
+    def prepare(
+        self,
+        settings: Settings,
+        hwnd: int | None,
+        wait: float,
+        say: Callable[[str], None],
+        generation: int = 0,
+    ) -> Prepared:
+        """The slow, thread-safe part of start(): find the window (waiting up
+        to `wait` seconds), build the translators, load the OCR engine and
+        work out the pipeline configuration. Raises StartError with a message
+        for the status line when the session cannot begin."""
         resolved = self.resolve_window(settings, hwnd, wait)
         if resolved is None:
-            self._say(f"no visible window matching {settings.window_match!r}")
-            return False
-        self.hwnd, self.title = resolved
-        self.settings = settings.copy()
-        game = settings.game or self.title or "game"
+            raise StartError(f"no visible window matching {settings.window_match!r}")
+        hwnd, title = resolved
+        game = settings.game or title or "game"
 
-        # 2. The translators: the main one and the optional draft.
         if settings.translator == "claude" and not has_anthropic_credentials(self.secrets):
-            self._say("no Anthropic key: enter one in Settings > Translation")
-            return False
+            raise StartError("no Anthropic key: enter one in Settings > Translation")
         try:
-            self.translator = build_translator(settings, game, self.store, self.secrets)
+            translator = build_translator(settings, game, self.store, self.secrets)
             draft = build_draft_translator(settings, self.store, self.secrets)
-        except (OSError, ValueError, RuntimeError) as exc:
-            self._say(f"translator setup failed: {exc}")
-            return False
-        for translator in (self.translator, draft):
-            if getattr(translator, "kind", None):
-                self._say(f"offline model: {translator.kind} ({translator.model_dir})")  # type: ignore[union-attr]
+        except (OSError, ValueError, RuntimeError, ImportError) as exc:
+            raise StartError(f"translator setup failed: {exc}") from exc
+        for candidate in (translator, draft):
+            if getattr(candidate, "kind", None):
+                say(f"offline model: {candidate.kind} ({candidate.model_dir})")  # type: ignore[union-attr]
 
-        # 3. The translation service, the OCR engine, the overlay window and the
-        #    pipeline thread that connects them.
-        frame, client = capture_area(self.hwnd, settings.include_frame)
-        self.service = self._build_service(settings, game, draft)
-        engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3])
-        self.overlay = OverlayWindow(
-            self.hwnd,
-            hide_when_unfocused=settings.hide_when_unfocused,
-            exclude_from_capture=settings.exclude_from_capture,
-            font_family=settings.font,
-        )
-        self.worker = PipelineThread(self.hwnd, engine, self.service, self._pipeline_config(settings, frame, client))
-        self.worker.blocks_ready.connect(self.overlay.set_blocks)
-        self.worker.status.connect(self._say)
-        self.overlay.target_lost.connect(self._on_target_lost)
+        frame, client = capture_area(hwnd, settings.include_frame)
+        try:
+            config = self._pipeline_config(settings, frame, client)
+        except re.error as exc:
+            raise StartError(f"invalid ignore pattern: {exc}") from exc
+        try:
+            engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3], say)
+        except Exception as exc:
+            raise StartError(f"OCR engine failed to load: {type(exc).__name__}: {exc}") from exc
+        return Prepared(generation, hwnd, title, settings, game, translator, draft, engine, config)
 
-        # 4. Go.
-        self.overlay.start()
-        self.worker.start()
+    def _on_prepared(self, prepared: Prepared) -> None:
+        if prepared.generation != self._generation or self.running:
+            return  # a later start() or stop() superseded this one
+        self._starting = False
+        try:
+            self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
+            self.translator = prepared.translator
+            self.service = self._build_service(prepared.settings, prepared.game, prepared.draft)
+            if self.cache is not None and self.cache.load_error:
+                self._say(f"translation cache unreadable ({self.cache.load_error}): set aside as .bad, starting empty")
+            self.overlay = OverlayWindow(
+                prepared.hwnd,
+                hide_when_unfocused=prepared.settings.hide_when_unfocused,
+                exclude_from_capture=prepared.settings.exclude_from_capture,
+                font_family=prepared.settings.font,
+            )
+            worker = PipelineThread(prepared.hwnd, prepared.engine, self.service, prepared.config)
+            worker.blocks_ready.connect(self.overlay.set_blocks)
+            worker.status.connect(self._say)
+            worker.finished.connect(lambda: self._on_worker_finished(worker))
+            self.overlay.target_lost.connect(self._on_target_lost)
+            self.worker = worker
+            self.overlay.start()
+            worker.start()
+        except Exception as exc:
+            self._discard_partial()
+            self._fail(f"start failed: {type(exc).__name__}: {exc}")
+            return
         self.running_changed.emit(True)
         self._say(
-            f"running on {self.title!r}: {settings.effective_source_lang} -> {settings.target_lang} "
-            f"via {self.translator.name}"
+            f"running on {self.title!r}: {prepared.settings.effective_source_lang} -> "
+            f"{prepared.settings.target_lang} via {prepared.translator.name}"
         )
-        return True
+
+    def _on_start_failed(self, generation: int, message: str) -> None:
+        if generation != self._generation:
+            return
+        self._starting = False
+        self._fail(message)
+
+    def _fail(self, message: str) -> None:
+        self._say(message)
+        self.start_failed.emit(message)
+
+    def _discard_partial(self) -> None:
+        """Undo what _on_prepared built before it failed."""
+        self.worker = None
+        if self.overlay is not None:
+            self.overlay.close()
+            self.overlay.deleteLater()
+            self.overlay = None
+        if self.service is not None:
+            self.service.shutdown()
+            self.service = None
+
+    def _on_worker_finished(self, worker: PipelineThread) -> None:
+        """The pipeline thread ended on its own (capture closed, or an error
+        it has already reported): the session is over."""
+        if self.worker is worker:
+            self._say("pipeline stopped")
+            self.stop()
 
     def _build_service(self, settings: Settings, game: str, draft: Translator | None) -> TranslationService:
         assert self.translator is not None
@@ -339,6 +484,9 @@ class OverlayController(QObject):
         self.stop()
 
     def stop(self) -> None:
+        """End the session; a start() still being prepared is abandoned."""
+        self._generation += 1
+        self._starting = False
         worker, overlay, service = self.worker, self.overlay, self.service
         self.worker = None
         if worker is not None:
@@ -356,7 +504,7 @@ class OverlayController(QObject):
         self._say("stopped")
 
     def toggle(self, settings: Settings) -> None:
-        if self.running:
+        if self.running or self.starting:
             self.stop()
         else:
             self.start(settings)
@@ -393,12 +541,20 @@ class OverlayController(QObject):
         self._selection_hwnd = hwnd
         frame, client = capture_area(hwnd, active.include_frame)
         ax0, _, ax1, _ = client or frame
-        self._selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_zone, center_x=(ax0 + ax1) // 2)
-        self._selector.selected.connect(self._apply_selected_area)
-        self._selector.cancelled.connect(self._selection_cancelled)
-        self._selector.start()
+        selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_zone, center_x=(ax0 + ax1) // 2)
+        selector.selected.connect(self._apply_selected_area)
+        selector.cancelled.connect(self._selection_cancelled)
+        # Closed any other way (the layer deletes itself on close): forget it,
+        # or no selection could ever be started again.
+        selector.destroyed.connect(lambda *_: self._forget_selector(selector))
+        self._selector = selector
+        selector.start()
         self._say("drag to select the area to translate (Esc cancels)")
         return True
+
+    def _forget_selector(self, selector: AreaSelector) -> None:
+        if self._selector is selector:
+            self._selector = None
 
     def _selection_cancelled(self) -> None:
         self._selector = None
@@ -432,7 +588,9 @@ class OverlayController(QObject):
     def stats_text(self) -> str:
         parts = []
         if self.worker and self.worker.ocr_ms:
-            parts.append(f"frames {self.worker.frames}, ocr {_spread(self.worker.ocr_ms)}")
+            parts.append(
+                f"frames {self.worker.frames} read, {self.worker.skipped} unchanged, ocr {_spread(self.worker.ocr_ms)}"
+            )
         if self.service:
             st = self.service.stats
             cache_note = f"; cache {len(self.cache)} entries" if self.cache is not None else ""
