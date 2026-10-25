@@ -71,6 +71,14 @@ only; for buyers, publish the zip elsewhere or from a public repository.
 The executables are not code-signed, so Windows warns about an unknown
 publisher until a signing step is added.
 
+**Uninstall:** delete the unzipped folder. Everything else gametl keeps
+lives in `%APPDATA%\gametl` (profiles, translation caches, downloaded
+models, `config.json`, the log) and in four Windows Credential Manager
+entries (`gametl/DEEPL_AUTH_KEY`, `gametl/ANTHROPIC_API_KEY`,
+`gametl/LICENSE_KEY`, `gametl/TRIAL_START`). The Licence tab's **Remove
+all data and quit**, or `gametl --remove-all-data`, deletes both. Nothing
+is written to the registry or to `%TEMP%`.
+
 **From source**, for licensed use (needs [uv](https://docs.astral.sh/uv/)):
 
 ```

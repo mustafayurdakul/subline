@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..capture.windows import list_windows
+from .cleanup import describe_data
 from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
@@ -94,6 +95,7 @@ class SettingsDialog(QDialog):
     applied = Signal(object, object)  # Settings, hwnd or None
     profile_saved = Signal(str)
     select_area_requested = Signal()
+    remove_all_data_requested = Signal()  # the user confirmed: wipe everything and quit
 
     def __init__(
         self,
@@ -360,6 +362,22 @@ class SettingsDialog(QDialog):
             link = QLabel(f'<a href="{PURCHASE_URL}">Buy a licence</a>')
             link.setOpenExternalLinks(True)
             column.addWidget(link)
+
+        data = QGroupBox("Data on this computer")
+        data_column = QVBoxLayout(data)
+        self.data_label = QLabel(describe_data(self.store, self.secrets))
+        self.data_label.setWordWrap(True)
+        self.data_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        data_column.addWidget(self.data_label)
+        self.remove_data_btn = QPushButton("Remove all data and quit")
+        self.remove_data_btn.setToolTip(
+            "Deletes the folder and the Credential Manager entries above (profiles, translation caches, "
+            "downloaded models, API keys, licence key, trial start), then quits. Nothing of gametl stays on "
+            "this computer apart from the program folder itself."
+        )
+        self.remove_data_btn.clicked.connect(self.remove_all_data)
+        data_column.addWidget(self.remove_data_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        column.addWidget(data)
         column.addStretch(1)
         self._refresh_license_status()
         return page
@@ -452,6 +470,25 @@ class SettingsDialog(QDialog):
 
     def _refresh_license_status(self) -> None:
         self.license_label.setText(license_status(self.secrets, self.store).text)
+
+    # -- data removal -------------------------------------------------------------
+
+    def confirm_remove_all_data(self) -> bool:
+        answer = QMessageBox.warning(
+            self,
+            "gametl",
+            "Remove every profile, translation cache, downloaded model, the API keys, the licence key and "
+            "the trial record from this computer, then quit?\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def remove_all_data(self) -> None:
+        """Ask once, then hand the removal to the owner (the tray), which
+        stops the overlay, deletes everything and quits."""
+        if self.confirm_remove_all_data():
+            self.remove_all_data_requested.emit()
 
     # -- settings <-> widgets -------------------------------------------------------
 

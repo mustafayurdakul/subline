@@ -106,6 +106,21 @@ def test_invalid_ignore_pattern_is_reported_and_blocks_apply(qapp: QApplication,
     dialog.close()
 
 
+def test_remove_all_data_asks_first_then_hands_over(qapp: QApplication, tmp_path: Path) -> None:
+    dialog = SettingsDialog(Settings(), ProfileStore(tmp_path), MemorySecretStore())
+    assert str(tmp_path) in dialog.data_label.text()
+    requests: list[int] = []
+    dialog.remove_all_data_requested.connect(lambda: requests.append(1))
+    dialog.confirm_remove_all_data = lambda: False  # type: ignore[method-assign]
+    dialog.remove_data_btn.click()
+    assert requests == []
+    dialog.confirm_remove_all_data = lambda: True  # type: ignore[method-assign]
+    dialog.remove_data_btn.click()
+    assert requests == [1]
+    assert tmp_path.exists()  # the dialog itself deletes nothing: the owner does, then quits
+    dialog.close()
+
+
 def test_keys_go_to_the_secret_store_not_the_profile(
     qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

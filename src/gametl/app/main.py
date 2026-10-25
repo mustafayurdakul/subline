@@ -33,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mode.add_argument("--activate", metavar="KEY", help="store a licence key and exit")
     mode.add_argument("--license-status", action="store_true", help="print the licence or trial state and exit")
+    mode.add_argument(
+        "--remove-all-data",
+        action="store_true",
+        help="delete the data folder and the Credential Manager entries (keys, licence, trial) and exit",
+    )
 
     target = p.add_argument_group("target")
     target.add_argument("--window", help="title substring of the game window")
@@ -211,6 +216,9 @@ def utf8_console() -> None:
         sys.stdout = sys.stdout or log
         sys.stderr = sys.stderr or log
         faulthandler.enable(file=log, all_threads=True)
+        from gametl.app.cleanup import register_log
+
+        register_log(log)  # "Remove all data" closes it before deleting the folder
         return
     for stream in (sys.stdout, sys.stderr):
         with contextlib.suppress(AttributeError, ValueError):
@@ -265,6 +273,13 @@ def main(argv: list[str] | None = None) -> int:
     store = ProfileStore(args.data_dir)
     if args.activate or args.license_status:
         return license_command(args.activate, store)
+    if args.remove_all_data:
+        from gametl.app.cleanup import remove_all_data
+        from gametl.app.credentials import WindowsCredentialStore
+
+        report = remove_all_data(store, WindowsCredentialStore())
+        print(report.text)
+        return 0 if report.complete else 1
     profile_name = args.profile
     if profile_name:
         if not store.exists(profile_name):
