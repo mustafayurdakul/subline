@@ -44,10 +44,15 @@ def test_dialog_round_trips_settings(qapp: QApplication, tmp_path: Path) -> None
         render="inplace",
         subtitle_font_px=30,
         subtitle_color="#FFEE00",
-        subtitle_background="none",
-        subtitle_position="bottom",
+        subtitle_background="shadow",
+        subtitle_pill_alpha=120,
+        subtitle_bold=True,
+        subtitle_position="source",
         subtitle_hide_source=False,
-        center_zone=False,
+        subtitle_center_tolerance=0,
+        subtitle_size_tolerance=50,
+        short_line_confidence=0.75,
+        center_zone=True,
         font="Arial",
         fps=8.0,
         diff_threshold=2.5,
@@ -103,6 +108,16 @@ def test_invalid_ignore_pattern_is_reported_and_blocks_apply(qapp: QApplication,
     dialog.save_profile()
     assert applied == [] and len(reported) == 2 and "(unclosed" in reported[0]
     assert ProfileStore(tmp_path).list() == []
+    dialog.close()
+
+
+def test_bottom_strip_preset_and_empty_colour(qapp: QApplication, tmp_path: Path) -> None:
+    dialog = SettingsDialog(Settings(), ProfileStore(tmp_path), MemorySecretStore())
+    assert dialog.roi.text() == ""
+    dialog.strip_btn.click()
+    assert dialog.roi.text() == "0,0.75,1,0.25"
+    dialog.subtitle_color.setText("   ")
+    assert dialog.to_settings().subtitle_color == ""  # empty stays empty: the game's own colour
     dialog.close()
 
 

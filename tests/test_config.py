@@ -28,6 +28,18 @@ def test_zone_only_is_the_default() -> None:
     assert Settings().ocr_gpu is False
 
 
+def test_subtitle_defaults_favour_a_steady_look() -> None:
+    s = Settings()
+    assert s.subtitle_position == "bottom" and s.subtitle_color == "" and s.subtitle_font_px == 0
+    assert s.center_zone is False  # free selection; Shift centres
+    assert (s.subtitle_center_tolerance, s.subtitle_size_tolerance) == (10, 35)
+    assert s.short_line_confidence == 0.9
+    # A profile saved before these fields existed keeps working and gets the defaults.
+    old = Settings.from_dict({"window_match": "Alan Wake 2", "subtitle_position": "source", "center_zone": True})
+    assert old.subtitle_position == "source" and old.center_zone is True
+    assert old.subtitle_background == "pill" and old.subtitle_pill_alpha == 230
+
+
 def test_saved_profiles_keep_their_own_patterns() -> None:
     assert Settings.from_dict({"ignore_patterns": []}).ignore_patterns == []
     assert Settings.from_dict({}).ignore_patterns == [NO_LETTERS_PATTERN]

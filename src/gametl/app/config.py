@@ -38,14 +38,21 @@ class Settings:
     game: str = ""  # name for the prompt and the cache; default: window title
     include_frame: bool = False  # read the title bar / frame too
     roi: str = ""  # the only area read and translated: x,y,w,h (fractions or px of the client area); empty = whole area
-    center_zone: bool = True  # keep a selected area symmetric about the client area's horizontal centre
+    center_zone: bool = (
+        False  # keep a selected area symmetric about the client area's centre (Shift inverts while dragging)
+    )
     # subtitle mode: with an area set, render translations in it with one fixed style
     render: str = "subtitle"  # "subtitle" | "inplace" (per-block, at the OCR box)
-    subtitle_font_px: int = 0  # 0 = the game's own subtitle size (median line height)
-    subtitle_color: str = "#FFFFFF"
-    subtitle_background: str = "pill"  # "pill" | "none"
-    subtitle_position: str = "source"  # "source" (where the game drew it) | "bottom" | "center" of the area
+    subtitle_font_px: int = 0  # 0 = the game's own subtitle size, learned from the first lines and then held
+    subtitle_color: str = ""  # "#RRGGBB"; empty = the game's own subtitle colour, sampled from the frame
+    subtitle_background: str = "pill"  # "pill" | "shadow" (soft drop shadow, no box) | "none" (outlined text)
+    subtitle_pill_alpha: int = 230  # opacity of the pill, 0..255
+    subtitle_bold: bool = False
+    subtitle_position: str = "bottom"  # "bottom" of the area (steady) | "source" (where the game drew it) | "center"
     subtitle_hide_source: bool = True  # cover the original line when the subtitle is drawn elsewhere
+    # HUD text sharing the area: subtitles are centred and one size; prompts and objectives are not.
+    subtitle_center_tolerance: int = 10  # % of the area width a block's centre may be off the area's centre; 0 = off
+    subtitle_size_tolerance: int = 35  # % a block's line height may differ from the learned subtitle size; 0 = off
     # languages and OCR
     lang: str = "en"  # OCR model language
     ocr_gpu: bool = False  # run OCR on the GPU through DirectML (any DirectX 12 card)
@@ -66,6 +73,7 @@ class Settings:
     font: str = "Segoe UI"
     ignore_zones: list[str] = field(default_factory=list)
     ignore_patterns: list[str] = field(default_factory=lambda: [NO_LETTERS_PATTERN])
+    short_line_confidence: float = 0.9  # a line of one or two letters needs this OCR confidence; 0 = off
     # pipeline
     fps: float = 10.0
     full_scan_every: int = 0  # with a zone: also sweep the rest of the area every N frames (0 = never)

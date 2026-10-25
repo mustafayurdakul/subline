@@ -79,9 +79,33 @@ def build_parser() -> argparse.ArgumentParser:
     look.add_argument(
         "--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size"
     )
-    look.add_argument("--subtitle-color", metavar="#RRGGBB", help="subtitle text colour (default #FFFFFF)")
-    look.add_argument("--subtitle-background", choices=["pill", "none"])
-    look.add_argument("--subtitle-position", choices=["source", "bottom", "center"])
+    look.add_argument(
+        "--subtitle-color", metavar="#RRGGBB", help="subtitle text colour; empty (default) = the game's own colour"
+    )
+    look.add_argument("--subtitle-background", choices=["pill", "shadow", "none"], help="default pill")
+    look.add_argument("--subtitle-pill-alpha", type=int, metavar="0-255", help="opacity of the pill (default 230)")
+    look.add_argument("--subtitle-bold", action="store_true", default=None, help="bold subtitle text")
+    look.add_argument(
+        "--subtitle-position", choices=["bottom", "source", "center"], help="default bottom (steady baseline)"
+    )
+    look.add_argument(
+        "--subtitle-center-tolerance",
+        type=int,
+        metavar="PCT",
+        help="drop text whose centre is further than PCT%% of the area width from its centre (default 10; 0 = off)",
+    )
+    look.add_argument(
+        "--subtitle-size-tolerance",
+        type=int,
+        metavar="PCT",
+        help="drop text whose line height differs more than PCT%% from the learned subtitle size (default 35; 0 = off)",
+    )
+    look.add_argument(
+        "--short-line-confidence",
+        type=float,
+        metavar="0-1",
+        help="a line of one or two letters needs this OCR confidence (default 0.9; 0 = off)",
+    )
     look.add_argument(
         "--show-source",
         action="store_true",
@@ -89,7 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not cover the original line when the subtitle is drawn elsewhere",
     )
     look.add_argument(
-        "--no-center-zone", action="store_true", default=None, help="do not mirror a selected area about the centre"
+        "--no-center-zone",
+        action="store_true",
+        default=None,
+        help="do not mirror a selected area about the centre by default (Shift while dragging inverts either way)",
     )
     look.add_argument("--style", choices=["auto", "patch", "pill", "outline"], help="in-place style")
     look.add_argument("--font")
@@ -162,12 +189,17 @@ _VALUE_OPTIONS = {
     "subtitle_font": "subtitle_font_px",
     "subtitle_color": "subtitle_color",
     "subtitle_background": "subtitle_background",
+    "subtitle_pill_alpha": "subtitle_pill_alpha",
     "subtitle_position": "subtitle_position",
+    "subtitle_center_tolerance": "subtitle_center_tolerance",
+    "subtitle_size_tolerance": "subtitle_size_tolerance",
+    "short_line_confidence": "short_line_confidence",
     "dump_dir": "dump_dir",
 }
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
 _FLAG_OPTIONS = {
     "no_center_zone": ("center_zone", False),
+    "subtitle_bold": ("subtitle_bold", True),
     "show_source": ("subtitle_hide_source", False),
     "include_frame": ("include_frame", True),
     "structured": ("structured", True),

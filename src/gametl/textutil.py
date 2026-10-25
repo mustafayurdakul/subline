@@ -13,6 +13,11 @@ def normalize_text(s: str) -> str:
     return _WS.sub(" ", s).strip().casefold()
 
 
+def letter_count(s: str) -> int:
+    """Letters of any script in `s`; digits, punctuation and spaces do not count."""
+    return sum(1 for ch in s if ch.isalpha())
+
+
 def text_similarity(a: str, b: str) -> float:
     """How likely two readings are the *same* on-screen text.
 
