@@ -1,23 +1,27 @@
 # Build the packaged folder on a Windows runner and publish it.
 #
+# Three ways to cut a release; all must agree with the version in pyproject.toml:
+#
+#   a merge to main that carries a version no tag exists for yet
+#       releases that version: the tag v<version> is created at the merge
+#       commit and the zip attached to its release (a merge whose version is
+#       already tagged builds nothing)
 #   git tag v0.2.0 && git push origin v0.2.0
-#       builds dist/gametl, zips it and attaches the zip to a GitHub release
-#       for the tag (a tag with a dash, v0.2.0-beta1, becomes a pre-release)
-#   Actions > Release > Run workflow, with a tag name such as v0.2.0
-#       the same, from the Actions tab: the tag is created at the chosen
-#       commit when the release is published
-#   Actions > Release > Run workflow, tag left empty
-#       builds without releasing and keeps the zip as a workflow artifact,
+#       the same for an explicit tag (a tag with a dash, v0.2.0-beta1,
+#       becomes a pre-release)
+#   Actions > Release > Run workflow
+#       with a tag name: the same, from the Actions tab; with the tag left
+#       empty: builds without releasing and keeps the zip as an artifact,
 #       to try the build first
 #
-# The tag must match the version in pyproject.toml. The executables are not
-# code-signed here: Windows shows "unknown publisher" for them until a
-# signing step (a cloud signing service) is added.
+# The executables are not code-signed here: Windows shows "unknown
+# publisher" for them until a signing step (a cloud signing service) is added.
 
 name: Release
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -30,10 +34,46 @@ permissions:
   contents: write
 
 jobs:
+  decide:
+    # Cheap and first: which tag (if any) this run releases, and whether to build at all.
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      build: ${{ steps.tag.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              tag="$GITHUB_REF_NAME"; build=true ;;
+            *)
+              if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+                tag="$(printf '%s' "$INPUT_TAG" | tr -d '[:space:]')"; build=true
+              elif git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+                tag=""; build=false   # main is already released at this version
+              else
+                tag="v$version"; build=true   # a new version on main: release it
+              fi ;;
+          esac
+          if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
+            echo "tag $tag does not match pyproject.toml version $version" >&2
+            exit 1
+          fi
+          echo "version $version, tag '${tag}', build $build"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
     runs-on: windows-latest
     env:
       QT_QPA_PLATFORM: offscreen # the app icon is rendered with Qt during the build
+      RELEASE_TAG: ${{ needs.decide.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -42,47 +82,34 @@ jobs:
       - name: Install
         run: uv sync --group build
 
-      - name: Work out the release tag and the archive name
-        id: tag
+      - name: Name the archive
+        id: name
         shell: pwsh
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          $tag = if ("${{ github.ref }}".StartsWith("refs/tags/")) { "${{ github.ref_name }}" } else { $env:INPUT_TAG.Trim() }
-          $label = if ($tag) { $tag } else { "${{ github.sha }}".Substring(0, 7) }
-          "tag=$tag" >> $env:GITHUB_OUTPUT
+          $label = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "${{ github.sha }}".Substring(0, 7) }
           "zip=gametl-$label-win64.zip" >> $env:GITHUB_OUTPUT
-
-      - name: Check that the tag matches the project version
-        if: steps.tag.outputs.tag != ''
-        shell: pwsh
-        run: |
-          $version = (uv version --short).Trim()
-          if ("v$version" -ne "${{ steps.tag.outputs.tag }}") {
-            throw "tag ${{ steps.tag.outputs.tag }} does not match pyproject.toml version $version"
-          }
 
       - name: Build
         run: uv run --group build python scripts/build.py --clean
 
       - name: Zip
         shell: pwsh
-        run: 7z a -mx=5 "${{ steps.tag.outputs.zip }}" ./dist/gametl
+        run: 7z a -mx=5 "${{ steps.name.outputs.zip }}" ./dist/gametl
 
       - name: Publish the release
-        if: steps.tag.outputs.tag != ''
+        if: needs.decide.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ needs.decide.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: ${{ steps.tag.outputs.zip }}
+          files: ${{ steps.name.outputs.zip }}
           generate_release_notes: true
-          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}
+          prerelease: ${{ contains(needs.decide.outputs.tag, '-') }}
 
       - name: Keep the build as an artifact
-        if: steps.tag.outputs.tag == ''
+        if: needs.decide.outputs.tag == ''
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.tag.outputs.zip }}
-          path: ${{ steps.tag.outputs.zip }}
+          name: ${{ steps.name.outputs.zip }}
+          path: ${{ steps.name.outputs.zip }}
           retention-days: 7
