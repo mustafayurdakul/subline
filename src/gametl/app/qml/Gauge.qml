@@ -25,19 +25,17 @@ Row {
             y: slider.topPadding + slider.availableHeight / 2 - height / 2
             width: slider.availableWidth
             height: 4
-            radius: 2
             color: Theme.borderStrong
             Rectangle {
                 width: slider.visualPosition * parent.width
                 height: parent.height
-                radius: 2
-                color: Theme.textSoft
+                color: Theme.accent
             }
         }
         handle: Rectangle {
             x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
             y: slider.topPadding + slider.availableHeight / 2 - height / 2
-            width: 16; height: 16; radius: 8
+            width: 14; height: 14
             color: Theme.text
             border.color: Theme.window
             border.width: 2

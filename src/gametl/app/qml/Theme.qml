@@ -2,8 +2,9 @@ pragma Singleton
 import QtQuick
 
 // The design tokens every component reads: one palette, one spacing grid,
-// one type scale. Neutral zinc greys on near-black; no hue anywhere in the
-// chrome, so the game's own colours in the preview are the only colour.
+// one type scale. Sharp corners; zinc greys on near-black with one muted
+// accent (a dim gold) for the things that matter: the filled button, a
+// switch that is on, the active page, focus.
 QtObject {
     readonly property color window: "#09090B"
     readonly property color sidebar: "#0C0C0E"
@@ -15,14 +16,16 @@ QtObject {
     readonly property color text: "#FAFAFA"
     readonly property color textSoft: "#D4D4D8"
     readonly property color muted: "#8E8E97"
-    readonly property color primary: "#E4E4E7"      // filled buttons, switches that are on
-    readonly property color textOnPrimary: "#09090B"
-    readonly property color selection: "#52525B"
-    readonly property color danger: "#E5484D"       // destructive actions only
+    readonly property color accent: "#A98E5C"       // dim gold: filled button, switch on, active page, focus
+    readonly property color accentSoft: "#26221A"   // the accent at 15 %, for the active page's row
+    readonly property color accentDeep: "#6E5C3C"   // outlines in the accent that must stay quiet
+    readonly property color textOnAccent: "#0B0A08"
+    readonly property color selection: "#4A4234"
+    readonly property color danger: "#B5484D"       // destructive actions only
 
     readonly property int space: 8
-    readonly property int radius: 12
-    readonly property int radiusSmall: 8
+    readonly property int radius: 0
+    readonly property int radiusSmall: 0
     readonly property int sidebarWidth: 224
     readonly property int contentWidth: 680
 

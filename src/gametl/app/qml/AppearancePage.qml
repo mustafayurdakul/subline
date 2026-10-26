@@ -14,7 +14,7 @@ ColumnLayout {
         background: ["pill", "shadow", "none"][backgroundPick.current]
         pillOpacity: pillAlpha.value / 255
         position: ["bottom", "source", "center"][positionPick.current]
-        textColor: ownColour.checked ? "#F2F2F2" : "#FFE27A"
+        textColor: ownColour.checked ? "#F2F2F2" : "#D9B86A"
     }
 
     Card {
@@ -31,7 +31,7 @@ ColumnLayout {
                 spacing: Theme.space
                 Toggle { id: ownColour; checked: true }
                 Text { text: "game's own"; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: Theme.sizeSmall + 1 }
-                Rectangle { width: 28; height: 28; radius: 6; color: "#FFE27A"; border.color: Theme.borderStrong; opacity: ownColour.checked ? 0.35 : 1 }
+                Rectangle { width: 28; height: 28; color: "#D9B86A"; border.color: Theme.borderStrong; opacity: ownColour.checked ? 0.35 : 1 }
             }
         }
         SettingRow { label: "Bold"; Toggle { id: boldToggle; checked: backend.subtitleBold } }

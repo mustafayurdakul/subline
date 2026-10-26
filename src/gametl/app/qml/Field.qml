@@ -21,7 +21,7 @@ TextField {
     background: Rectangle {
         radius: Theme.radiusSmall
         color: Theme.field
-        border.color: root.activeFocus ? Theme.muted : Theme.border
+        border.color: root.activeFocus ? Theme.accent : Theme.border
         border.width: 1
     }
 }

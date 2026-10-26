@@ -32,13 +32,13 @@ Rectangle {
 
             Rectangle {
                 visible: root.step > 0
-                width: 24; height: 24; radius: 12
-                color: Theme.cardRaised
-                border.color: Theme.borderStrong
+                width: 24; height: 24
+                color: Theme.accentSoft
+                border.color: Theme.accentDeep
                 Text {
                     anchors.centerIn: parent
                     text: root.step
-                    color: Theme.text
+                    color: Theme.accent
                     font.family: Theme.font
                     font.pixelSize: Theme.sizeSmall
                     font.weight: Font.DemiBold

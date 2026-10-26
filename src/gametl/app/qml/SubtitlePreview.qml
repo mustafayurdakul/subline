@@ -15,21 +15,19 @@ Rectangle {
     property string position: "bottom"
 
     implicitHeight: width * 9 / 16
-    radius: Theme.radius
     clip: true
     color: "#0A0C10"
 
     // A dusk scene: sky, a tree line, a lit window. Enough to judge contrast.
     Rectangle {
         anchors.fill: parent
-        radius: root.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#26262C" }
-            GradientStop { position: 0.55; color: "#34323A" }
+            GradientStop { position: 0.0; color: "#3A2C2C" }
+            GradientStop { position: 0.55; color: "#2E2733" }
             GradientStop { position: 1.0; color: "#0E0E11" }
         }
     }
-    Rectangle { x: parent.width * 0.62; y: parent.height * 0.18; width: 110; height: 110; radius: 55; color: "#D8CBA0"; opacity: 0.22 }
+    Rectangle { x: parent.width * 0.62; y: parent.height * 0.18; width: 110; height: 110; radius: 55; color: "#E3C98E"; opacity: 0.28 }
     Repeater {
         model: 9
         Rectangle {
@@ -39,10 +37,10 @@ Rectangle {
             width: root.width / 6
             height: root.height * 0.6
             radius: 40
-            color: "#121215"
+            color: "#15131A"
         }
     }
-    Rectangle { x: parent.width * 0.74; y: parent.height * 0.66; width: 22; height: 30; color: "#E8C27A"; opacity: 0.8 }
+    Rectangle { x: parent.width * 0.74; y: parent.height * 0.66; width: 22; height: 30; color: "#E8B45A"; opacity: 0.85 }
 
     Item {
         id: zone
@@ -99,7 +97,6 @@ Rectangle {
         anchors.margins: 10
         width: previewTag.implicitWidth + 16
         height: 22
-        radius: 11
         color: Qt.rgba(0, 0, 0, 0.45)
         Text { id: previewTag; anchors.centerIn: parent; text: "Live preview"; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: 11 }
     }

@@ -2,17 +2,13 @@ import QtQuick
 import QtQuick.Layouts
 import "Icons.js" as Icons
 
-// Page title on the left; the state of the overlay and its one button on the right.
+// Page title on the left; the state of the overlay, in words, and its one button on the right.
 Item {
     id: root
     property string title: ""
     property string subtitle: ""
     property string status: "idle"  // "idle" | "starting" | "running" | "paused"
     property string statusText: "Overlay off"
-
-    readonly property string statusIcon: status === "running" ? Icons.activity
-                                       : status === "starting" ? Icons.loader
-                                       : status === "paused" ? Icons.pause : Icons.power
 
     implicitHeight: 72
 
@@ -31,27 +27,16 @@ Item {
 
         Rectangle {
             height: 32
-            width: chip.implicitWidth + 26
-            radius: 16
-            color: root.status === "running" ? Theme.cardRaised : Theme.card
-            border.color: root.status === "running" ? Theme.borderStrong : Theme.border
-            Row {
+            width: chip.implicitWidth + 28
+            color: root.status === "running" ? Theme.accentSoft : Theme.card
+            border.color: root.status === "running" ? Theme.accentDeep : Theme.border
+            Text {
                 id: chip
                 anchors.centerIn: parent
-                spacing: 8
-                Icon {
-                    path: root.statusIcon
-                    size: 15
-                    color: root.status === "running" ? Theme.text : Theme.muted
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    text: root.statusText
-                    color: root.status === "running" ? Theme.text : Theme.textSoft
-                    font.family: Theme.font
-                    font.pixelSize: Theme.sizeSmall + 1
-                    anchors.verticalCenter: parent.verticalCenter
-                }
+                text: root.statusText
+                color: root.status === "running" ? Theme.text : Theme.textSoft
+                font.family: Theme.font
+                font.pixelSize: Theme.sizeSmall + 1
             }
         }
 
