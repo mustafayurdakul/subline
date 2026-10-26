@@ -25,14 +25,18 @@ Rectangle {
         width: root.width - 2 * root.padding
         spacing: Theme.space
 
-        RowLayout {
+        // Title block. The step badge sits on the title line, not centred
+        // on title plus helper, so it reads as numbering the heading.
+        Item {
             Layout.fillWidth: true
-            spacing: Theme.space + 2
             visible: root.title !== ""
+            implicitHeight: titles.implicitHeight
 
             Rectangle {
+                id: badge
                 visible: root.step > 0
                 width: 24; height: 24
+                y: titleText.y + (titleText.height - height) / 2
                 color: Theme.accentSoft
                 border.color: Theme.accentDeep
                 Text {
@@ -45,9 +49,12 @@ Rectangle {
                 }
             }
             ColumnLayout {
-                Layout.fillWidth: true
+                id: titles
+                x: badge.visible ? badge.width + Theme.space + 2 : 0
+                width: parent.width - x
                 spacing: 2
                 Text {
+                    id: titleText
                     text: root.title
                     color: Theme.text
                     font.family: Theme.font
