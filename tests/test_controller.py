@@ -25,6 +25,7 @@ from gametl.app.credentials import MemorySecretStore
 from gametl.capture.base import Frame
 from gametl.capture.windows import WindowInfo
 from gametl.ocr.base import OcrResult, TextLine
+from tests.helpers import wait_until
 
 HWND = 4242
 TITLE = "Fake Game"
@@ -32,19 +33,8 @@ FRAME = (0, 0, 800, 600)
 CLIENT = (0, 30, 800, 600)
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    return QApplication.instance() or QApplication([])  # type: ignore[return-value]
-
-
 def wait_for(qapp: QApplication, predicate, timeout: float = 5.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        qapp.processEvents()
-        if predicate():
-            return
-        time.sleep(0.01)
-    raise AssertionError("condition not met in time")
+    assert wait_until(predicate, timeout, tick=qapp.processEvents), "condition not met in time"
 
 
 class FakeEngine:
@@ -90,7 +80,7 @@ class FakeCapture:
         if FakeCapture.close:
             self.closed = True
             return None
-        return Frame(np.full((600, 800, 3), 20, dtype=np.uint8), time.perf_counter(), FRAME)
+        return Frame(np.full((600, 800, 3), 20, dtype=np.uint8), time.perf_counter())
 
 
 class FakeOverlay(QObject):
@@ -188,7 +178,7 @@ def test_area_selection_restarts_on_the_same_engine(qapp, controller) -> None:
     specs: list[str] = []
     controller.area_selected.connect(specs.append)
 
-    controller._selection_hwnd = HWND
+    controller._selection = (HWND, FRAME, CLIENT)  # as select_area() leaves it
     controller._apply_selected_area((100, 480, 700, 580))  # frame pixels; client area starts 30 px down
     assert specs == ["0.1250,0.7895,0.7500,0.1754"]
     assert controller.settings is not None and controller.settings.roi == specs[0]

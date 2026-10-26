@@ -14,10 +14,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QSize, QUrl
-from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 
 from .. import APP_NAME
+from .config import ProfileStore, Settings
+from .credentials import MemorySecretStore
 from .icon import make_icon
 from .settings_backend import SettingsBackend, qml_dir
 
@@ -32,24 +33,16 @@ class SettingsWindow(QQuickView):
         self.problems: list[str] = []  # QML errors and warnings, as they come
         self.setTitle(APP_NAME)
         self.setIcon(make_icon(False))
-        self.setColor(QColor("#09090B"))
         self.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
         self.setMinimumSize(QSize(880, 600))
         self.resize(1000, 680)
-        engine = self.engine()
-        engine.addImportPath(str(qml_dir().parent))  # the gametl.ui module lives in qml/
-        engine.warnings.connect(self._on_warnings)
+        self.engine().warnings.connect(self._on_warnings)
         self.rootContext().setContextProperty("backend", backend)
         self.setSource(QUrl.fromLocalFile(str(qml_dir() / "Main.qml")))
         self.problems += [error.toString() for error in self.errors()]
 
     def _on_warnings(self, warnings) -> None:
         self.problems += [warning.toString() for warning in warnings]
-
-    @property
-    def page(self) -> str:
-        root = self.rootObject()
-        return str(root.property("page")) if root is not None else ""
 
     def show_page(self, page: str) -> None:
         root = self.rootObject()
@@ -70,10 +63,7 @@ def check(pages: Sequence[str] = PAGES) -> list[str]:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("QT_QUICK_BACKEND", "software")
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
-    from PySide6.QtGui import QGuiApplication
-
-    from .config import ProfileStore, Settings
-    from .credentials import MemorySecretStore
+    from PySide6.QtGui import QGuiApplication  # after the platform is chosen above
 
     global _app
     _app = app = QGuiApplication.instance() or QGuiApplication([])

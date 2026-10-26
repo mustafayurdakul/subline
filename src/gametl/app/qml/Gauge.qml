@@ -1,11 +1,10 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// A slider with the value shown beside it. With `map` and `key` it follows
-// and writes that settings entry; `scale` shows a 0..1 setting as 0..100.
+// A slider with the value shown beside it, bound to `map[key]`; `scale`
+// shows a 0..1 setting as 0..100.
 Row {
     id: root
-    property real value: 0
     property real from: 0
     property real to: 100
     property real stepSize: 1
@@ -13,26 +12,19 @@ Row {
     property real scale: 1
     property string suffix: ""
     property string specialText: ""  // shown at `from`
-    property var map: null
+    property var map: backend.settings
     property string key: ""
-    readonly property bool bound: map !== null && key !== ""
+    readonly property real value: Number(map[key]) * scale
     spacing: Theme.space + 2
-
-    Binding on value { when: root.bound; value: root.bound ? Number(root.map[root.key]) * root.scale : 0 }
 
     Slider {
         id: slider
         width: 160
         height: 24
         from: root.from; to: root.to; stepSize: root.stepSize
+        snapMode: Slider.SnapAlways
         value: root.value
-        onMoved: {
-            var shown = Math.round(value / root.stepSize) * root.stepSize
-            if (root.bound)
-                root.map[root.key] = Math.round(shown / root.scale * 1000) / 1000
-            else
-                root.value = shown
-        }
+        onMoved: root.map[root.key] = Math.round(value / root.scale * 1000) / 1000
 
         background: Rectangle {
             x: slider.leftPadding
@@ -55,12 +47,11 @@ Row {
             border.width: 2
         }
     }
-    Text {
+    Label {
         anchors.verticalCenter: parent.verticalCenter
         width: 56
         text: root.value === root.from && root.specialText !== "" ? root.specialText : root.value.toFixed(root.decimals) + root.suffix
         color: Theme.textSoft
-        font.family: Theme.font
-        font.pixelSize: Theme.sizeSmall + 1
+        font.pixelSize: Theme.sizeCaption
     }
 }

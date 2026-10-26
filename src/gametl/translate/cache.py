@@ -61,23 +61,32 @@ class TranslationCache:
         self._dirty = False
         self.load_error: str | None = None  # set when the file on disk could not be read
         if self.path and self.path.exists():
-            try:
-                self.load()
-            except (OSError, ValueError, AttributeError, TypeError) as exc:
-                # A damaged file must not stop the game from starting: keep it
-                # aside for inspection and begin with an empty cache.
-                self.load_error = f"{type(exc).__name__}: {exc}"
-                self._entries.clear()
-                self._templates.clear()
-                self._recent.clear()
-                self._dirty = False
-                self._quarantine()
+            self._load()
 
-    def _quarantine(self) -> None:
+    def _load(self) -> None:
+        """Read the file at `path`. A damaged file must not stop the game
+        from starting: it is set aside as .bad and the cache begins empty."""
         assert self.path is not None
-        bad = self.path.with_suffix(self.path.suffix + ".bad")
-        with contextlib.suppress(OSError):
-            os.replace(self.path, bad)
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            with self._lock:
+                self._clear()
+                for key, per_lang in data.get("entries", {}).items():
+                    for lang, translation in per_lang.items():
+                        self._store(key, lang, translation)
+        except (OSError, ValueError, AttributeError, TypeError) as exc:
+            self.load_error = f"{type(exc).__name__}: {exc}"
+            with self._lock:
+                self._clear()
+            with contextlib.suppress(OSError):
+                os.replace(self.path, self.path.with_suffix(self.path.suffix + ".bad"))
+
+    def _clear(self) -> None:
+        self._entries.clear()
+        self._templates.clear()
+        self._recent.clear()
+        self._dirty = False
 
     @staticmethod
     def key(text: str) -> str:
@@ -109,12 +118,18 @@ class TranslationCache:
             if len(key) >= self.fuzzy_min_len:
                 words = key.count(" ")
                 for recent_key in reversed(self._recent):
-                    if recent_key.count(" ") != words:
+                    if recent_key.count(" ") != words or not self._lengths_allow(key, recent_key):
                         continue
                     candidate = self._entries.get(recent_key, {}).get(target_lang)
                     if candidate is not None and text_similarity(key, recent_key) >= self.fuzzy_ratio:
                         return candidate
         return None
+
+    def _lengths_allow(self, a: str, b: str) -> bool:
+        """Whether two keys can be similar enough at all: the difflib ratio
+        is at most 2 * min(len) / (len(a) + len(b)), so most of the recent
+        keys are ruled out without comparing their characters."""
+        return 2 * min(len(a), len(b)) >= self.fuzzy_ratio * (len(a) + len(b))
 
     def put(self, text: str, target_lang: str, translation: str) -> None:
         key = self.key(text)
@@ -133,19 +148,6 @@ class TranslationCache:
             self._recent.remove(key)
         self._recent.append(key)
 
-    def load(self) -> None:
-        assert self.path is not None
-        with open(self.path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        with self._lock:
-            self._entries.clear()
-            self._templates.clear()
-            self._recent.clear()
-            for key, per_lang in data.get("entries", {}).items():
-                for lang, translation in per_lang.items():
-                    self._store(key, lang, translation)
-            self._dirty = False
-
     def save(self) -> bool:
         """Write to disk if anything changed. Returns True when written."""
         if self.path is None:
@@ -156,8 +158,13 @@ class TranslationCache:
             # Serialised under the lock: a worker thread may `put` while we write.
             text = json.dumps({"version": 1, "entries": self._entries}, ensure_ascii=False, indent=0)
             self._dirty = False
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError:
+            with self._lock:
+                self._dirty = True  # still unsaved: the next save tries again
+            raise
         return True

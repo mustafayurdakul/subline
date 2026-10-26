@@ -22,8 +22,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 from gametl.app.settings_window import PAGES
 
 
@@ -68,6 +66,11 @@ def main() -> int:
     from gametl.app.settings_window import SettingsWindow
 
     app = QGuiApplication([])
+
+    def settle() -> None:
+        for _ in range(20):
+            app.processEvents()
+
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as folder:
@@ -81,13 +84,10 @@ def main() -> int:
         pages = PAGES if args.page == "all" else [args.page]
         for page in pages:
             view.show_page(page)
-            root = view.rootObject()
-            for _ in range(20):
-                app.processEvents()
+            settle()
             if args.full:
-                view.resize(args.width, max(args.height, int(root.property("fullHeight"))))
-                for _ in range(20):
-                    app.processEvents()
+                view.resize(args.width, max(args.height, int(view.rootObject().property("fullHeight"))))
+                settle()
             image = view.grabWindow()
             suffix = f"-{args.background}" if page == "appearance" and args.background != "pill" else ""
             path = out / f"{page}{suffix}.png"

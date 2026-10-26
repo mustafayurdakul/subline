@@ -22,27 +22,20 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from gametl.app.license import LicenseError, make_key, parse_key
+from gametl.app.license import LicenseError, generate_keypair, make_key, parse_key
 
 DEFAULT_KEY_FILE = Path.home() / "Documents" / "gametl-license" / "license_private.pem"
 
 
 def keygen(path: Path) -> int:
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
     if path.exists():
         print(f"{path} exists; refusing to overwrite the signing key")
         return 2
-    private = Ed25519PrivateKey.generate()
+    pem, public_hex = generate_keypair()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(
-        private.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
-        )
-    )
+    path.write_bytes(pem)
     print(f"private key written to {path}  (back it up, never commit it)")
-    print(f'PUBLIC_KEY_HEX = "{private.public_key().public_bytes_raw().hex()}"')
+    print(f'PUBLIC_KEY_HEX = "{public_hex}"')
     return 0
 
 

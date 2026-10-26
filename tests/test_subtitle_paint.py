@@ -21,11 +21,6 @@ ZONE = (0, 200, 400, 300)
 WIDTH, HEIGHT = 400, 300
 
 
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    return QApplication.instance() or QApplication([])  # type: ignore[return-value]
-
-
 @pytest.fixture
 def overlay(qapp: QApplication) -> OverlayWindow:
     return OverlayWindow(0)  # never shown: only its layout and painter are used

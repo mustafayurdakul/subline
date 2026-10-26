@@ -65,9 +65,6 @@ class RapidOcrEngine:
         if model_root_dir:
             params["Global.model_root_dir"] = model_root_dir
 
-        self.lang = lang
-        self.version = version
-        self.size = size
         self._ocr = RapidOCR(params=params)
 
     def warm_up(self, width: int = 1280, height: int = 720) -> float:
@@ -88,17 +85,13 @@ class RapidOcrEngine:
         total_ms = (time.perf_counter() - t0) * 1000.0
 
         lines: list[TextLine] = []
-        boxes = getattr(out, "boxes", None)
-        texts = getattr(out, "txts", None) or ()
-        scores = getattr(out, "scores", None) or ()
-        if boxes is not None:
-            for box, text, score in zip(boxes, texts, scores, strict=False):
+        if out.boxes is not None:  # None when nothing was detected
+            for box, text, score in zip(out.boxes, out.txts or (), out.scores or (), strict=False):
                 quad = np.asarray(box, dtype=np.float32).reshape(4, 2)
                 lines.append(TextLine(text=str(text), quad=quad, confidence=float(score)))
 
         timings = {"total": total_ms}
-        stage_seconds = getattr(out, "elapse_list", None) or []
-        for stage, seconds in zip(("det", "cls", "rec"), stage_seconds, strict=False):
+        for stage, seconds in zip(("det", "cls", "rec"), out.elapse_list or [], strict=False):
             if isinstance(seconds, (int, float)):
                 timings[stage] = float(seconds) * 1000.0
         return OcrResult(lines=lines, timings_ms=timings)

@@ -12,16 +12,13 @@ Rectangle {
     color: Theme.card
     border.color: Theme.danger
 
-    Text {
+    Label {
         id: message
         anchors.left: parent.left
         anchors.right: closeButton.left
         anchors.leftMargin: 2 * Theme.space
         anchors.verticalCenter: parent.verticalCenter
         text: root.text
-        color: Theme.text
-        font.family: Theme.font
-        font.pixelSize: Theme.size
         wrapMode: Text.WordWrap
     }
     Item {

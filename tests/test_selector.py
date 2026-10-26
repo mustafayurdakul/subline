@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
-
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -16,11 +14,6 @@ from gametl.overlay.selector import AreaSelector, rect_to_zone_spec
 SHIFT = Qt.KeyboardModifier.ShiftModifier
 CTRL = Qt.KeyboardModifier.ControlModifier
 NONE = Qt.KeyboardModifier.NoModifier
-
-
-@pytest.fixture(scope="module")
-def qapp() -> QApplication:
-    return QApplication.instance() or QApplication([])  # type: ignore[return-value]
 
 
 def drag(selector: AreaSelector, start: QPoint, end: QPoint, modifier=NONE) -> None:

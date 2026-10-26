@@ -20,6 +20,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gametl.app.controller import parse_zone
 from gametl.capture.base import Frame
 from gametl.capture.windows import (
     client_rect_on_screen,
@@ -30,18 +31,6 @@ from gametl.capture.windows import (
 )
 from gametl.ocr.base import OcrResult
 from gametl.ocr.rapid import RapidOcrEngine
-
-
-def parse_roi(spec: str | None, width: int, height: int) -> tuple[int, int, int, int]:
-    """'x,y,w,h' as fractions (all <= 1) or pixels. Returns x0, y0, x1, y1."""
-    if not spec:
-        return 0, 0, width, height
-    x, y, w, h = (float(v) for v in spec.split(","))
-    if max(x, y, w, h) <= 1.0:
-        x, y, w, h = x * width, y * height, w * width, h * height
-    x0, y0 = max(0, int(x)), max(0, int(y))
-    x1, y1 = min(width, int(x + w)), min(height, int(y + h))
-    return x0, y0, x1, y1
 
 
 def frame_diff(previous: np.ndarray | None, image: np.ndarray) -> tuple[float, np.ndarray]:
@@ -97,7 +86,7 @@ def run_image(args: argparse.Namespace) -> int:
         return 2
     engine = make_engine(args)
     h, w = image.shape[:2]
-    x0, y0, x1, y1 = parse_roi(args.roi, w, h)
+    x0, y0, x1, y1 = parse_zone(args.roi, w, h) or (0, 0, w, h)
     crop = image[y0:y1, x0:x1]
     print(f"image {w}x{h}, roi ({x0},{y0})-({x1},{y1})")
 
@@ -167,7 +156,7 @@ def run_window(args: argparse.Namespace) -> int:
             last_ts = frame.timestamp
 
             if roi is None:
-                roi = parse_roi(args.roi, frame.width, frame.height)
+                roi = parse_zone(args.roi, frame.width, frame.height) or (0, 0, frame.width, frame.height)
                 print(
                     f"  first frame {frame.width}x{frame.height} "
                     f"(dwm {dwm[2] - dwm[0]}x{dwm[3] - dwm[1]}, "

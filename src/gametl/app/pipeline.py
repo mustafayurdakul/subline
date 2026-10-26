@@ -17,17 +17,15 @@ from PySide6.QtCore import QThread, Signal
 
 from ..capture.base import Frame
 from ..capture.wgc import WgcWindowCapture
+from ..geometry import RGB, Box
 from ..layout.colors import analyze_colors, bgr_to_rgb
-from ..layout.style import StyleMemory, ZoneStyle
+from ..layout.style import StyleMemory, ZoneStyle, line_height_of
 from ..ocr.base import OcrEngine, TextLine
 from ..overlay.window import RenderBlock
 from ..textutil import letter_count
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
 from ..tracking.filters import LineFilter
 from ..translate.service import TranslationService
-
-Box = tuple[int, int, int, int]
-RGB = tuple[int, int, int]
 
 
 @dataclass(slots=True)
@@ -149,31 +147,33 @@ class PipelineThread(QThread):
         cfg = self.cfg
         if self.unchanged(frame):
             self.skipped += 1
-            blocks = list(self._tracker.blocks)
-            render = self.render_blocks(blocks, frame)
+            blocks, lines = list(self._tracker.blocks), None
+        else:
+            t0 = time.perf_counter()
+            blocks, lines = self.track_frame(frame)
+            ocr_ms = (time.perf_counter() - t0) * 1000
+            self.ocr_ms.append(ocr_ms)
             if cfg.debug:
-                render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
-            return render
-        t0 = time.perf_counter()
-        blocks, lines = self.track_frame(frame)
-        ocr_ms = (time.perf_counter() - t0) * 1000
-        self.ocr_ms.append(ocr_ms)
+                detail = " ".join(f"#{b.id}{b.bbox}{'*' if b.translation else ''}" for b in blocks)
+                self.status.emit(
+                    f"frame {self.frames}: ocr {ocr_ms:.0f}ms lines={len(lines)} blocks={len(blocks)} "
+                    f"skipped={self.skipped} {detail}"
+                )
+            if cfg.dump_dir:
+                self._dump(frame, lines, blocks)
         render = self.render_blocks(blocks, frame)
         if cfg.debug:
             render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
-            detail = " ".join(f"#{b.id}{b.bbox}{'*' if b.translation else ''}" for b in blocks)
-            self.status.emit(
-                f"frame {self.frames}: ocr {ocr_ms:.0f}ms lines={len(lines)} blocks={len(blocks)} "
-                f"skipped={self.skipped} {detail}"
-            )
-        if cfg.dump_dir:
-            self._dump(frame, lines, blocks)
         return render
 
     # -- frame diff ------------------------------------------------------------
 
+    def _area(self, frame: Frame) -> Box:
+        """The part of the frame that is read: the client area, or all of it."""
+        return self.cfg.area or (0, 0, frame.width, frame.height)
+
     def _thumbnail(self, frame: Frame) -> np.ndarray:
-        x0, y0, x1, y1 = self.cfg.roi or self.cfg.area or (0, 0, frame.width, frame.height)
+        x0, y0, x1, y1 = self.cfg.roi or self._area(frame)
         region = frame.image[y0:y1, x0:x1]
         if region.size == 0:
             return np.zeros((1, 1), dtype=np.uint8)
@@ -191,18 +191,25 @@ class PipelineThread(QThread):
             return False
         thumb = self._thumbnail(frame)
         last = self._last_thumb
-        if last is None or last.shape != thumb.shape or self._skip_run >= cfg.max_skipped:
-            self._last_thumb, self._skip_run = thumb, 0
-            return False
-        settled = all(
-            b.pending_text is None and b.stable_frames >= cfg.stable_frames and b.missing_frames == 0
-            for b in self._tracker.blocks
-        )
-        if not settled or float(np.mean(cv2.absdiff(last, thumb))) >= cfg.diff_threshold:
+        if (
+            last is None
+            or last.shape != thumb.shape
+            or self._skip_run >= cfg.max_skipped
+            or not self._settled()
+            or float(np.mean(cv2.absdiff(last, thumb))) >= cfg.diff_threshold
+        ):
             self._last_thumb, self._skip_run = thumb, 0
             return False
         self._skip_run += 1
         return True
+
+    def _settled(self) -> bool:
+        """No tracked block is waiting for another sighting."""
+        cfg = self.cfg
+        return all(
+            b.pending_text is None and b.stable_frames >= cfg.stable_frames and b.missing_frames == 0
+            for b in self._tracker.blocks
+        )
 
     def track_frame(self, frame: Frame) -> tuple[list[TextBlock], list[TextLine]]:
         """OCR the frame and fold the lines into the tracked blocks. Returns
@@ -217,7 +224,7 @@ class PipelineThread(QThread):
         """Fill in the translations that are ready (queueing the rest) and
         return what the overlay should draw for them."""
         self._translate_ready(blocks, frame)
-        area = self.cfg.area or (0, 0, frame.width, frame.height)
+        area = self._area(frame)
         return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
 
     # -- subtitle zone ------------------------------------------------------------
@@ -236,9 +243,6 @@ class PipelineThread(QThread):
         offset = abs((block.bbox[0] + block.bbox[2]) / 2 - (zx0 + zx1) / 2)
         return offset <= tolerance * max(1, zx1 - zx0)
 
-    def _line_height(self, block: TextBlock) -> float:
-        return (block.bbox[3] - block.bbox[1]) / max(1, len(block.line_texts))
-
     def is_subtitle(self, block: TextBlock) -> bool:
         """In subtitle mode, whether a block looks like a subtitle rather than
         HUD text sharing the zone: centred, and about the learned size once
@@ -251,7 +255,7 @@ class PipelineThread(QThread):
         locked = self.zone_style.line_height
         if tolerance <= 0 or locked is None:
             return True
-        return abs(self._line_height(block) - locked) <= tolerance * locked
+        return abs(line_height_of(block.bbox, len(block.line_texts)) - locked) <= tolerance * locked
 
     def _ocr_region(self, frame: Frame, box: Box) -> list[TextLine]:
         x0, y0, x1, y1 = box
@@ -260,7 +264,7 @@ class PipelineThread(QThread):
     def _ocr(self, frame: Frame) -> tuple[list[TextLine], Box]:
         """OCR the roi (or the whole area), returning the lines and the
         region that was read."""
-        full = self.cfg.area or (0, 0, frame.width, frame.height)
+        full = self._area(frame)
         roi = self.cfg.roi
         if roi is None:
             return self._ocr_region(frame, full), full
@@ -305,7 +309,7 @@ class PipelineThread(QThread):
         block.contrast = sample.contrast
         self.style_memory.observe(block.bbox, max(1, len(block.line_texts)), sample.bg, sample.fg, sample.busy)
         if self.subtitle_mode and self._centered(block):
-            self.zone_style.observe(self._line_height(block), sample.fg)
+            self.zone_style.observe(line_height_of(block.bbox, len(block.line_texts)), sample.fg)
 
     def _room(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> tuple[int, int]:
         """Free pixels below and above a block before the next block that
@@ -327,7 +331,8 @@ class PipelineThread(QThread):
         return max(0, below), max(0, above)
 
     def _dump(self, frame: Frame, lines: list[TextLine], blocks: list[TextBlock]) -> None:
-        dump_dir = self.cfg.dump_dir or "."
+        dump_dir = self.cfg.dump_dir
+        assert dump_dir  # only called when a dump folder is set
         os.makedirs(dump_dir, exist_ok=True)
         image = frame.image.copy()
         for line in lines:

@@ -105,6 +105,14 @@ class Settings:
     def copy(self) -> Settings:
         return Settings.from_dict(self.to_dict())
 
+    def set_area(self, spec: str) -> None:
+        """Make `spec` the area to translate ('' for the whole window). A
+        chosen area is the whole point of reading, so the periodic sweep of
+        the rest is switched off with it."""
+        self.roi = spec
+        if spec:
+            self.full_scan_every = 0
+
     @property
     def effective_source_lang(self) -> str:
         return self.source_lang or self.lang
@@ -137,6 +145,10 @@ class ProfileStore:
     def cache_dir(self) -> Path:
         return self.root / "cache"
 
+    def cache_path(self, game: str, target_lang: str, translator: str) -> Path:
+        """The translation cache file for one game, language and translator."""
+        return self.cache_dir / f"{slug(game)}.{target_lang}.{translator}.json"
+
     @property
     def models_dir(self) -> Path:
         return self.root / "models"
@@ -151,9 +163,7 @@ class ProfileStore:
         return self.profiles_dir / f"{slug(name)}.json"
 
     def list(self) -> list[str]:
-        if not self.profiles_dir.exists():
-            return []
-        return sorted(p.stem for p in self.profiles_dir.glob("*.json"))
+        return sorted(p.stem for p in self.profiles_dir.glob("*.json"))  # a missing folder yields nothing
 
     def exists(self, name: str) -> bool:
         return self.path(name).exists()
@@ -189,8 +199,6 @@ class ProfileStore:
     # -- config ------------------------------------------------------------
 
     def load_config(self) -> dict:
-        if not self.config_path.exists():
-            return {}
         try:
             with open(self.config_path, encoding="utf-8") as fh:
                 return json.load(fh) or {}

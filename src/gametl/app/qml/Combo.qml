@@ -2,14 +2,13 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "Icons.js" as Icons
 
-// An editable drop-down: type a value or pick one of `options`. With `map`
-// and `key` it follows and writes that settings entry.
+// An editable drop-down bound to `map[key]`: type a value or pick one of
+// `options`.
 ComboBox {
     id: root
     property var options: []
-    property var map: null
+    property var map: backend.settings
     property string key: ""
-    readonly property bool bound: map !== null && key !== ""
 
     editable: true
     model: options
@@ -22,10 +21,10 @@ ComboBox {
 
     // The text comes from the map, not from editText: a model reset (the
     // window list refreshing) blanks editText, and must not blank the field.
-    onActivated: function(index) { if (bound) map[key] = String(options[index]) }
+    onActivated: function(index) { map[key] = String(options[index]) }
 
     contentItem: TextInput {
-        text: root.bound ? String(root.map[root.key] ?? "") : root.editText
+        text: String(root.map[root.key] ?? "")
         color: Theme.text
         selectionColor: Theme.selection
         selectedTextColor: Theme.text
@@ -33,10 +32,10 @@ ComboBox {
         verticalAlignment: Text.AlignVCenter
         clip: true
         autoScroll: true
-        onTextEdited: if (root.bound) root.map[root.key] = text
+        onTextEdited: root.map[root.key] = text
     }
     background: Rectangle {
-        radius: Theme.radiusSmall
+        radius: Theme.radius
         color: Theme.field
         border.color: root.activeFocus ? Theme.accent : Theme.border
     }
@@ -53,15 +52,7 @@ ComboBox {
         width: root.width
         height: 30
         highlighted: root.highlightedIndex === index
-        contentItem: Text {
-            text: row.modelData
-            color: Theme.text
-            font.family: Theme.font
-            font.pixelSize: Theme.size
-            elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter
-            leftPadding: 4
-        }
+        contentItem: Label { text: row.modelData; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter; leftPadding: 4 }
         background: Rectangle { color: row.highlighted ? Theme.cardRaised : "transparent" }
     }
     popup: Popup {

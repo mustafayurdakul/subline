@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gametl.layout.fit import ellipsize, fit_text, wrap_words
+from gametl.layout.fit import fit_text, truncate_with_ellipsis, wrap_words
 
 
 def measure(text: str, px: int) -> float:
@@ -15,9 +15,8 @@ def test_wrap_words_greedy_and_overflowing_word() -> None:
     assert wrap_words("", 10, width_of) == [""]
 
 
-def test_ellipsize() -> None:
-    assert ellipsize("short", 100, len) == "short"
-    assert ellipsize("a rather long line", 8, len) == "a rathe…"
+def test_truncate_with_ellipsis() -> None:
+    assert truncate_with_ellipsis("a rather long line", 8, len) == "a rathe…"
 
 
 def test_text_that_fits_is_unchanged() -> None:

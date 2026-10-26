@@ -2,12 +2,13 @@ import QtQuick
 import QtQuick.Controls.Basic
 
 // A switch: a square knob sliding on a bar; the bar takes the accent when
-// on. With `map` and `key` it follows and writes that settings entry.
+// on. With a `key` it follows and writes that settings entry; without one
+// the page binds `checked` itself.
 Switch {
     id: root
-    property var map: null
+    property var map: backend.settings
     property string key: ""
-    readonly property bool bound: map !== null && key !== ""
+    readonly property bool bound: key !== ""
 
     implicitWidth: 44
     implicitHeight: 22

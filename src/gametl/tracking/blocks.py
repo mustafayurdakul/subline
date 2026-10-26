@@ -13,12 +13,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..geometry import BGR, Box
 from ..ocr.base import TextLine
 from ..textutil import text_similarity
-
-Box = tuple[int, int, int, int]
-BGR = tuple[int, int, int]
-
 
 # -- geometry ------------------------------------------------------------------
 
@@ -137,9 +134,7 @@ def group_lines(lines: list[TextLine], gap_factor: float = 0.7, overlap_min: flo
 class TextBlock:
     id: int
     bbox: Box
-    lines: list[TextLine]
     text: str  # line texts joined with "\n"
-    confidence: float
     stable_frames: int = 0  # consecutive updates with unchanged text
     missing_frames: int = 0  # consecutive scanned frames without a match
     pending_text: str | None = None  # a different reading, not yet confirmed
@@ -229,13 +224,7 @@ class BlockTracker:
         return list(self.blocks)
 
     def _new(self, group: list[TextLine], bbox: Box) -> TextBlock:
-        block = TextBlock(
-            id=self._next_id,
-            bbox=bbox,
-            lines=group,
-            text="\n".join(line.text for line in group),
-            confidence=min(line.confidence for line in group),
-        )
+        block = TextBlock(id=self._next_id, bbox=bbox, text="\n".join(line.text for line in group))
         self._next_id += 1
         return block
 
@@ -254,8 +243,6 @@ class BlockTracker:
         reading turns out to be jitter, the cache restores it a frame later.
         """
         text = "\n".join(line.text for line in group)
-        block.lines = group
-        block.confidence = min(line.confidence for line in group)
         block.missing_frames = 0
 
         # Same text as before (within OCR jitter): one frame more stable.

@@ -10,6 +10,7 @@ import pytest
 
 from gametl.translate.base import TranslationError, TranslationRequest
 from gametl.translate.claude import ClaudeTranslator, TranslatedItem, TranslationBatch
+from tests.helpers import text_response
 
 
 class StubMessages:
@@ -42,14 +43,7 @@ def response_with(items, stop_reason="end_turn"):
 
 
 def test_defaults_are_plain_json_without_thinking() -> None:
-    body = '{"items": [{"id": 0, "text": "Merhaba"}]}'
-    response = SimpleNamespace(
-        stop_reason="end_turn",
-        stop_details=None,
-        content=[SimpleNamespace(type="text", text=body)],
-        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
-    )
-    client = StubClient(response)
+    client = StubClient(text_response('{"items": [{"id": 0, "text": "Merhaba"}]}'))
     translator = ClaudeTranslator(client=client)
     assert translator.translate(TranslationRequest(["Hello"], target_lang="tr")) == ["Merhaba"]
     (call,) = client.messages.created
@@ -66,7 +60,6 @@ def test_structured_request_shape_and_result_order() -> None:
         game="Fake Game",
         glossary={"Ammo": "Mühimmat"},
         source_lang="en",
-        target_lang="tr",
         structured=True,
         thinking="adaptive",
         client=client,
@@ -106,15 +99,8 @@ def test_structured_request_shape_and_result_order() -> None:
 
 
 def test_plain_mode_sends_positional_items_and_reads_string_lists() -> None:
-    body = '{"items": ["Yakın dur.", "O kapıyı açma dedim."]}'
-    response = SimpleNamespace(
-        stop_reason="end_turn",
-        stop_details=None,
-        content=[SimpleNamespace(type="text", text=body)],
-        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
-    )
-    client = StubClient(response)
-    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr")
+    client = StubClient(text_response('{"items": ["Yakın dur.", "O kapıyı açma dedim."]}'))
+    translator = ClaudeTranslator(client=client, source_lang="en")
     out = translator.translate(
         TranslationRequest(["Stay close.", "I told you not to open that door."], target_lang="tr")
     )
@@ -128,7 +114,7 @@ def test_plain_mode_sends_positional_items_and_reads_string_lists() -> None:
 
 def test_system_prompt_is_stable_across_calls() -> None:
     client = StubClient(response_with([(0, "x")]))
-    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr", structured=True)
+    translator = ClaudeTranslator(client=client, source_lang="en", structured=True)
     translator.translate(TranslationRequest(["a"], target_lang="tr"))
     translator.translate(TranslationRequest(["b"], target_lang="tr", context=[("a", "x")]))
     first, second = client.messages.calls
@@ -155,13 +141,6 @@ def test_disabled_thinking_is_not_sent_to_models_that_reject_it() -> None:
     assert "thinking" not in client.messages.calls[0]
 
 
-def test_adaptive_thinking_omits_the_parameter() -> None:
-    client = StubClient(response_with([(0, "x")]))
-    translator = ClaudeTranslator(client=client, thinking="adaptive", structured=True)
-    translator.translate(TranslationRequest(["a"], target_lang="tr"))
-    assert "thinking" not in client.messages.calls[0]
-
-
 def test_refusal_and_cutoff_raise() -> None:
     for mode in (True, False):
         translator = ClaudeTranslator(client=StubClient(response_with([], stop_reason="refusal")), structured=mode)
@@ -173,27 +152,17 @@ def test_refusal_and_cutoff_raise() -> None:
 
 
 def test_malformed_plain_json_raises() -> None:
-    response = SimpleNamespace(
-        stop_reason="end_turn",
-        stop_details=None,
-        content=[SimpleNamespace(type="text", text="Sure! Here you go: not json")],
-        usage=None,
-    )
-    translator = ClaudeTranslator(client=StubClient(response))
+    translator = ClaudeTranslator(client=StubClient(text_response("Sure! Here you go: not json")))
     with pytest.raises(TranslationError):
         translator.translate(TranslationRequest(["a"], target_lang="tr"))
 
 
 def test_plain_json_mode_parses_text_block() -> None:
     body = '```json\n{"items": [{"id": 0, "text": "Merhaba"}, {"id": 1, "text": "Yakın dur."}]}\n```'
-    response = SimpleNamespace(
-        stop_reason="end_turn",
-        stop_details=None,
-        content=[SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text=body)],
-        usage=SimpleNamespace(input_tokens=1, output_tokens=1),
-    )
+    response = text_response(body)
+    response.content.insert(0, SimpleNamespace(type="thinking", thinking=""))  # answered after a thinking block
     client = StubClient(response)
-    translator = ClaudeTranslator(client=client, structured=False, source_lang="en", target_lang="tr")
+    translator = ClaudeTranslator(client=client, structured=False, source_lang="en")
     out = translator.translate(TranslationRequest(["Hello", "Stay close."], target_lang="tr"))
     assert out == ["Merhaba", "Yakın dur."]
     (call,) = client.messages.created

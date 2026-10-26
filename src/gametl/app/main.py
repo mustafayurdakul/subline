@@ -54,9 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     lang = p.add_argument_group("languages")
-    lang.add_argument("--lang", help="OCR model language (en, ch, japan, korean, de, ...); default en")
+    lang.add_argument("--lang", help=f"OCR model language (en, ch, japan, korean, de, ...); default {Settings.lang}")
     lang.add_argument("--source-lang", help="source language for the translator; default: same as --lang")
-    lang.add_argument("--target-lang", help="target language code; default tr")
+    lang.add_argument("--target-lang", help=f"target language code; default {Settings.target_lang}")
     lang.add_argument("--ocr-gpu", action="store_true", default=None, help="run OCR on the GPU (DirectML)")
 
     tr = p.add_argument_group("translation")
@@ -64,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--draft", choices=["none", "offline", "deepl"], help="fast draft shown until the translator answers"
     )
-    tr.add_argument("--model", help="default claude-haiku-5-5")
+    tr.add_argument("--model", help=f"default {Settings.model}")
     tr.add_argument("--effort", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"])
     tr.add_argument("--structured", action="store_true", default=None, help="server-side structured output")
@@ -85,8 +85,15 @@ def build_parser() -> argparse.ArgumentParser:
     look.add_argument(
         "--subtitle-color", metavar="#RRGGBB", help="subtitle text colour; empty (default) = the game's own colour"
     )
-    look.add_argument("--subtitle-background", choices=["pill", "shadow", "none"], help="default pill")
-    look.add_argument("--subtitle-pill-alpha", type=int, metavar="0-255", help="opacity of the pill (default 230)")
+    look.add_argument(
+        "--subtitle-background", choices=["pill", "shadow", "none"], help=f"default {Settings.subtitle_background}"
+    )
+    look.add_argument(
+        "--subtitle-pill-alpha",
+        type=int,
+        metavar="0-255",
+        help=f"opacity of the pill (default {Settings.subtitle_pill_alpha})",
+    )
     look.add_argument("--subtitle-bold", action="store_true", default=None, help="bold subtitle text")
     look.add_argument(
         "--subtitle-position", choices=["bottom", "source", "center"], help="default bottom (steady baseline)"
@@ -95,19 +102,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--subtitle-center-tolerance",
         type=int,
         metavar="PCT",
-        help="drop text whose centre is further than PCT%% of the area width from its centre (default 10; 0 = off)",
+        help="drop text whose centre is further than PCT%% of the area width from its centre "
+        f"(default {Settings.subtitle_center_tolerance}; 0 = off)",
     )
     look.add_argument(
         "--subtitle-size-tolerance",
         type=int,
         metavar="PCT",
-        help="drop text whose line height differs more than PCT%% from the learned subtitle size (default 35; 0 = off)",
+        help="drop text whose line height differs more than PCT%% from the learned subtitle size "
+        f"(default {Settings.subtitle_size_tolerance}; 0 = off)",
     )
     look.add_argument(
         "--short-line-confidence",
         type=float,
         metavar="0-1",
-        help="a line of one or two letters needs this OCR confidence (default 0.9; 0 = off)",
+        help="a line of one or two letters needs this OCR confidence "
+        f"(default {Settings.short_line_confidence}; 0 = off)",
     )
     look.add_argument(
         "--show-source",
@@ -127,7 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
     look.add_argument("--ignore-pattern", action="append", metavar="REGEX", help="drop OCR lines matching; repeatable")
 
     run = p.add_argument_group("pipeline")
-    run.add_argument("--fps", type=float, help="capture cap; default 10")
+    run.add_argument("--fps", type=float, help=f"capture cap; default {Settings.fps:g}")
     run.add_argument(
         "--full-scan-every", type=int, help="with --roi: also sweep the rest every N frames (default 0 = never)"
     )
@@ -137,13 +147,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--diff-threshold",
         type=float,
         metavar="N",
-        help="skip OCR while the read area changes less than N (thumbnail difference, 0-255; default 1; 0 = never)",
+        help="skip OCR while the read area changes less than N "
+        f"(thumbnail difference, 0-255; default {Settings.diff_threshold:g}; 0 = never)",
     )
     run.add_argument(
         "--autosave-seconds",
         type=float,
         metavar="S",
-        help="write new translations to the cache file within S seconds (default 10)",
+        help=f"write new translations to the cache file within S seconds (default {Settings.autosave_seconds:g})",
     )
     run.add_argument(
         "--no-hide-unfocused",
@@ -167,38 +178,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 # Command-line option -> Settings field, copied when the option was given.
+# Most options are named after their field; three are not.
 _VALUE_OPTIONS = {
-    "window": "window_match",
-    "roi": "roi",
-    "lang": "lang",
-    "source_lang": "source_lang",
-    "target_lang": "target_lang",
-    "translator": "translator",
-    "model": "model",
-    "effort": "effort",
-    "thinking": "thinking",
-    "game": "game",
-    "glossary": "glossary_path",
-    "tone": "tone",
-    "style": "style",
-    "font": "font",
-    "fps": "fps",
-    "full_scan_every": "full_scan_every",
-    "stable_frames": "stable_frames",
-    "max_missing": "max_missing",
-    "diff_threshold": "diff_threshold",
-    "autosave_seconds": "autosave_seconds",
-    "render": "render",
-    "subtitle_font": "subtitle_font_px",
-    "subtitle_color": "subtitle_color",
-    "subtitle_background": "subtitle_background",
-    "subtitle_pill_alpha": "subtitle_pill_alpha",
-    "subtitle_position": "subtitle_position",
-    "subtitle_center_tolerance": "subtitle_center_tolerance",
-    "subtitle_size_tolerance": "subtitle_size_tolerance",
-    "short_line_confidence": "short_line_confidence",
-    "dump_dir": "dump_dir",
-}
+    name: name
+    for name in (
+        "roi", "lang", "source_lang", "target_lang", "translator", "model", "effort", "thinking", "game", "tone",
+        "style", "font", "fps", "full_scan_every", "stable_frames", "max_missing", "diff_threshold",
+        "autosave_seconds", "render", "subtitle_color", "subtitle_background", "subtitle_pill_alpha",
+        "subtitle_position", "subtitle_center_tolerance", "subtitle_size_tolerance", "short_line_confidence",
+        "dump_dir",
+    )
+} | {"window": "window_match", "glossary": "glossary_path", "subtitle_font": "subtitle_font_px"}  # fmt: skip
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
 _FLAG_OPTIONS = {
     "no_center_zone": ("center_zone", False),
@@ -218,7 +208,7 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
     """Overlay the command-line options that were given on `base`."""
     s = base.copy()
     for option, attr in _VALUE_OPTIONS.items():
-        value = getattr(args, option, None)
+        value = getattr(args, option)
         if value is not None:
             setattr(s, attr, value)
     for flag, (attr, value) in _FLAG_OPTIONS.items():
@@ -231,6 +221,15 @@ def settings_from_args(args: argparse.Namespace, base: Settings) -> Settings:
     if args.ignore_pattern:
         s.ignore_patterns = list(args.ignore_pattern)
     return s
+
+
+def screenshot(rect: tuple[int, int, int, int], path: str) -> None:
+    """Save a screen rectangle, layered windows (the overlay) included."""
+    from PIL import ImageGrab
+
+    image = ImageGrab.grab(bbox=rect, include_layered_windows=True, all_screens=True)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    image.save(path)
 
 
 def utf8_console() -> None:
@@ -334,15 +333,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.save_profile:
         path = store.save(args.save_profile, settings)
-        store.last_profile = slug(args.save_profile)
-        profile_name = slug(args.save_profile)
+        profile_name = store.last_profile = slug(args.save_profile)
         print(f"profile saved to {path}")
 
     if args.download_model:
         from gametl.translate.offline import ensure_model
 
         try:
-            model_dir, _ = ensure_model(settings.effective_source_lang, settings.target_lang, store.models_dir, print)
+            model_dir = ensure_model(settings.effective_source_lang, settings.target_lang, store.models_dir, print)
         except Exception as exc:
             print(f"download failed: {exc}")
             return 2
@@ -352,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from gametl.app.controller import OverlayController, grab_screen_region
+    from gametl.app.controller import OverlayController
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
@@ -381,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def finish() -> None:
             if args.screenshot and controller.overlay and controller.overlay.target_rect:
-                grab_screen_region(controller.overlay.target_rect, args.screenshot)
+                screenshot(controller.overlay.target_rect, args.screenshot)
                 print(f"screenshot saved to {args.screenshot}")
             app.quit()
 

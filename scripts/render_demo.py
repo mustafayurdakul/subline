@@ -31,23 +31,18 @@ from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from gametl.app.config import ProfileStore, Settings
-from gametl.app.controller import OverlayController, build_translator
+from gametl.app.controller import build_translator, parse_zone, pipeline_config
 from gametl.app.credentials import WindowsCredentialStore
 from gametl.app.main import utf8_console
 from gametl.app.pipeline import PipelineThread
 from gametl.capture.base import Frame
+from gametl.geometry import Box
 from gametl.ocr.rapid import RapidOcrEngine
 from gametl.overlay.window import OverlayWindow
 from gametl.translate.cache import TranslationCache
 from gametl.translate.service import TranslationService
 
-Box = tuple[int, int, int, int]
 LABELS = {"original": "Game", "translated": "With gametl"}
-
-
-def parse_fractions(spec: str) -> tuple[float, float, float, float]:
-    x, y, w, h = (float(v) for v in spec.split(","))
-    return x, y, w, h
 
 
 def paint_onto(image_bgr: np.ndarray, overlay: OverlayWindow, blocks) -> np.ndarray:
@@ -156,12 +151,11 @@ def main() -> int:
     translator = build_translator(settings, "demo", store, WindowsCredentialStore())
     service = TranslationService(translator, TranslationCache(), target_lang=args.target_lang, source_lang="en")
     engine = RapidOcrEngine(lang="en", model_root_dir=str(store.models_dir / "ocr"))
-    config = OverlayController._pipeline_config(settings, (0, 0, width, height), None)
+    config = pipeline_config(settings, (0, 0, width, height), None)
     pipeline = PipelineThread(0, engine, service, config)
     overlay = OverlayWindow(0)  # never shown: only its painter is used
 
-    cx, cy, cw, ch = parse_fractions(args.crop)
-    crop = (int(cx * width), int(cy * height), int((cx + cw) * width), int((cy + ch) * height))
+    crop = parse_zone(args.crop, width, height) or (0, 0, width, height)
     size = (args.width, int(args.width * (crop[3] - crop[1]) / (crop[2] - crop[0])))
     font = label_font(max(14, args.width // 40))
 

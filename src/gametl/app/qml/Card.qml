@@ -31,32 +31,17 @@ Rectangle {
             Layout.fillWidth: true
             visible: root.title !== ""
             spacing: 2
-            Text {
+            Label {
                 visible: root.step > 0
                 text: "STEP " + root.step
                 color: Theme.accent
-                font.family: Theme.font
-                font.pixelSize: 11
+                font.pixelSize: Theme.sizeTiny
                 font.weight: Font.DemiBold
                 font.letterSpacing: 1.2
                 Layout.bottomMargin: 2
             }
-            Text {
-                text: root.title
-                color: Theme.text
-                font.family: Theme.font
-                font.pixelSize: Theme.sizeTitle
-                font.weight: Font.DemiBold
-            }
-            Text {
-                visible: root.helper !== ""
-                text: root.helper
-                color: Theme.muted
-                font.family: Theme.font
-                font.pixelSize: Theme.sizeSmall
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
+            Label { text: root.title; font.pixelSize: Theme.sizeTitle; font.weight: Font.DemiBold }
+            Caption { visible: root.helper !== ""; text: root.helper; Layout.fillWidth: true }
         }
 
         Rectangle {

@@ -27,6 +27,7 @@ from .. import APP_NAME, __version__
 from .cleanup import describe_data
 from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
+from .hotkeys import parse_combo
 from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
 
 # fmt: off
@@ -34,7 +35,6 @@ OCR_LANGS = [
     "en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it", "pt", "pl", "nl", "tr", "cyrillic", "arabic",
 ]
 # fmt: on
-TRANSLATORS = ["claude", "deepl", "offline", "uppercase", "echo", "verbose"]
 BOTTOM_STRIP = "0,0.75,1,0.25"  # the area preset most games' subtitles fall in
 CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
 HOTKEY_LABELS = {
@@ -69,10 +69,6 @@ def invalid_pattern(patterns: list[str]) -> str | None:
 
 def invalid_hotkey(hotkeys: dict[str, str]) -> str | None:
     """One line naming the first hotkey that does not parse, or None."""
-    try:
-        from .hotkeys import parse_combo
-    except (ImportError, AttributeError, OSError):  # not on Windows: nothing to register anyway
-        return None
     for name, combo in hotkeys.items():
         try:
             parse_combo(combo)
@@ -101,7 +97,8 @@ def _coerce(name: str, raw: Any, fallback: Any) -> Any:
     return text or EMPTY_DEFAULTS.get(name, "")
 
 
-# Qt keys that the hotkey parser knows by name, for the press-to-set fields.
+# Qt keys that the hotkey parser knows by name (hotkeys.NAMED_KEYS), for the
+# press-to-set fields.
 _NAMED_QT_KEYS = {
     Qt.Key.Key_Space: "space",
     Qt.Key.Key_Tab: "tab",
@@ -143,10 +140,10 @@ def combo_from_key(key: int, modifiers: int) -> str:
         name = chr(key).lower()
     elif Qt.Key.Key_F1 <= key <= Qt.Key.Key_F24:
         name = f"f{key - Qt.Key.Key_F1 + 1}"
-    elif key in _NAMED_QT_KEYS:
-        name = _NAMED_QT_KEYS[Qt.Key(key)]
     else:
-        return ""
+        name = _NAMED_QT_KEYS.get(key)  # type: ignore[call-overload]
+        if name is None:
+            return ""
     return "+".join([*parts, name])
 
 
@@ -162,7 +159,7 @@ class ModelDownloadThread(QThread):
         from ..translate.offline import ensure_model
 
         try:
-            model_dir, _ = ensure_model(self.source, self.target, self.models_dir, self.progress.emit)
+            model_dir = ensure_model(self.source, self.target, self.models_dir, self.progress.emit)
         except Exception as exc:  # reported in the window
             self.finished_ok.emit(False, f"download failed: {exc}")
             return
@@ -205,7 +202,7 @@ class SettingsBackend(QObject):
         with warnings.catch_warnings():  # PySide6 6.12 flags the one public constructor as deprecated
             warnings.simplefilter("ignore", DeprecationWarning)
             self._map = QQmlPropertyMap()
-        self._base: Settings = settings
+        self._base: Settings
         self._status = "idle"
         self._status_text = ""
         self._profile_name = profile_name or ""
@@ -214,7 +211,6 @@ class SettingsBackend(QObject):
         self._download: ModelDownloadThread | None = None
         self._download_status = ""
         self._problem = ""
-        self._loading = False
         self.load(settings)
         self._map.valueChanged.connect(self._on_value_changed)
         self._refresh_license_status()
@@ -222,17 +218,14 @@ class SettingsBackend(QObject):
     # -- settings <-> map ---------------------------------------------------------
 
     def load(self, settings: Settings) -> None:
-        """Show `settings`; they become the base `to_settings()` builds on."""
+        """Show `settings`; they become the base `to_settings()` builds on.
+        (Writes from Python do not count as edits: no hotkey registration.)"""
         self._base = settings
-        self._loading = True
-        try:
-            for name in _FIELDS:
-                value = getattr(settings, name)
-                self._map.insert(name, "\n".join(value) if name in LIST_FIELDS else value)
-            for name in DEFAULT_HOTKEYS:
-                self._map.insert(f"hotkey_{name}", settings.hotkeys.get(name, DEFAULT_HOTKEYS[name]))
-        finally:
-            self._loading = False
+        for name in _FIELDS:
+            value = getattr(settings, name)
+            self._map.insert(name, "\n".join(value) if name in LIST_FIELDS else value)
+        for name in DEFAULT_HOTKEYS:
+            self._map.insert(f"hotkey_{name}", settings.hotkeys.get(name, DEFAULT_HOTKEYS[name]))
 
     def to_settings(self, base: Settings | None = None) -> Settings:
         """The map's values on top of `base` (default: the settings last
@@ -251,15 +244,23 @@ class SettingsBackend(QObject):
         return s
 
     def set(self, name: str, value: Any) -> None:
-        """Change one entry from Python (the tray, after an area selection),
-        with the same follow-up a change from a page gets."""
+        """Change one entry as an edit from a page would: the same follow-up
+        (the map's own valueChanged reports QML writes only)."""
         self._map.insert(name, value)
         self._on_value_changed(name, value)
 
     def _on_value_changed(self, key: str, _value: Any) -> None:
-        """A page wrote `key` (the map's valueChanged reports QML writes only)."""
-        if key.startswith("hotkey_") and not self._loading:
+        if key.startswith("hotkey_"):
             self.hotkeys_changed.emit(self.to_settings())
+
+    def _checked_settings(self) -> Settings | None:
+        """The map's settings when they can run, else None with the problem reported."""
+        settings = self.to_settings()
+        problem = invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
+        if problem:
+            self.report_problem(problem)
+            return None
+        return settings
 
     def _settings_map(self) -> QObject:
         return self._map
@@ -268,46 +269,17 @@ class SettingsBackend(QObject):
 
     # -- constants for the pages --------------------------------------------------------
 
-    def _app_name(self) -> str:
-        return APP_NAME
-
-    def _version(self) -> str:
-        return __version__
-
-    def _ocr_langs(self) -> list[str]:
-        return list(OCR_LANGS)
-
-    def _claude_models(self) -> list[str]:
-        return list(CLAUDE_MODELS)
-
-    def _trial_days(self) -> int:
-        return TRIAL_DAYS
-
-    def _purchase_url(self) -> str:
-        return PURCHASE_URL
-
-    def _data_folder(self) -> str:
-        return str(self.store.root)
-
-    def _data_description(self) -> str:
-        return describe_data(self.store, self.secrets)
-
-    def _default_hotkeys(self) -> dict:
-        return dict(DEFAULT_HOTKEYS)
-
-    def _hotkey_labels(self) -> dict:
-        return dict(HOTKEY_LABELS)
-
-    appName = Property(str, _app_name, constant=True)
-    version = Property(str, _version, constant=True)
-    ocrLangs = Property("QStringList", _ocr_langs, constant=True)
-    claudeModels = Property("QStringList", _claude_models, constant=True)
-    trialDays = Property(int, _trial_days, constant=True)
-    purchaseUrl = Property(str, _purchase_url, constant=True)
-    dataFolder = Property(str, _data_folder, constant=True)
-    dataDescription = Property(str, _data_description, constant=True)
-    defaultHotkeys = Property("QVariantMap", _default_hotkeys, constant=True)
-    hotkeyLabels = Property("QVariantMap", _hotkey_labels, constant=True)
+    appName = Property(str, lambda self: APP_NAME, constant=True)
+    version = Property(str, lambda self: __version__, constant=True)
+    ocrLangs = Property("QStringList", lambda self: list(OCR_LANGS), constant=True)
+    claudeModels = Property("QStringList", lambda self: list(CLAUDE_MODELS), constant=True)
+    trialDays = Property(int, lambda self: TRIAL_DAYS, constant=True)
+    purchaseUrl = Property(str, lambda self: PURCHASE_URL, constant=True)
+    dataFolder = Property(str, lambda self: str(self.store.root), constant=True)
+    dataDescription = Property(str, lambda self: describe_data(self.store, self.secrets), constant=True)
+    hotkeyNames = Property("QStringList", lambda self: list(DEFAULT_HOTKEYS), constant=True)  # in menu order
+    defaultHotkeys = Property("QVariantMap", lambda self: dict(DEFAULT_HOTKEYS), constant=True)
+    hotkeyLabels = Property("QVariantMap", lambda self: dict(HOTKEY_LABELS), constant=True)
 
     # -- overlay state -------------------------------------------------------------------
 
@@ -334,12 +306,9 @@ class SettingsBackend(QObject):
     @Slot()
     def start(self) -> None:
         """Validate, then ask the tray to run the overlay with the map's settings."""
-        settings = self.to_settings()
-        problem = invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
-        if problem:
-            self.report_problem(problem)
-            return
-        self.applied.emit(settings, self.selected_hwnd())
+        settings = self._checked_settings()
+        if settings is not None:
+            self.applied.emit(settings, self.selected_hwnd())
 
     @Slot()
     def stop(self) -> None:
@@ -374,11 +343,11 @@ class SettingsBackend(QObject):
 
     @Slot()
     def useBottomStrip(self) -> None:
-        self._map.insert("roi", BOTTOM_STRIP)
+        self.set("roi", BOTTOM_STRIP)
 
     @Slot()
     def useWholeWindow(self) -> None:
-        self._map.insert("roi", "")
+        self.set("roi", "")
 
     # -- profiles ---------------------------------------------------------------------------
 
@@ -398,18 +367,16 @@ class SettingsBackend(QObject):
 
     @Slot(str)
     def saveProfile(self, name: str) -> None:
-        settings = self.to_settings()
-        problem = invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
-        if problem:
-            self.report_problem(problem)
+        settings = self._checked_settings()
+        if settings is None:
             return
-        name = name.strip() or settings.game or settings.window_match or "game"
+        name = slug(name.strip() or settings.game or settings.window_match or "game")
         self.store.save(name, settings)
-        self.store.last_profile = slug(name)
+        self.store.last_profile = name
         self._base = settings
-        self.set_profile_name(slug(name))
+        self.set_profile_name(name)
         self.profilesChanged.emit()
-        self.profile_saved.emit(slug(name))
+        self.profile_saved.emit(name)
 
     @Slot(str)
     def loadProfile(self, name: str) -> None:
@@ -511,10 +478,13 @@ class SettingsBackend(QObject):
             return
         settings = self.to_settings()
         source, target = settings.effective_source_lang, settings.target_lang
-        self._download = ModelDownloadThread(source, target, self.store.models_dir, self)
-        self._download.progress.connect(self._set_download_status)
-        self._download.finished_ok.connect(self._download_done)
-        self._download.start()
+        thread = ModelDownloadThread(source, target, self.store.models_dir, self)
+        thread.progress.connect(self._set_download_status)
+        thread.finished_ok.connect(self._download_done)
+        thread.finished.connect(self.downloadChanged)  # `downloading` turns false once the thread has ended
+        thread.finished.connect(thread.deleteLater)
+        self._download = thread
+        thread.start()
         self._set_download_status(f"downloading offline model for {source} -> {target}...")
 
     def _set_download_status(self, text: str) -> None:
@@ -523,7 +493,7 @@ class SettingsBackend(QObject):
 
     def _download_done(self, ok: bool, message: str) -> None:
         if ok and not self._map.value("draft"):
-            self._map.insert("draft", "offline")
+            self.set("draft", "offline")
         self._set_download_status(message)
 
     # -- glossary -----------------------------------------------------------------------------------------
@@ -534,7 +504,7 @@ class SettingsBackend(QObject):
 
         path, _ = QFileDialog.getOpenFileName(None, "Glossary JSON", "", "JSON (*.json)")
         if path:
-            self._map.insert("glossary_path", path)
+            self.set("glossary_path", path)
 
     # -- hotkeys ------------------------------------------------------------------------------------------
 
@@ -549,7 +519,7 @@ class SettingsBackend(QObject):
     @Slot()
     def resetHotkeys(self) -> None:
         for name, combo in DEFAULT_HOTKEYS.items():
-            self._map.insert(f"hotkey_{name}", combo)
+            self.set(f"hotkey_{name}", combo)
 
     # -- problems ------------------------------------------------------------------------------------------
 

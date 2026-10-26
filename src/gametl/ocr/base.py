@@ -7,6 +7,8 @@ from typing import Protocol
 
 import numpy as np
 
+from ..geometry import Box
+
 
 @dataclass(slots=True)
 class TextLine:
@@ -19,18 +21,21 @@ class TextLine:
     text: str
     quad: np.ndarray
     confidence: float
+    _bbox: Box | None = field(default=None, repr=False, compare=False)
 
     @property
-    def bbox(self) -> tuple[int, int, int, int]:
-        """Axis-aligned (x0, y0, x1, y1) in integer pixels; x1 and y1 exclusive."""
-        xs = self.quad[:, 0]
-        ys = self.quad[:, 1]
-        return (
-            int(np.floor(xs.min())),
-            int(np.floor(ys.min())),
-            int(np.ceil(xs.max())),
-            int(np.ceil(ys.max())),
-        )
+    def bbox(self) -> Box:
+        """Axis-aligned (x0, y0, x1, y1) in integer pixels; x1 and y1
+        exclusive. Computed once: the tracker asks for it many times a frame."""
+        if self._bbox is None:
+            xs, ys = self.quad[:, 0], self.quad[:, 1]
+            self._bbox = (
+                int(np.floor(xs.min())),
+                int(np.floor(ys.min())),
+                int(np.ceil(xs.max())),
+                int(np.ceil(ys.max())),
+            )
+        return self._bbox
 
     @property
     def height(self) -> float:

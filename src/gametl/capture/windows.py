@@ -151,9 +151,9 @@ def window_process_id(hwnd: int) -> int:
 
 def list_windows(min_size: int = 64, include_own: bool = False) -> list[WindowInfo]:
     """Top-level windows a user would recognise: visible, titled, not cloaked,
-    at least `min_size` pixels in both directions. gametl's own windows (the
-    settings window, whose title contains "game") are left out unless
-    `include_own`, so a typed title never matches the app itself."""
+    at least `min_size` pixels in both directions. Windows of this process
+    (the settings window) are left out unless `include_own`, so a typed
+    title never matches the app itself."""
     found: list[WindowInfo] = []
     own_pid = os.getpid()
 
@@ -185,7 +185,4 @@ def find_window(title_substring: str) -> WindowInfo | None:
     candidates = [w for w in list_windows() if needle in w.title.casefold()]
     if not candidates:
         return None
-    for w in candidates:
-        if w.title.casefold() == needle:
-            return w
-    return candidates[0]
+    return next((w for w in candidates if w.title.casefold() == needle), candidates[0])

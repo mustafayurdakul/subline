@@ -58,17 +58,17 @@ def locate_model_files(root: Path) -> ModelFiles | None:
     return None
 
 
-def opus_dir(models_dir: Path, source: str, target: str) -> Path:
+def opus_dir(models_dir: Path | str, source: str, target: str) -> Path:
     return Path(models_dir) / f"opus-{source}_{target}"
 
 
-def package_dir(models_dir: Path, source: str, target: str) -> Path:
+def package_dir(models_dir: Path | str, source: str, target: str) -> Path:
     return Path(models_dir) / f"argos-{source}_{target}"
 
 
 def find_model(models_dir: Path | str, source: str, target: str) -> ModelFiles | None:
     """The best installed model for the pair: converted OPUS first, then Argos."""
-    for candidate in (opus_dir(Path(models_dir), source, target), package_dir(Path(models_dir), source, target)):
+    for candidate in (opus_dir(models_dir, source, target), package_dir(models_dir, source, target)):
         if candidate.exists():
             found = locate_model_files(candidate)
             if found:
@@ -87,22 +87,20 @@ def find_package(index: list[dict], source: str, target: str) -> dict | None:
     return None
 
 
-def ensure_model(
-    source: str,
-    target: str,
-    models_dir: Path | str,
-    progress: Callable[[str], None] | None = None,
-) -> tuple[Path, Path]:
-    """Return (model dir, sentencepiece) for the pair, downloading the Argos
-    package on first use. Raises RuntimeError when no package exists."""
+def quiet(_line: str) -> None:
+    """The progress callback that reports nothing."""
+
+
+def ensure_model(source: str, target: str, models_dir: Path | str, say: Callable[[str], None] = quiet) -> Path:
+    """The model folder for the pair, downloading the Argos package on first
+    use. Raises RuntimeError when no package exists."""
     import requests
 
-    dest = package_dir(Path(models_dir), source, target)
+    dest = package_dir(models_dir, source, target)
     found = locate_model_files(dest) if dest.exists() else None
     if found:
-        return found.model_dir, found.sp_source
+        return found.model_dir
 
-    say = progress or (lambda _s: None)
     say(f"fetching Argos package index for {source}->{target}")
     index = requests.get(ARGOS_INDEX_URL, timeout=30).json()
     entry = find_package(index, source, target)
@@ -136,7 +134,7 @@ def ensure_model(
     meta = {"source": source, "target": target, "package": entry.get("code"), "version": entry.get("package_version")}
     (dest / "gametl.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     say("offline model ready")
-    return found.model_dir, found.sp_source
+    return found.model_dir
 
 
 # -- translator ---------------------------------------------------------------------

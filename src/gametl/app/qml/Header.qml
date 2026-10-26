@@ -20,8 +20,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         width: root.rowWidth - buttons.width - 2 * Theme.space
         spacing: 2
-        Text { text: root.title; color: Theme.text; font.family: Theme.font; font.pixelSize: Theme.sizeHeading; font.weight: Font.DemiBold; elide: Text.ElideRight; width: parent.width }
-        Text { text: root.subtitle; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall + 1; visible: root.subtitle !== ""; elide: Text.ElideRight; width: parent.width }
+        Label { width: parent.width; text: root.title; font.pixelSize: Theme.sizeHeading; font.weight: Font.DemiBold; elide: Text.ElideRight }
+        Caption { width: parent.width; text: root.subtitle; font.pixelSize: Theme.sizeCaption; visible: root.subtitle !== ""; elide: Text.ElideRight; wrapMode: Text.NoWrap }
     }
 
     Item {

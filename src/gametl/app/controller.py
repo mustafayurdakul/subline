@@ -4,17 +4,16 @@ line, the tray icon and the settings window."""
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
 from ..capture.windows import client_rect_on_screen, find_window, window_rect, window_title
+from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
 from ..overlay.window import OverlayWindow
@@ -23,7 +22,7 @@ from ..translate.base import Translator
 from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
 from ..translate.service import TranslationService
-from .config import ProfileStore, Settings, slug
+from .config import ProfileStore, Settings
 from .credentials import (
     DEEPL_KEY,
     SecretStore,
@@ -34,10 +33,6 @@ from .credentials import (
 )
 from .license import license_status
 from .pipeline import PipelineConfig, PipelineThread
-
-Box = tuple[int, int, int, int]
-RGB = tuple[int, int, int]
-
 
 # -- zones and colours -------------------------------------------------------------
 
@@ -61,8 +56,8 @@ def offset_zone(zone: Box, dx: int, dy: int) -> Box:
     return zone[0] + dx, zone[1] + dy, zone[2] + dx, zone[3] + dy
 
 
-def parse_color(text: str, default: RGB = (255, 255, 255)) -> RGB:
-    """'#RRGGBB' or 'r,g,b' -> RGB tuple; anything else gives the default."""
+def parse_color(text: str) -> RGB:
+    """'#RRGGBB' or 'r,g,b' -> RGB tuple; anything else gives white."""
     text = (text or "").strip()
     try:
         if text.startswith("#") and len(text) == 7:
@@ -72,42 +67,61 @@ def parse_color(text: str, default: RGB = (255, 255, 255)) -> RGB:
             return max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))
     except ValueError:
         pass
-    return default
-
-
-def client_area_in_frame(hwnd: int) -> tuple[Box, Box | None]:
-    """(frame box, client area within the frame, or None when degenerate)."""
-    rect = window_rect(hwnd)
-    frame_w, frame_h = rect[2] - rect[0], rect[3] - rect[1]
-    c = client_rect_on_screen(hwnd)
-    area: Box | None = (
-        max(0, c[0] - rect[0]),
-        max(0, c[1] - rect[1]),
-        min(frame_w, c[2] - rect[0]),
-        min(frame_h, c[3] - rect[1]),
-    )
-    if area[2] <= area[0] or area[3] <= area[1]:
-        area = None
-    return (0, 0, frame_w, frame_h), area
+    return 255, 255, 255
 
 
 def capture_area(hwnd: int, include_frame: bool) -> tuple[Box, Box | None]:
     """(frame box, the client area within it, or None when the whole frame
     is read because `include_frame` is set or the client area is unknown)."""
-    frame, client = client_area_in_frame(hwnd)
-    return frame, (None if include_frame else client)
+    rect = window_rect(hwnd)
+    frame = (0, 0, rect[2] - rect[0], rect[3] - rect[1])
+    if include_frame:
+        return frame, None
+    c = client_rect_on_screen(hwnd)
+    client = (
+        max(0, c[0] - rect[0]),
+        max(0, c[1] - rect[1]),
+        min(frame[2], c[2] - rect[0]),
+        min(frame[3], c[3] - rect[1]),
+    )
+    if client[2] <= client[0] or client[3] <= client[1]:
+        return frame, None
+    return frame, client
 
 
-# -- screenshots ---------------------------------------------------------------------
-
-
-def grab_screen_region(rect: Box, path: str) -> None:
-    """Screenshot of a screen rectangle, layered windows (ours) included."""
-    from PIL import ImageGrab
-
-    image = ImageGrab.grab(bbox=rect, include_layered_windows=True, all_screens=True)
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    image.save(path)
+def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> PipelineConfig:
+    """The pipeline's view of the settings. Zones in the settings are
+    fractions of the read area (the client area, or the whole frame); the
+    pipeline wants frame pixels."""
+    ax0, ay0, ax1, ay1 = client or frame
+    width, height = ax1 - ax0, ay1 - ay0
+    roi = parse_zone(settings.roi, width, height)
+    zones = (parse_zone(spec, width, height) for spec in settings.ignore_zones)
+    ignore_zones = [offset_zone(zone, ax0, ay0) for zone in zones if zone is not None]
+    patterns = [p for p in settings.ignore_patterns if p.strip()]
+    return PipelineConfig(
+        area=client,
+        roi=offset_zone(roi, ax0, ay0) if roi is not None else None,
+        fps=settings.fps,
+        full_scan_every=settings.full_scan_every,
+        stable_frames=settings.stable_frames,
+        max_missing=settings.max_missing,
+        diff_threshold=settings.diff_threshold,
+        style=settings.style,
+        line_filter=LineFilter.compile(ignore_zones, patterns, short_confidence=settings.short_line_confidence),
+        render=settings.render,
+        subtitle_font_px=settings.subtitle_font_px,
+        subtitle_color=parse_color(settings.subtitle_color) if settings.subtitle_color.strip() else None,
+        subtitle_background=settings.subtitle_background,
+        subtitle_pill_alpha=max(0, min(255, int(settings.subtitle_pill_alpha))),
+        subtitle_bold=settings.subtitle_bold,
+        subtitle_position=settings.subtitle_position,
+        subtitle_hide_source=settings.subtitle_hide_source,
+        subtitle_center_tolerance=max(0, settings.subtitle_center_tolerance) / 100,
+        subtitle_size_tolerance=max(0, settings.subtitle_size_tolerance) / 100,
+        debug=settings.debug,
+        dump_dir=settings.dump_dir or None,
+    )
 
 
 # -- translators ---------------------------------------------------------------------
@@ -136,13 +150,13 @@ def build_draft_translator(settings: Settings, store: ProfileStore, secrets: Sec
     return None
 
 
+# Translators for trying the pipeline without a key or a network.
+_DUMMY_TRANSLATORS = {"uppercase": UppercaseTranslator, "verbose": VerboseTranslator, "echo": EchoTranslator}
+
+
 def build_translator(settings: Settings, game: str, store: ProfileStore, secrets: SecretStore) -> Translator:
-    if settings.translator == "uppercase":
-        return UppercaseTranslator()
-    if settings.translator == "verbose":
-        return VerboseTranslator()
-    if settings.translator == "echo":
-        return EchoTranslator()
+    if dummy := _DUMMY_TRANSLATORS.get(settings.translator):
+        return dummy()
     if settings.translator == "offline":
         return build_offline_translator(settings, store)
     if settings.translator == "deepl":
@@ -162,7 +176,6 @@ def build_translator(settings: Settings, game: str, store: ProfileStore, secrets
         glossary=glossary,
         tone=settings.tone or None,
         source_lang=settings.effective_source_lang,
-        target_lang=settings.target_lang,
         api_key=anthropic_api_key(secrets),
     )
 
@@ -253,14 +266,13 @@ class OverlayController(QObject):
         self.service: TranslationService | None = None
         self.translator: Translator | None = None
         self.cache: TranslationCache | None = None
-        self.cache_path: Path | None = None
         self._engines: dict[tuple[str, bool], RapidOcrEngine] = {}  # by (language, gpu)
         self._engine_lock = threading.Lock()
         self._generation = 0  # bumped by every start() and stop(); a preparation from before is ignored
         self._start_workers: set[_StartWorker] = set()
         self._starting = False
         self._selector: AreaSelector | None = None
-        self._selection_hwnd: int | None = None
+        self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
 
     # -- state -------------------------------------------------------------
 
@@ -294,13 +306,10 @@ class OverlayController(QObject):
             info = find_window(settings.window_match)
         return (info.hwnd, info.title) if info else None
 
-    def engine(
-        self, lang: str, gpu: bool, frame_w: int = 1280, frame_h: int = 720, say: Callable[[str], None] | None = None
-    ) -> RapidOcrEngine:
+    def engine(self, lang: str, gpu: bool, frame_w: int, frame_h: int, say: Callable[[str], None]) -> RapidOcrEngine:
         """One warmed-up OCR engine per language and device, kept for the
         life of the controller (loading takes a second or two). Safe to call
         from a worker thread; two starts wanting the same engine load it once."""
-        say = say or self._say
         with self._engine_lock:
             engine = self._engines.get((lang, gpu))
             if engine is None:
@@ -366,7 +375,7 @@ class OverlayController(QObject):
 
         frame, client = capture_area(hwnd, settings.include_frame)
         try:
-            config = self._pipeline_config(settings, frame, client)
+            config = pipeline_config(settings, frame, client)
         except re.error as exc:
             raise StartError(f"invalid ignore pattern: {exc}") from exc
         try:
@@ -388,7 +397,7 @@ class OverlayController(QObject):
         try:
             self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
             self.translator = prepared.translator
-            self.service = self._build_service(prepared.settings, prepared.game, prepared.draft)
+            self.service = self._build_service(prepared.settings, prepared.game, prepared.translator, prepared.draft)
             if self.cache is not None and self.cache.load_error:
                 self._say(f"translation cache unreadable ({self.cache.load_error}): set aside as .bad, starting empty")
             self.overlay = OverlayWindow(
@@ -406,7 +415,7 @@ class OverlayController(QObject):
             self.overlay.start()
             worker.start()
         except Exception as exc:
-            self._discard_partial()
+            self._release()  # undo what was built before the failure
             self._fail(f"start failed: {type(exc).__name__}: {exc}")
             return
         self.running_changed.emit(True)
@@ -425,16 +434,16 @@ class OverlayController(QObject):
         self._say(message)
         self.start_failed.emit(message)
 
-    def _discard_partial(self) -> None:
-        """Undo what _on_prepared built before it failed."""
-        self.worker = None
-        if self.overlay is not None:
-            self.overlay.close()
-            self.overlay.deleteLater()
-            self.overlay = None
-        if self.service is not None:
-            self.service.shutdown()
-            self.service = None
+    def _release(self) -> None:
+        """Let go of the session's overlay and translation service (the
+        pipeline thread, if any, has been stopped by the caller)."""
+        overlay, service = self.overlay, self.service
+        self.worker, self.overlay, self.service = None, None, None
+        if overlay is not None:
+            overlay.close()
+            overlay.deleteLater()
+        if service is not None:
+            service.shutdown()
 
     def _on_worker_finished(self, worker: PipelineThread) -> None:
         """The pipeline thread ended on its own (capture closed, or an error
@@ -443,54 +452,19 @@ class OverlayController(QObject):
             self._say("pipeline stopped")
             self.stop()
 
-    def _build_service(self, settings: Settings, game: str, draft: Translator | None) -> TranslationService:
-        assert self.translator is not None
-        self.cache_path = None
-        if settings.use_cache_file:
-            self.cache_path = self.store.cache_dir / f"{slug(game)}.{settings.target_lang}.{self.translator.name}.json"
-        self.cache = TranslationCache(self.cache_path)
+    def _build_service(
+        self, settings: Settings, game: str, translator: Translator, draft: Translator | None
+    ) -> TranslationService:
+        path = self.store.cache_path(game, settings.target_lang, translator.name) if settings.use_cache_file else None
+        self.cache = TranslationCache(path)
         return TranslationService(
-            self.translator,
+            translator,
             self.cache,
             target_lang=settings.target_lang,
             source_lang=settings.effective_source_lang,
             on_status=self._say,
             draft_translator=draft,
             autosave_seconds=settings.autosave_seconds,
-        )
-
-    @staticmethod
-    def _pipeline_config(settings: Settings, frame: Box, client: Box | None) -> PipelineConfig:
-        """Zones in the settings are fractions of the read area (the client
-        area, or the whole frame); the pipeline wants frame pixels."""
-        ax0, ay0, ax1, ay1 = client or frame
-        width, height = ax1 - ax0, ay1 - ay0
-        roi = parse_zone(settings.roi, width, height)
-        zones = (parse_zone(spec, width, height) for spec in settings.ignore_zones)
-        ignore_zones = [offset_zone(zone, ax0, ay0) for zone in zones if zone is not None]
-        patterns = [p for p in settings.ignore_patterns if p.strip()]
-        return PipelineConfig(
-            area=client,
-            roi=offset_zone(roi, ax0, ay0) if roi is not None else None,
-            fps=settings.fps,
-            full_scan_every=settings.full_scan_every,
-            stable_frames=settings.stable_frames,
-            max_missing=settings.max_missing,
-            diff_threshold=settings.diff_threshold,
-            style=settings.style,
-            line_filter=LineFilter.compile(ignore_zones, patterns, short_confidence=settings.short_line_confidence),
-            render=settings.render,
-            subtitle_font_px=settings.subtitle_font_px,
-            subtitle_color=parse_color(settings.subtitle_color) if settings.subtitle_color.strip() else None,
-            subtitle_background=settings.subtitle_background,
-            subtitle_pill_alpha=max(0, min(255, int(settings.subtitle_pill_alpha))),
-            subtitle_bold=settings.subtitle_bold,
-            subtitle_position=settings.subtitle_position,
-            subtitle_hide_source=settings.subtitle_hide_source,
-            subtitle_center_tolerance=max(0, settings.subtitle_center_tolerance) / 100,
-            subtitle_size_tolerance=max(0, settings.subtitle_size_tolerance) / 100,
-            debug=settings.debug,
-            dump_dir=settings.dump_dir or None,
         )
 
     def _on_target_lost(self) -> None:
@@ -501,18 +475,11 @@ class OverlayController(QObject):
         """End the session; a start() still being prepared is abandoned."""
         self._generation += 1
         self._settled()
-        worker, overlay, service = self.worker, self.overlay, self.service
-        self.worker = None
+        worker = self.worker
         if worker is not None:
             worker.stop()
             worker.wait(3000)
-        if overlay is not None:
-            overlay.close()
-            overlay.deleteLater()
-            self.overlay = None
-        if service is not None:
-            service.shutdown()
-            self.service = None
+        self._release()
         self.running_changed.emit(False)
         self.paused_changed.emit(False)
         self._say("stopped")
@@ -559,8 +526,8 @@ class OverlayController(QObject):
                 self._say("select area: no game window found; start the game or set its title first")
                 return False
             hwnd = resolved[0]
-        self._selection_hwnd = hwnd
         frame, client = capture_area(hwnd, active.include_frame)
+        self._selection = (hwnd, frame, client)
         ax0, _, ax1, _ = client or frame
         selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_zone, center_x=(ax0 + ax1) // 2)
         selector.selected.connect(self._apply_selected_area)
@@ -583,26 +550,26 @@ class OverlayController(QObject):
 
     def _apply_selected_area(self, rect: tuple) -> None:
         self._selector = None
-        hwnd = self._selection_hwnd or self.hwnd
-        assert hwnd is not None
-        include_frame = self.settings is not None and self.settings.include_frame
-        frame, client = capture_area(hwnd, include_frame)
+        assert self._selection is not None
+        # The same frame and client area the selector was opened over: the
+        # settings in force may have changed meanwhile, or not exist yet.
+        hwnd, frame, client = self._selection
         spec = rect_to_zone_spec(tuple(rect), client or frame)
         self._say(f"area selected: {spec}; translating only that area")
+        self._set_area(spec, hwnd)
+
+    def clear_area(self) -> None:
+        self._say("area cleared: translating the whole window")
+        self._set_area("", self.hwnd)
+
+    def _set_area(self, spec: str, hwnd: int | None) -> None:
+        """Make `spec` the area of the session's settings and tell the
+        owner; a running session restarts on it."""
         if self.settings is not None:
-            self.settings.roi = spec
-            self.settings.full_scan_every = 0
+            self.settings.set_area(spec)
         self.area_selected.emit(spec)
         if self.running and self.settings is not None:
             self.start(self.settings, hwnd)
-
-    def clear_area(self) -> None:
-        if self.settings is not None:
-            self.settings.roi = ""
-        self.area_selected.emit("")
-        self._say("area cleared: translating the whole window")
-        if self.running and self.settings is not None:
-            self.start(self.settings, self.hwnd)
 
     # -- reporting ---------------------------------------------------------
 

@@ -8,29 +8,29 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from ..geometry import Box
 from ..ocr.base import TextLine
 from ..textutil import letter_count
 
-Box = tuple[int, int, int, int]
+# A line of this many letters or fewer is as often an OCR fragment or a HUD
+# glyph as a word ("No.", "Go!"): it passes only when OCR is sure of it.
+SHORT_LETTERS = 2
 
 
 @dataclass(slots=True)
 class LineFilter:
     zones: list[Box] = field(default_factory=list)  # frame pixels
     patterns: list[re.Pattern[str]] = field(default_factory=list)
-    # A line of one or two letters is as often an OCR fragment or a HUD glyph
-    # as a word ("No.", "Go!"): it passes only when OCR is sure of it.
-    short_letters: int = 2
-    short_confidence: float = 0.9  # 0 = off
+    short_confidence: float = 0.9  # confidence a short line needs; 0 = off
 
     def __bool__(self) -> bool:
         return bool(self.zones or self.patterns or self.short_confidence > 0)
 
-    @staticmethod
+    @classmethod
     def compile(
-        zones: list[Box] | None = None, patterns: list[str] | None = None, short_confidence: float = 0.9
+        cls, zones: list[Box] | None = None, patterns: list[str] | None = None, short_confidence: float = 0.9
     ) -> LineFilter:
-        return LineFilter(
+        return cls(
             zones=list(zones or []),
             patterns=[re.compile(p, re.IGNORECASE) for p in (patterns or [])],
             short_confidence=short_confidence,
@@ -44,7 +44,7 @@ class LineFilter:
                 return True
         if (
             self.short_confidence > 0
-            and letter_count(line.text) <= self.short_letters
+            and letter_count(line.text) <= SHORT_LETTERS
             and line.confidence < self.short_confidence
         ):
             return True

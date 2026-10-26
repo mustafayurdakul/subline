@@ -42,7 +42,6 @@ def test_subtitle_defaults_favour_a_steady_look() -> None:
 
 def test_saved_profiles_keep_their_own_patterns() -> None:
     assert Settings.from_dict({"ignore_patterns": []}).ignore_patterns == []
-    assert Settings.from_dict({}).ignore_patterns == [NO_LETTERS_PATTERN]
 
 
 def test_effective_source_lang() -> None:

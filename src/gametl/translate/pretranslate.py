@@ -23,7 +23,8 @@ from typing import Any
 
 from .base import TranslationRequest
 from .cache import TranslationCache
-from .claude import ClaudeTranslator, supports_disabled_thinking
+from .claude import ClaudeTranslator
+from .offline import quiet
 
 _SRT_TIMING = re.compile(r"^\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+")
 _TAGS = re.compile(r"<[^>]+>|\{[^}]+\}")
@@ -88,13 +89,21 @@ def _load_csv(text: str) -> list[str]:
         return []
     header = [h.strip().lower() for h in rows[0]]
     column = next((i for i, h in enumerate(header) if h in ("text", "source", "line", "string")), None)
-    body = rows[1:] if column is not None else rows
-    column = column or 0
+    if column is None:  # no header: the first column of every row
+        column, body = 0, rows
+    else:
+        body = rows[1:]
     return [row[column] for row in body if len(row) > column]
 
 
 def chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), max(1, size))]
+
+
+def uncached(lines: list[str], cache: TranslationCache, target_lang: str) -> list[str]:
+    """The lines the cache has no translation for. The lookup is the cache's
+    own, fuzzy one, so a near-duplicate of a cached line is skipped too."""
+    return [line for line in lines if cache.get(line, target_lang) is None]
 
 
 # -- synchronous ------------------------------------------------------------------
@@ -106,12 +115,11 @@ def pretranslate_sync(
     cache: TranslationCache,
     target_lang: str,
     chunk_size: int = 20,
-    progress: Callable[[str], None] | None = None,
+    say: Callable[[str], None] = quiet,
 ) -> int:
     """Translate `lines` not yet in `cache` through the normal API. Returns
     the number of lines added."""
-    say = progress or (lambda _s: None)
-    todo = [ln for ln in lines if cache.get(ln, target_lang) is None]
+    todo = uncached(lines, cache, target_lang)
     say(f"{len(lines)} lines, {len(todo)} to translate")
     added = 0
     chunks = chunked(todo, chunk_size)
@@ -134,16 +142,17 @@ class BatchJob:
     batch_id: str
     target_lang: str
     chunks: dict[str, list[str]] = field(default_factory=dict)  # custom_id -> source lines
+    game: str = ""  # whose cache the results go to
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"batch_id": self.batch_id, "target_lang": self.target_lang, "chunks": self.chunks}
+        data = {"batch_id": self.batch_id, "target_lang": self.target_lang, "game": self.game, "chunks": self.chunks}
         path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> BatchJob:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(data["batch_id"], data["target_lang"], data["chunks"])
+        return cls(data["batch_id"], data["target_lang"], data["chunks"], data.get("game", ""))
 
 
 def build_batch_requests(
@@ -156,16 +165,7 @@ def build_batch_requests(
         custom_id = f"chunk-{i:05d}"
         chunks[custom_id] = chunk
         request = TranslationRequest(chunk, translator.source_lang, target_lang)
-        params: dict[str, Any] = {
-            "model": translator.model,
-            "max_tokens": translator.max_tokens,
-            "system": translator.system_blocks(translator.source_lang, target_lang),
-            "messages": [{"role": "user", "content": translator.user_payload(request)}],
-            "output_config": {"effort": translator.effort},
-        }
-        if translator.thinking == "disabled" and supports_disabled_thinking(translator.model):
-            params["thinking"] = {"type": "disabled"}
-        requests.append({"custom_id": custom_id, "params": params})
+        requests.append({"custom_id": custom_id, "params": translator.request_params(request)})
     return requests, chunks
 
 
@@ -176,33 +176,33 @@ def submit_batch(
     target_lang: str,
     chunk_size: int = 20,
     client: Any = None,
+    game: str = "",
 ) -> BatchJob | None:
     """Create a batch for the lines not in the cache. None when nothing to do.
     The request goes through the translator's own client (so a key from the
     Credential Manager is used) unless another `client` is given."""
     if translator.structured:
         raise ValueError("batch pre-translation needs the plain-JSON reply mode (structured=False)")
-    todo = [ln for ln in lines if cache.get(ln, target_lang) is None]
+    todo = uncached(lines, cache, target_lang)
     if not todo:
         return None
     requests, chunks = build_batch_requests(todo, translator, target_lang, chunk_size)
     if client is None:
-        client = translator._client
+        client = translator.client
     batch = client.messages.batches.create(requests=requests)
-    return BatchJob(batch.id, target_lang, chunks)
+    return BatchJob(batch.id, target_lang, chunks, game)
 
 
 def collect_batch(
     job: BatchJob,
     cache: TranslationCache,
     client: Any = None,
-    progress: Callable[[str], None] | None = None,
+    say: Callable[[str], None] = quiet,
 ) -> tuple[bool, int, int]:
     """Fetch a batch's results into the cache. Returns (ended, lines added,
     failed chunks). When the batch has not ended, nothing is collected yet.
     `client` is an Anthropic client; without one the SDK's own configuration
     (ANTHROPIC_API_KEY) is used."""
-    say = progress or (lambda _s: None)
     if client is None:
         import anthropic
 
@@ -233,9 +233,9 @@ def collect_batch(
             failed += 1
             say(f"{result.custom_id}: unreadable reply ({exc})")
             continue
-        for item in parsed.items:
-            if 0 <= item.id < len(sources) and item.text.strip():
-                cache.put(sources[item.id], job.target_lang, item.text)
+        for source, translated in zip(sources, ClaudeTranslator.results_from(parsed, len(sources)), strict=True):
+            if translated is not None:
+                cache.put(source, job.target_lang, translated)
                 added += 1
     cache.save()
     return True, added, failed
@@ -247,11 +247,11 @@ def wait_for_batch(
     timeout: float,
     poll: float = 20.0,
     client: Any = None,
-    progress: Callable[[str], None] | None = None,
+    say: Callable[[str], None] = quiet,
 ) -> tuple[bool, int, int]:
     deadline = time.monotonic() + timeout
     while True:
-        ended, added, failed = collect_batch(job, cache, client, progress)
+        ended, added, failed = collect_batch(job, cache, client, say)
         if ended or time.monotonic() >= deadline:
             return ended, added, failed
         time.sleep(poll)

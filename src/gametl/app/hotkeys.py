@@ -10,24 +10,34 @@ from ctypes import wintypes
 
 from PySide6.QtCore import QAbstractNativeEventFilter
 
-_user32 = ctypes.windll.user32
-_user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
-_user32.RegisterHotKey.restype = wintypes.BOOL
-_user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
-_user32.UnregisterHotKey.restype = wintypes.BOOL
-
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
 WM_HOTKEY = 0x0312
 
 # fmt: off
 _MODIFIERS = {"ctrl": MOD_CONTROL, "control": MOD_CONTROL, "alt": MOD_ALT, "shift": MOD_SHIFT, "win": MOD_WIN}
-_NAMED_KEYS = {
+NAMED_KEYS = {
     "space": 0x20, "tab": 0x09, "enter": 0x0D, "return": 0x0D, "esc": 0x1B, "escape": 0x1B,
     "backspace": 0x08, "delete": 0x2E, "insert": 0x2D, "home": 0x24, "end": 0x23,
     "pageup": 0x21, "pagedown": 0x22, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
     "pause": 0x13, "scrolllock": 0x91, "printscreen": 0x2C,
 }
 # fmt: on
+
+
+def _user32():
+    """user32, bound on first use: importing this module (for `parse_combo`)
+    must not need Windows."""
+    global _USER32
+    if _USER32 is None:
+        _USER32 = ctypes.windll.user32
+        _USER32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+        _USER32.RegisterHotKey.restype = wintypes.BOOL
+        _USER32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+        _USER32.UnregisterHotKey.restype = wintypes.BOOL
+    return _USER32
+
+
+_USER32 = None
 
 
 def parse_combo(combo: str) -> tuple[int, int]:
@@ -49,8 +59,8 @@ def parse_combo(combo: str) -> tuple[int, int]:
         return mods, ord(key.upper())
     if key.startswith("f") and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
         return mods, 0x70 + int(key[1:]) - 1
-    if key in _NAMED_KEYS:
-        return mods, _NAMED_KEYS[key]
+    if key in NAMED_KEYS:
+        return mods, NAMED_KEYS[key]
     raise ValueError(f"unknown key {key!r} in {combo!r}")
 
 
@@ -77,7 +87,7 @@ class GlobalHotkeys(QAbstractNativeEventFilter):
             self._callbacks[self._names[name]] = callback  # same keys: only the callback may change
             return True
         hotkey_id = self._next_id
-        if not _user32.RegisterHotKey(None, hotkey_id, mods | MOD_NOREPEAT, vk):
+        if not _user32().RegisterHotKey(None, hotkey_id, mods | MOD_NOREPEAT, vk):
             return False
         self._next_id += 1
         self.unregister(name)  # the old combination is released only once the new one holds
@@ -90,7 +100,7 @@ class GlobalHotkeys(QAbstractNativeEventFilter):
         hotkey_id = self._names.pop(name, None)
         self._combos.pop(name, None)
         if hotkey_id is not None:
-            _user32.UnregisterHotKey(None, hotkey_id)
+            _user32().UnregisterHotKey(None, hotkey_id)
             self._callbacks.pop(hotkey_id, None)
 
     def unregister_all(self) -> None:

@@ -186,8 +186,11 @@ class TranslationService:
         """Fold finished batches into the cache. Returns the number of final
         translations that arrived."""
         with self._lock:
-            done = [f for f in self._futures if f.done()]
-            self._futures = [f for f in self._futures if not f.done()]
+            # One pass: a future finishing between two passes would be in neither list.
+            done, pending = [], []
+            for future in self._futures:
+                (done if future.done() else pending).append(future)
+            self._futures = pending
         translated = 0
         for future in done:
             batch = future.result()
@@ -270,12 +273,15 @@ class TranslationService:
             texts=texts, source_lang=self.source_lang, target_lang=self.target_lang, context=context
         )
         t0 = time.perf_counter()
+        results: list[str | None] = [None] * len(texts)
+        error: Exception | None = None
         try:
-            results = translator.translate(request)
+            got = translator.translate(request)
         except Exception as exc:  # any backend failure cools down the whole batch
-            return BatchResult(kind, texts, [None] * len(texts), exc, (time.perf_counter() - t0) * 1000)
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        if len(results) != len(texts):
-            error = RuntimeError(f"translator returned {len(results)} items for {len(texts)} texts")
-            return BatchResult(kind, texts, [None] * len(texts), error, elapsed_ms)
-        return BatchResult(kind, texts, list(results), None, elapsed_ms)
+            error = exc
+        else:
+            if len(got) == len(texts):
+                results = list(got)
+            else:
+                error = RuntimeError(f"translator returned {len(got)} items for {len(texts)} texts")
+        return BatchResult(kind, texts, results, error, (time.perf_counter() - t0) * 1000)
