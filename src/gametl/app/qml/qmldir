@@ -1,0 +1,28 @@
+module gametl.ui
+singleton Theme 1.0 Theme.qml
+Icon 1.0 Icon.qml
+Card 1.0 Card.qml
+SettingRow 1.0 SettingRow.qml
+Toggle 1.0 Toggle.qml
+Segmented 1.0 Segmented.qml
+Field 1.0 Field.qml
+Stepper 1.0 Stepper.qml
+Gauge 1.0 Gauge.qml
+PrimaryButton 1.0 PrimaryButton.qml
+SecondaryButton 1.0 SecondaryButton.qml
+SideNav 1.0 SideNav.qml
+Header 1.0 Header.qml
+SubtitlePreview 1.0 SubtitlePreview.qml
+FirstRunPage 1.0 FirstRunPage.qml
+GamePage 1.0 GamePage.qml
+AppearancePage 1.0 AppearancePage.qml
+Combo 1.0 Combo.qml
+MultiField 1.0 MultiField.qml
+HotkeyField 1.0 HotkeyField.qml
+Confirm 1.0 Confirm.qml
+ProfilePopup 1.0 ProfilePopup.qml
+Banner 1.0 Banner.qml
+TranslationPage 1.0 TranslationPage.qml
+HotkeysPage 1.0 HotkeysPage.qml
+LicencePage 1.0 LicencePage.qml
+AdvancedPage 1.0 AdvancedPage.qml

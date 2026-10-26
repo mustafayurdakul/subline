@@ -91,28 +91,41 @@ uv run gametl
 
 ## Quick start
 
-1. Run gametl. A tray icon appears and the settings window opens.
-2. On the **Translation** tab, paste your DeepL or Anthropic key into its
-   field and press Save. Keys are kept in Windows Credential Manager, never
-   in a profile file. Pick the translator and the target language.
-3. On the **Game** tab, pick the game window from the list (Refresh after
-   launching the game), then **Apply and run** and **Save profile**.
-4. With the game in front, press **Ctrl+Shift+A** and drag a rectangle over
-   the subtitle area. Arrow keys nudge it (Shift: 10 px, Ctrl: resize),
+1. Run gametl. A tray icon appears and the settings window (shown in the
+   app as **Subline**) opens on its **Set up** page.
+2. Step 1: pick the game window from the list (Refresh after launching the
+   game). Step 2: press **Bottom strip**, or **Select on screen** and drag
+   a rectangle over the subtitle area. Step 3: pick the translator, the
+   target language, and paste the DeepL or Anthropic key into its field
+   and press Save. Keys are kept in Windows Credential Manager, never in a
+   profile file.
+3. Step 4: **Start overlay**, and **Save as profile** so the game is
+   recognised next time. The **Start** button at the top right of every
+   page does the same; while the overlay runs it reads **Stop**.
+4. With the game in front, **Ctrl+Shift+A** selects the area at any time:
+   drag a rectangle, arrow keys nudge it (Shift: 10 px, Ctrl: resize),
    Enter confirms, Esc cancels; holding Shift while dragging keeps the
-   rectangle centred, so one edge and the height are enough. The **Bottom
-   strip** button on the Game tab sets the bottom quarter of the window
-   without any dragging. Translations appear in that area from then on,
-   and the area is saved with the profile.
+   rectangle centred, so one edge and the height are enough. Translations
+   appear in that area from then on, and the area is saved with the
+   profile.
 
-Next time, start the game from the tray's Profiles menu.
+The other pages refine the rest: **Game** (window, area, what to ignore),
+**Translation** (languages, draft, keys, Claude options), **Appearance**
+(size, colour, pill or shadow, placement, with a live preview),
+**Hotkeys** (click a field and press the keys), **Licence** and
+**Advanced** (capture rate, timing, the data folder). Changes take effect
+at the next Start; hotkeys at once. The profile box at the bottom left
+lists the saved profiles and saves the current settings under a name.
 
-The **Licence** tab shows how many trial days are left; paste your key
+Next time, start the game from the tray's Profiles menu or let the
+window title match: the profile whose window it names loads on its own.
+
+The **Licence** page shows how many trial days are left; paste your key
 there and press Activate. The key is kept in Windows Credential Manager.
 From the command line, `gametl --activate KEY` stores a key and
 `gametl --license-status` prints the state.
 
-Default hotkeys (changeable on the Hotkeys tab):
+Default hotkeys (changeable on the Hotkeys page):
 
 | Hotkey | Action |
 | --- | --- |
@@ -244,6 +257,12 @@ the three ways of driving it. The slow part of a start (waiting for the
 window, loading or downloading models) runs on a thread, so the tray and
 the settings window stay responsive. `app/credentials.py` finds API keys.
 
+The settings window is Qt Quick: the pages are QML files under
+`app/qml/`, styled by hand (`Theme.qml` holds the colours and sizes), and
+`app/settings_backend.py` is what they read and write: a property map
+with one entry per setting, plus the actions (start, select an area, save
+a key, activate a licence) that go to the tray as signals.
+
 ```
 src/gametl/
   capture/    window-targeted screen capture (Windows Graphics Capture)
@@ -252,10 +271,10 @@ src/gametl/
   translate/  Translator interface, Claude / DeepL / offline backends, cache, service
   layout/     fitting text into the source box, colour sampling, consistent styling
   overlay/    transparent click-through window, area selector
-  app/        controller, pipeline thread, tray icon, settings window, hotkeys, profiles, API keys
-scripts/      fake game, demo renderer, diagnostics, build, model conversion
+  app/        controller, pipeline thread, tray icon, settings window (qml/), hotkeys, profiles, API keys
+scripts/      fake game, demo renderer, diagnostics, build, model conversion, settings-window renders
 tests/
-docs/         demo clip
+docs/         demo clip, renders of the settings pages (docs/ui)
 ```
 
 [PLAN.md](PLAN.md) is the design document and the log of every decision and
@@ -278,6 +297,10 @@ uv run python scripts/fake_game.py
 uv run gametl --window "Fake Game" --translator verbose --roi 0,0.75,1,0.25
 ```
 
+`scripts/preview_ui.py --full --out out/ui` renders every settings page to
+PNG without a display (the renders in `docs/ui` come from it), and
+`gametl --check-ui` loads every page offscreen and reports QML problems;
+CI runs the latter from the frozen build too.
 `scripts/spike_capture_ocr.py` captures a window and prints what OCR sees,
 with timings, without the overlay. `scripts/bench_translate.py` measures
 Claude request latency per configuration (real API calls).

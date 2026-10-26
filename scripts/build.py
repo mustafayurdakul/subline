@@ -24,7 +24,7 @@ def make_ico(path: Path) -> None:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
     from PySide6.QtWidgets import QApplication
 
-    from gametl.app.tray import make_icon
+    from gametl.app.icon import make_icon
 
     app = QApplication.instance() or QApplication([])  # noqa: F841 (needed for QPixmap)
     icon = make_icon(False)

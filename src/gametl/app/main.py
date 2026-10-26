@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="delete the data folder and the Credential Manager entries (keys, licence, trial) and exit",
     )
+    mode.add_argument(
+        "--check-ui", action="store_true", help="load every settings page without a display, report problems and exit"
+    )
 
     target = p.add_argument_group("target")
     target.add_argument("--window", help="title substring of the game window")
@@ -284,6 +287,12 @@ def main(argv: list[str] | None = None) -> int:
 
         return pretranslate_main(argv[1:])
     args = build_parser().parse_args(argv)
+    if args.check_ui:
+        from gametl.app.settings_window import check
+
+        problems = check()
+        print("\n".join([*problems, f"settings window: {len(problems)} problems"]))
+        return 1 if problems else 0
 
     # Physical pixels everywhere: overlay geometry == capture-frame pixels.
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")

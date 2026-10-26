@@ -4,6 +4,9 @@
 #   gametl-cli.exe  console build of the same entry point, for command-line
 #                   use and `gametl-cli pretranslate ...`
 # Models are not bundled; they download on first run into %APPDATA%\gametl\models.
+# The settings window is Qt Quick: its QML pages ship under gametl/app/qml and
+# the Qt QML modules they import (QtQuick, Controls.Basic, Layouts) come from
+# PySide6's qml folder, pruned to those modules.
 # The licence, the third-party notices and every bundled component's licence
 # text go next to the executables (LICENSE, THIRD_PARTY_NOTICES.md, licenses/).
 # Build with:  uv run --group build python scripts/build.py
@@ -73,16 +76,18 @@ datas = [
     if "/models/" not in src.replace("\\", "/")
 ]
 datas += [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
+datas += [(str(path), "gametl/app/qml") for path in Path("src/gametl/app/qml").iterdir() if path.is_file()]
 datas += licence_files()
 binaries = collect_dynamic_libs("ctranslate2") + collect_dynamic_libs("onnxruntime")
 hiddenimports = (
     collect_submodules("rapidocr")
     + collect_submodules("gametl")
     + ["shapely", "pyclipper", "omegaconf", "sentencepiece", "ctranslate2", "windows_capture"]
+    + ["PySide6.QtQml", "PySide6.QtQuick"]
 )
 excludes = [
     "tkinter", "unittest", "pydoc", "matplotlib", "IPython", "notebook", "torch", "transformers",
-    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtNetwork", "PySide6.QtOpenGL", "PySide6.QtPdf",
+    "PySide6.QtPdf",
     "PySide6.QtSvg", "PySide6.QtMultimedia", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebChannel", "PySide6.QtPositioning", "PySide6.QtLocation", "PySide6.QtQuickWidgets",
     "PySide6.QtQuick3D", "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtXml", "PySide6.QtBluetooth",
@@ -105,6 +110,34 @@ a = Analysis(
     excludes=excludes,
     noarchive=False,
 )
+
+# The QML modules the settings window imports, and nothing else from PySide6's
+# qml folder (the rest, 3D, WebEngine, Multimedia and so on, is tens of MB).
+QML_KEEP = (
+    "PySide6/qml/QtQml/",
+    "PySide6/qml/QtQuick/qmldir",
+    "PySide6/qml/QtQuick/plugins.qmltypes",
+    "PySide6/qml/QtQuick/qtquick2plugin",
+    "PySide6/qml/QtQuick/Controls/qmldir",
+    "PySide6/qml/QtQuick/Controls/plugins.qmltypes",
+    "PySide6/qml/QtQuick/Controls/qtquickcontrols2plugin",
+    "PySide6/qml/QtQuick/Controls/Basic/",
+    "PySide6/qml/QtQuick/Controls/impl/",
+    "PySide6/qml/QtQuick/Templates/",
+    "PySide6/qml/QtQuick/Layouts/",
+    "PySide6/qml/QtQuick/Window/",
+)
+
+
+def keep_qml(entry) -> bool:
+    # The hooks place the folder at PySide6/qml (Windows wheels) or PySide6/Qt/qml.
+    dest = entry[0].replace("\\", "/").replace("PySide6/Qt/qml/", "PySide6/qml/")
+    return not dest.startswith("PySide6/qml/") or dest.startswith(QML_KEEP)
+
+
+a.datas = [entry for entry in a.datas if keep_qml(entry)]
+a.binaries = [entry for entry in a.binaries if keep_qml(entry)]
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 exe_tray = EXE(

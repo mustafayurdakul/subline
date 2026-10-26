@@ -1,0 +1,75 @@
+import QtQuick
+import QtQuick.Layouts
+
+// A settings group: title, optional helper line, then its rows.
+Rectangle {
+    id: root
+    property string title: ""
+    property string helper: ""
+    property int step: 0  // 1..n numbers the card (first-run flow)
+    default property alias content: body.data
+
+    Layout.fillWidth: true
+    implicitHeight: column.implicitHeight + 2 * padding
+    radius: Theme.radius
+    color: Theme.card
+    border.color: Theme.border
+    border.width: 1
+
+    readonly property int padding: 2 * Theme.space
+
+    ColumnLayout {
+        id: column
+        x: root.padding
+        y: root.padding
+        width: root.width - 2 * root.padding
+        spacing: Theme.space
+
+        // Title block. A step number shows as a small accent line above the
+        // title ("STEP 1"), so the heading itself stays clean.
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: root.title !== ""
+            spacing: 2
+            Text {
+                visible: root.step > 0
+                text: "STEP " + root.step
+                color: Theme.accent
+                font.family: Theme.font
+                font.pixelSize: 11
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1.2
+                Layout.bottomMargin: 2
+            }
+            Text {
+                text: root.title
+                color: Theme.text
+                font.family: Theme.font
+                font.pixelSize: Theme.sizeTitle
+                font.weight: Font.DemiBold
+            }
+            Text {
+                visible: root.helper !== ""
+                text: root.helper
+                color: Theme.muted
+                font.family: Theme.font
+                font.pixelSize: Theme.sizeSmall
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+
+        Rectangle {
+            visible: root.title !== ""
+            Layout.fillWidth: true
+            height: 1
+            color: Theme.border
+        }
+
+        ColumnLayout {
+            id: body
+            Layout.fillWidth: true
+            spacing: Theme.space
+        }
+    }
+}
