@@ -33,14 +33,15 @@ Rectangle {
             Layout.fillWidth: true
             Layout.bottomMargin: 2 * Theme.space
             spacing: 10
-            Rectangle {
+            // The mark: a window frame with the subtitle strip along its bottom.
+            Item {
                 width: 30; height: 30
-                color: Theme.accent
-                Text { anchors.centerIn: parent; text: "T"; color: Theme.textOnAccent; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.Bold }
+                Rectangle { anchors.fill: parent; color: "transparent"; border.color: Theme.accent; border.width: 2 }
+                Rectangle { x: 7; y: 19; width: 16; height: 4; color: Theme.accent }
             }
             ColumnLayout {
                 spacing: 0
-                Text { text: "gametl"; color: Theme.text; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.DemiBold }
+                Text { text: "Subline"; color: Theme.text; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.DemiBold }
                 Text { text: "0.1.2"; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall }
             }
         }
