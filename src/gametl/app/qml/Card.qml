@@ -6,7 +6,8 @@ Rectangle {
     id: root
     property string title: ""
     property string helper: ""
-    property int step: 0  // 1..n shows a numbered badge (first-run flow)
+    property int step: 0  // 1..n numbers the card (first-run flow)
+    property string stepStyle: "badge"
     default property alias content: body.data
 
     Layout.fillWidth: true
@@ -25,8 +26,11 @@ Rectangle {
         width: root.width - 2 * root.padding
         spacing: Theme.space
 
-        // Title block. The step badge sits on the title line, not centred
-        // on title plus helper, so it reads as numbering the heading.
+        // Title block. `stepStyle` picks how a step number shows:
+        // "eyebrow"  small "STEP 1" line above the title
+        // "inline"   the number leads the title, in the accent
+        // "corner"   a large faint number at the card's right
+        // "badge"    a small boxed number on the title line
         Item {
             Layout.fillWidth: true
             visible: root.title !== ""
@@ -34,7 +38,7 @@ Rectangle {
 
             Rectangle {
                 id: badge
-                visible: root.step > 0
+                visible: root.step > 0 && root.stepStyle === "badge"
                 width: 24; height: 24
                 y: titleText.y + (titleText.height - height) / 2
                 color: Theme.accentSoft
@@ -48,14 +52,36 @@ Rectangle {
                     font.weight: Font.DemiBold
                 }
             }
+            Text {
+                visible: root.step > 0 && root.stepStyle === "corner"
+                anchors.right: parent.right
+                anchors.rightMargin: 2
+                y: -6
+                text: root.step < 10 ? "0" + root.step : root.step
+                color: Theme.accent
+                opacity: 0.45
+                font.family: Theme.font
+                font.pixelSize: 30
+                font.weight: Font.Light
+            }
             ColumnLayout {
                 id: titles
                 x: badge.visible ? badge.width + Theme.space + 2 : 0
                 width: parent.width - x
                 spacing: 2
                 Text {
+                    visible: root.step > 0 && root.stepStyle === "eyebrow"
+                    text: "STEP " + root.step
+                    color: Theme.accent
+                    font.family: Theme.font
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: 1.2
+                    Layout.bottomMargin: 2
+                }
+                Text {
                     id: titleText
-                    text: root.title
+                    text: root.step > 0 && root.stepStyle === "inline" ? root.step + ".  " + root.title : root.title
                     color: Theme.text
                     font.family: Theme.font
                     font.pixelSize: Theme.sizeTitle
