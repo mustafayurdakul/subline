@@ -60,13 +60,6 @@ def truncate_with_ellipsis(text: str, max_width: float, width_of: Callable[[str]
     return text + "…"
 
 
-def ellipsize(text: str, max_width: float, width_of: Callable[[str], float]) -> str:
-    """Unchanged when it fits, else trimmed with an ellipsis."""
-    if width_of(text) <= max_width:
-        return text
-    return truncate_with_ellipsis(text, max_width, width_of)
-
-
 def fit_text(
     text: str,
     width: int,
@@ -83,7 +76,7 @@ def fit_text(
     font size `base_px` (the source text's size). Explicit newlines are kept
     as paragraph breaks. `max_height` is how tall the box may become."""
     paragraphs = text.split("\n")
-    limit = max(height, max_height if max_height is not None else height)
+    limit = max(height, max_height or 0)
     base_px = max(min_px, int(base_px))
     floor_px = max(min_px, round(base_px * shrink_floor))
 
@@ -100,10 +93,11 @@ def fit_text(
         if total <= limit:
             return TextLayout(lines, base_px, line_h, math.ceil(total), total > height, False)
 
-    # 2. Shrink a little, one pixel at a time; remember the largest size that
-    #    would fit if the box grew.
+    # 2. Shrink a little, one pixel at a time (base_px itself was just tried
+    #    when growing was preferred); remember the largest size that would
+    #    fit if the box grew.
     grow: tuple[list[str], int, float, float] | None = None
-    for px in range(base_px, floor_px - 1, -1):
+    for px in range(base_px - 1 if prefer_grow else base_px, floor_px - 1, -1):
         lines, line_h, total = layout_at(px)
         if total <= height:
             return TextLayout(lines, px, line_h, math.ceil(total), False, False)

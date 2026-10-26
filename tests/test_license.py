@@ -7,8 +7,6 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from gametl.app.config import ProfileStore
 from gametl.app.credentials import MemorySecretStore
@@ -17,21 +15,13 @@ from gametl.app.license import (
     LicenseError,
     activate,
     deactivate,
+    generate_keypair,
     license_status,
     make_key,
     parse_key,
 )
 
 TODAY = date(2026, 10, 23)
-
-
-@pytest.fixture(scope="module")
-def keypair() -> tuple[bytes, str]:
-    private = Ed25519PrivateKey.generate()
-    pem = private.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
-    )
-    return pem, private.public_key().public_bytes_raw().hex()
 
 
 def test_key_round_trip_and_tampering(keypair: tuple[bytes, str]) -> None:
@@ -47,15 +37,8 @@ def test_key_round_trip_and_tampering(keypair: tuple[bytes, str]) -> None:
     assert perpetual.expires is None and perpetual.valid_on(date(2099, 1, 1))
 
     body, _, signature = key[len("GAMETL-") :].partition(".")
-    other_pem, _ = (Ed25519PrivateKey.generate(), None)
-    forged = make_key(
-        other_pem.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
-        ),
-        "Ada Lovelace",
-        "ada@example.com",
-        TODAY,
-    )
+    other_pem, _ = generate_keypair()
+    forged = make_key(other_pem, "Ada Lovelace", "ada@example.com", TODAY)
     with pytest.raises(LicenseError):
         parse_key(forged, public)  # signed with someone else's key
     with pytest.raises(LicenseError):

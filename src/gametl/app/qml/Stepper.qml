@@ -1,57 +1,47 @@
 import QtQuick
-import QtQuick.Controls.Basic
 
-// A number with minus and plus buttons; `specialText` shows for `from`.
-// With `map` and `key` it follows and writes that settings entry.
+// A number with minus and plus buttons, bound to `map[key]`; `specialText`
+// shows for `from`.
 Rectangle {
     id: root
-    property real value: 0
     property int from: 0
     property int to: 100
     property int step: 1
     property string suffix: ""
     property string specialText: ""
-    property var map: null
+    property var map: backend.settings
     property string key: ""
-    readonly property bool bound: map !== null && key !== ""
+    readonly property real value: Number(map[key])
 
     implicitWidth: 132
     implicitHeight: 32
-    radius: Theme.radiusSmall
+    radius: Theme.radius
     color: Theme.field
     border.color: Theme.border
 
-    Binding on value { when: root.bound; value: root.bound ? Number(root.map[root.key]) : 0 }
-
     function change(delta) {
-        var next = Math.min(root.to, Math.max(root.from, Math.round(root.value) + delta))
-        if (bound)
-            map[key] = next
-        else
-            value = next
+        map[key] = Math.min(root.to, Math.max(root.from, Math.round(root.value) + delta))
+    }
+
+    component StepButton: Item {
+        property string glyph
+        property int delta
+        width: 32; height: root.height
+        Label { anchors.centerIn: parent; text: parent.glyph; color: Theme.textSoft; font.pixelSize: 16 }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.change(parent.delta) }
     }
 
     Row {
         anchors.fill: parent
-        Rectangle {
-            width: 32; height: parent.height; color: "transparent"
-            Text { anchors.centerIn: parent; text: "−"; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: 16 }
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.change(-root.step) }
-        }
-        Rectangle {
-            width: root.width - 64; height: parent.height; color: "transparent"
-            Text {
+        StepButton { glyph: "−"; delta: -root.step }
+        Item {
+            width: root.width - 64; height: root.height
+            Label {
                 anchors.centerIn: parent
                 text: root.value === root.from && root.specialText !== "" ? root.specialText : Math.round(root.value) + root.suffix
-                color: Theme.text
-                font.family: Theme.font
-                font.pixelSize: Theme.sizeSmall + 1
+                font.pixelSize: Theme.sizeCaption
             }
         }
-        Rectangle {
-            width: 32; height: parent.height; color: "transparent"
-            Text { anchors.centerIn: parent; text: "+"; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: 16 }
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.change(root.step) }
-        }
+        StepButton { glyph: "+"; delta: root.step }
     }
 }

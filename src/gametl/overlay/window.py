@@ -32,10 +32,9 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from ..capture.windows import foreground_window, is_minimized, is_window, window_rect
+from ..geometry import RGB, Box
 from ..layout.fit import TextLayout, fit_text
-
-Box = tuple[int, int, int, int]
-RGB = tuple[int, int, int]
+from ..layout.style import font_px_for
 
 _user32 = ctypes.windll.user32
 _GWL_EXSTYLE = -20
@@ -58,8 +57,15 @@ DEBUG_COLOR = QColor(0, 255, 0)
 WHITE = QColor(255, 255, 255)
 _OUTLINE_OFFSETS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
 # A soft drop shadow, as games draw their own subtitles: a few offset copies
-# of the text, the farther the fainter; (dx, dy) in pixels and the alpha.
-_SHADOW_LAYERS = [((1, 1), 170), ((2, 2), 120), ((3, 3), 70), ((0, 2), 70), ((2, 0), 70)]
+# of the text, the farther the fainter; (dx, dy) in pixels and the colour.
+# (The settings window's preview mirrors these in SubtitlePreview.qml.)
+_SHADOW_LAYERS = [
+    ((1, 1), QColor(0, 0, 0, 170)),
+    ((2, 2), QColor(0, 0, 0, 120)),
+    ((3, 3), QColor(0, 0, 0, 70)),
+    ((0, 2), QColor(0, 0, 0, 70)),
+    ((2, 0), QColor(0, 0, 0, 70)),
+]
 _LAYOUT_CACHE_SIZE = 512
 _REFERENCE_SIZES = (12, 16, 24, 32, 48, 100)  # font sizes the line-height ratio is measured at
 
@@ -72,7 +78,6 @@ class RenderBlock:
     lines: list[str] = field(default_factory=list)
     bg: RGB = (0, 0, 0)
     fg: RGB = (255, 255, 255)
-    align: str = "center"  # "center" | "left"
     style: str = "patch"  # "patch" | "pill" | "outline" | "subtitle"
     source_lines: int = 1  # lines in the source text; sets the base font size unless font_px is given
     font_px: int | None = None  # base font size decided by the caller (style memory)
@@ -117,8 +122,8 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
 
 
 def source_font_px(box_height: int, source_lines: int) -> int:
-    """Font size that matches the source text: 80 % of its line height."""
-    return max(6, int(box_height / max(1, source_lines) * 0.8))
+    """Font size that matches the source text, from its line height."""
+    return font_px_for(box_height / max(1, source_lines))
 
 
 def _padded(box: Box, pad_x: int, pad_y: int) -> QRect:
@@ -166,13 +171,11 @@ class OverlayWindow(QWidget):
         self.exclude_from_capture = exclude_from_capture
         self.font_family = font_family
         self.padding = padding
-        self.excluded_from_capture = False
         self.paint_errors = 0
 
         self._blocks: list[RenderBlock] = []
         self._target_rect: Box | None = None
-        self._fonts: dict[tuple[int, bool], QFont] = {}
-        self._metrics: dict[tuple[int, bool], QFontMetrics] = {}
+        self._fonts: dict[tuple[int, bool], tuple[QFont, QFontMetrics]] = {}  # by (pixel size, bold)
         self._spacing: dict[bool, float] = {}  # line height / font pixel size, per weight
         self._layouts: dict[tuple, TextLayout] = {}
 
@@ -198,7 +201,7 @@ class OverlayWindow(QWidget):
         if wanted != ex:
             _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, wanted)
         if self.exclude_from_capture:
-            self.excluded_from_capture = bool(_user32.SetWindowDisplayAffinity(hwnd, _WDA_EXCLUDEFROMCAPTURE))
+            _user32.SetWindowDisplayAffinity(hwnd, _WDA_EXCLUDEFROMCAPTURE)
 
     def ex_style(self) -> int:
         return _user32.GetWindowLongW(wintypes.HWND(int(self.winId())), _GWL_EXSTYLE)
@@ -246,20 +249,20 @@ class OverlayWindow(QWidget):
 
     # -- fonts and layout ----------------------------------------------------------
 
-    def font_at(self, px: int, bold: bool = False) -> QFont:
-        key = (px, bold)
-        font = self._fonts.get(key)
-        if font is None:
+    def _font_and_metrics(self, px: int, bold: bool) -> tuple[QFont, QFontMetrics]:
+        entry = self._fonts.get((px, bold))
+        if entry is None:
             font = QFont(self.font_family)
             font.setPixelSize(px)
             font.setBold(bold)
-            self._fonts[key] = font
-            self._metrics[key] = QFontMetrics(font)
-        return font
+            entry = self._fonts[(px, bold)] = (font, QFontMetrics(font))
+        return entry
+
+    def font_at(self, px: int, bold: bool = False) -> QFont:
+        return self._font_and_metrics(px, bold)[0]
 
     def metrics_at(self, px: int, bold: bool = False) -> QFontMetrics:
-        self.font_at(px, bold)
-        return self._metrics[(px, bold)]
+        return self._font_and_metrics(px, bold)[1]
 
     def spacing_ratio(self, bold: bool = False) -> float:
         """Line height per pixel of font size, from the font's own metrics
@@ -270,9 +273,6 @@ class OverlayWindow(QWidget):
             ratio = max(1.0, *(self.metrics_at(px, bold).height() / px for px in _REFERENCE_SIZES))
             self._spacing[bold] = ratio
         return ratio
-
-    def measure(self, text: str, px: int) -> float:
-        return float(self.metrics_at(px).horizontalAdvance(text))
 
     def measurer(self, bold: bool) -> Callable[[str, int], float]:
         return lambda text, px: float(self.metrics_at(px, bold).horizontalAdvance(text))
@@ -285,24 +285,24 @@ class OverlayWindow(QWidget):
             layout = self._layouts[key] = build()
         return layout
 
+    @staticmethod
+    def _base_px(block: RenderBlock) -> int:
+        """The font size to start from: the caller's, else the source text's."""
+        return block.font_px or source_font_px(block.bbox[3] - block.bbox[1], block.source_lines)
+
+    def _pads(self, bbox: Box) -> tuple[int, int]:
+        """(horizontal, vertical) padding around a box: the sides get more on tall text."""
+        return max(self.padding, int(0.2 * (bbox[3] - bbox[1]))), self.padding
+
     def layout_for(self, block: RenderBlock) -> TextLayout:
         """In-place layout: wrapped and sized for the block's box plus the
         free room around it."""
         x0, y0, x1, y1 = block.bbox
         width, height = x1 - x0, y1 - y0
-        base_px = block.font_px or source_font_px(height, block.source_lines)
+        base_px = self._base_px(block)
+        room = block.room_below + block.room_above  # only the sum matters to the layout
         ratio = self.spacing_ratio(block.bold)
-        key = (
-            "inplace",
-            tuple(block.lines),
-            width,
-            height,
-            base_px,
-            block.prefer_grow,
-            block.room_below,
-            block.room_above,
-            block.bold,
-        )
+        key = ("inplace", tuple(block.lines), width, height, base_px, block.prefer_grow, room, block.bold)
         return self._cached_layout(
             key,
             lambda: fit_text(
@@ -311,7 +311,7 @@ class OverlayWindow(QWidget):
                 height,
                 self.measurer(block.bold),
                 base_px,
-                max_height=height + block.room_below + block.room_above,
+                max_height=height + room,
                 line_spacing=ratio,
                 prefer_grow=block.prefer_grow,
             ),
@@ -324,10 +324,8 @@ class OverlayWindow(QWidget):
         assert block.zone is not None
         _x0, y0, _x1, y1 = block.bbox
         zx0, zy0, zx1, zy1 = block.zone
-        pad = self.padding
-        pad_x = max(pad, int(0.2 * (y1 - y0)))
-        source = _padded(block.bbox, pad_x, pad)
-        font_px = block.font_px or source_font_px(y1 - y0, block.source_lines)
+        source = _padded(block.bbox, *self._pads(block.bbox))
+        font_px = self._base_px(block)
         ratio = self.spacing_ratio(block.bold)
         margin = max(12, font_px // 2)
         width = max(50, (zx1 - zx0) - 2 * margin)
@@ -363,20 +361,18 @@ class OverlayWindow(QWidget):
             self._paint_block(p, block)
 
     def _paint_block(self, p: QPainter, block: RenderBlock) -> None:
-        pad = self.padding
-        pad_x = max(pad, int(0.2 * (block.bbox[3] - block.bbox[1])))
         if block.outline:
             p.setPen(QPen(DEBUG_COLOR, 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRect(_padded(block.bbox, pad_x, pad))
+            p.drawRect(_padded(block.bbox, *self._pads(block.bbox)))
         elif not block.lines:
             return
         elif block.style == "subtitle" and block.zone is not None:
             self._paint_subtitle(p, block)
         else:
-            self._paint_in_place(p, block, pad, pad_x)
+            self._paint_in_place(p, block)
 
-    def _paint_in_place(self, p: QPainter, block: RenderBlock, pad: int, pad_x: int) -> None:
+    def _paint_in_place(self, p: QPainter, block: RenderBlock) -> None:
         """Patch, pill or outline style on the block's own box, grown into
         the free room when the translation needs more lines."""
         layout = self.layout_for(block)
@@ -384,7 +380,7 @@ class OverlayWindow(QWidget):
         # Extra lines push the box up or down into the free room reported by the pipeline.
         up, down = _split_growth(max(0, layout.height - (y1 - y0)), block.room_above, block.room_below)
         top, bottom = y0 - up, y1 + down
-        rect = _padded((x0, top, x1, bottom), pad_x, pad)
+        rect = _padded((x0, top, x1, bottom), *self._pads(block.bbox))
 
         if block.style == "patch":
             p.fillRect(rect, QColor(*block.bg))
@@ -399,13 +395,10 @@ class OverlayWindow(QWidget):
             decoration = "outline"
 
         p.setFont(self.font_at(layout.font_px, block.bold))
-        h_align = Qt.AlignmentFlag.AlignHCenter if block.align == "center" else Qt.AlignmentFlag.AlignLeft
         total = len(layout.lines) * layout.line_height
         text_top = top + max(0.0, ((bottom - top) - total) / 2)
         area = QRect(x0, int(text_top), x1 - x0, int(total) + 1)
-        self._draw_lines(
-            p, layout.lines, area, layout.line_height, Qt.AlignmentFlag.AlignVCenter | h_align, fg, decoration
-        )
+        self._draw_lines(p, layout.lines, area, layout.line_height, Qt.AlignmentFlag.AlignCenter, fg, decoration)
 
     def _paint_subtitle(self, p: QPainter, block: RenderBlock) -> None:
         """One fixed style, centred in the zone. Background "pill": a
@@ -458,8 +451,8 @@ class OverlayWindow(QWidget):
                 for dx, dy in _OUTLINE_OFFSETS:
                     p.drawText(rect.translated(dx, dy), flags, line)
             elif decoration == "shadow":
-                for (dx, dy), alpha in _SHADOW_LAYERS:
-                    p.setPen(QColor(0, 0, 0, alpha))
+                for (dx, dy), color in _SHADOW_LAYERS:
+                    p.setPen(color)
                     p.drawText(rect.translated(dx, dy), flags, line)
             p.setPen(fg)
             p.drawText(rect, flags, line)

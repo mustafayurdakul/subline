@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import "Icons.js" as Icons
 
 // The settings window's content: side navigation, header, the current page.
 // `backend` (a SettingsBackend, set as a context property by the window)
@@ -10,23 +11,19 @@ Rectangle {
     property string page: "firstrun"
     // The height at which the current page shows whole (for full-page renders).
     readonly property int fullHeight: header.height + banner.height + pageLoader.y + pageLoader.height + 4 * Theme.space
-    width: 1000
-    height: 680
     color: Theme.window
 
-    readonly property var titles: ({
-        "firstrun": ["Set up", "Four steps, then play."],
-        "game": ["Game", "Which window to read, and which part of it."],
-        "translation": ["Translation", "Languages, translator and keys."],
-        "appearance": ["Appearance", "How the subtitles look."],
-        "hotkeys": ["Hotkeys", "Global shortcuts; press the keys to set one."],
-        "licence": ["Licence", "Trial, key and the data on this computer."],
-        "advanced": ["Advanced", "Timing, filters and diagnostics."]
-    })
-    readonly property var pages: ({
-        "firstrun": firstRun, "game": game, "translation": translation, "appearance": appearance,
-        "hotkeys": hotkeys, "licence": licence, "advanced": advanced
-    })
+    // The one table the navigation, the header and the page loader read.
+    readonly property var pages: [
+        { key: "firstrun", label: "Set up", subtitle: "Four steps, then play.", icon: Icons.sparkles, source: "FirstRunPage.qml" },
+        { key: "game", label: "Game", subtitle: "Which window to read, and which part of it.", icon: Icons.gamepad, source: "GamePage.qml" },
+        { key: "translation", label: "Translation", subtitle: "Languages, translator and keys.", icon: Icons.translate, source: "TranslationPage.qml" },
+        { key: "appearance", label: "Appearance", subtitle: "How the subtitles look.", icon: Icons.palette, source: "AppearancePage.qml" },
+        { key: "hotkeys", label: "Hotkeys", subtitle: "Global shortcuts; press the keys to set one.", icon: Icons.keyboard, source: "HotkeysPage.qml" },
+        { key: "licence", label: "Licence", subtitle: "Trial, key and the data on this computer.", icon: Icons.key, source: "LicencePage.qml" },
+        { key: "advanced", label: "Advanced", subtitle: "Timing, filters and diagnostics.", icon: Icons.sliders, source: "AdvancedPage.qml" },
+    ]
+    readonly property var current: pages.find(function(p) { return p.key === root.page }) || pages[0]
 
     RowLayout {
         anchors.fill: parent
@@ -34,6 +31,7 @@ Rectangle {
 
         SideNav {
             Layout.fillHeight: true
+            pages: root.pages
             current: root.page
             onNavigate: function(key) { root.page = key }
             onProfileClicked: profiles.open()
@@ -47,26 +45,21 @@ Rectangle {
             Header {
                 id: header
                 Layout.fillWidth: true
-                title: root.titles[root.page][0]
-                subtitle: root.titles[root.page][1]
+                title: root.current.label
+                subtitle: root.current.subtitle
                 status: backend.status
             }
 
             Banner {
                 id: banner
-                Layout.fillWidth: true
                 Layout.leftMargin: 4 * Theme.space
-                Layout.rightMargin: 4 * Theme.space
                 Layout.topMargin: visible ? 2 * Theme.space : 0
-                Layout.preferredWidth: Math.min(Theme.contentWidth, parent.width - 8 * Theme.space)
-                Layout.maximumWidth: Theme.contentWidth
-                Layout.alignment: Qt.AlignLeft
+                Layout.preferredWidth: pageLoader.width
                 text: backend.problem
                 onDismissed: backend.clearProblem()
             }
 
             Flickable {
-                id: flick
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentHeight: pageLoader.height + 6 * Theme.space
@@ -81,19 +74,11 @@ Rectangle {
                     x: 4 * Theme.space
                     y: 3 * Theme.space
                     width: Math.min(Theme.contentWidth, parent.width - 8 * Theme.space)
-                    sourceComponent: root.pages[root.page]
+                    source: root.current.source
                 }
             }
         }
     }
-
-    Component { id: firstRun; FirstRunPage { width: pageLoader.width } }
-    Component { id: game; GamePage { width: pageLoader.width } }
-    Component { id: translation; TranslationPage { width: pageLoader.width } }
-    Component { id: appearance; AppearancePage { width: pageLoader.width } }
-    Component { id: hotkeys; HotkeysPage { width: pageLoader.width } }
-    Component { id: licence; LicencePage { width: pageLoader.width } }
-    Component { id: advanced; AdvancedPage { width: pageLoader.width } }
 
     ProfilePopup { id: profiles }
 }

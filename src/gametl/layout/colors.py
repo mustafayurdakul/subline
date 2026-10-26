@@ -13,8 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-Box = tuple[int, int, int, int]
-BGR = tuple[int, int, int]
+from ..geometry import BGR, RGB, Box
 
 
 @dataclass(slots=True)
@@ -71,7 +70,8 @@ def analyze_colors(
 
     # Text colour: the inner pixels that differ most from the background colour.
     bg = np.median(ring, axis=0)
-    distance = np.abs(inner.astype(np.int16) - bg.astype(np.int16)).sum(axis=1)
+    bg16 = bg.astype(np.int16)
+    distance = np.abs(inner.astype(np.int16) - bg16).sum(axis=1)
     k = max(1, int(len(distance) * text_fraction))
     order = np.argsort(distance)
     fg = np.median(inner[order[-k:]], axis=0)
@@ -79,19 +79,18 @@ def analyze_colors(
     ring_std = _robust_spread(_luminance(ring))
     # Inner pixels clearly on the background side (not glyph, not anti-aliased
     # edge): if those vary, there is artwork behind the text.
-    fg_distance = float(np.abs(fg.astype(np.int16) - bg.astype(np.int16)).sum())
+    fg_distance = float(np.abs(fg.astype(np.int16) - bg16).sum())
     near = inner[distance < 0.25 * max(fg_distance, 1.0)]
     base_std = _robust_spread(_luminance(near)) if len(near) > 20 else 0.0
     busy = ring_std > busy_std or base_std > busy_std
 
-    contrast = abs(float(_luminance(fg[None, :])[0]) - float(_luminance(bg[None, :])[0]))
-    return ColorSample(
-        bg=tuple(int(v) for v in bg),  # type: ignore[arg-type]
-        fg=tuple(int(v) for v in fg),  # type: ignore[arg-type]
-        busy=busy,
-        contrast=contrast,
-    )
+    contrast = abs(float(_luminance(fg)) - float(_luminance(bg)))
+    return ColorSample(bg=_triple(bg), fg=_triple(fg), busy=busy, contrast=contrast)
 
 
-def bgr_to_rgb(c: BGR) -> tuple[int, int, int]:
+def _triple(color: np.ndarray) -> BGR:
+    return int(color[0]), int(color[1]), int(color[2])
+
+
+def bgr_to_rgb(c: BGR) -> RGB:
     return (c[2], c[1], c[0])

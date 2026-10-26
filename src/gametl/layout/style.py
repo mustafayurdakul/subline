@@ -11,11 +11,27 @@ every line in the subtitle zone renders alike.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
 
-Box = tuple[int, int, int, int]
-BGR = tuple[int, int, int]
+from ..geometry import BGR, Box
+
+
+def line_height_of(bbox: Box, n_lines: int) -> float:
+    """Source box height per text line."""
+    return (bbox[3] - bbox[1]) / max(1, n_lines)
+
+
+def font_px_for(line_height: float, factor: float = 0.8) -> int:
+    """Font pixel size that matches a source line height: glyphs are about
+    `factor` of the line, and never under 6 px."""
+    return max(6, int(line_height * factor))
+
+
+def _median_color(colors: Iterable[BGR]) -> BGR:
+    samples = list(colors)
+    return int(median(c[0] for c in samples)), int(median(c[1] for c in samples)), int(median(c[2] for c in samples))
 
 
 @dataclass(slots=True)
@@ -44,9 +60,8 @@ class StyleMemory:
         return out
 
     def observe(self, bbox: Box, n_lines: int, bg: BGR, fg: BGR, busy: bool) -> None:
-        line_height = (bbox[3] - bbox[1]) / max(1, n_lines)
         band = self._bands.setdefault(self.band(bbox), deque(maxlen=self.keep))
-        band.append(StyleSample(line_height, bg, fg, busy))
+        band.append(StyleSample(line_height_of(bbox, n_lines), bg, fg, busy))
 
     def font_px(self, bbox: Box, n_lines: int, factor: float = 0.8) -> int:
         """Font pixel size for a block: the band's median line height when
@@ -56,16 +71,14 @@ class StyleMemory:
             # History only: the current box's own height is the jitter being removed.
             line_height = median(s.line_height for s in samples)
         else:
-            line_height = (bbox[3] - bbox[1]) / max(1, n_lines)
-        return max(6, int(line_height * factor))
+            line_height = line_height_of(bbox, n_lines)
+        return font_px_for(line_height, factor)
 
     def colors(self, bbox: Box) -> tuple[BGR, BGR] | None:
         samples = self._samples(bbox)
         if len(samples) < self.min_samples:
             return None
-        bg = tuple(int(median(s.bg[i] for s in samples)) for i in range(3))
-        fg = tuple(int(median(s.fg[i] for s in samples)) for i in range(3))
-        return bg, fg  # type: ignore[return-value]
+        return _median_color(s.bg for s in samples), _median_color(s.fg for s in samples)
 
     def busy(self, bbox: Box, default: bool) -> bool:
         samples = self._samples(bbox)
@@ -114,7 +127,7 @@ class ZoneStyle:
             self.line_height, self._fg = current, self._median_fg()
 
     def _median_fg(self) -> BGR:
-        return tuple(int(median(c[i] for c in self._fgs)) for i in range(3))  # type: ignore[return-value]
+        return _median_color(self._fgs)
 
     def font_px(self, fallback: int, factor: float = 0.8) -> int:
         """Font size from the locked line height; before the lock, from the
@@ -125,7 +138,7 @@ class ZoneStyle:
             height = median(self._heights)
         else:
             return fallback
-        return max(6, int(height * factor))
+        return font_px_for(height, factor)
 
     @property
     def fg(self) -> BGR | None:

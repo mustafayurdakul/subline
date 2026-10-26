@@ -18,20 +18,20 @@ QtObject {
     readonly property color muted: "#8E8E97"
     readonly property color accent: "#A98E5C"       // dim gold: filled button, switch on, active page, focus
     readonly property color accentSoft: "#26221A"   // the accent at 15 %, for the active page's row
-    readonly property color accentDeep: "#6E5C3C"   // outlines in the accent that must stay quiet
     readonly property color textOnAccent: "#0B0A08"
     readonly property color selection: "#4A4234"
     readonly property color danger: "#B5484D"       // destructive actions only
 
     readonly property int space: 8
     readonly property int radius: 0
-    readonly property int radiusSmall: 0
     readonly property int sidebarWidth: 224
     readonly property int contentWidth: 680
 
     readonly property string font: Qt.platform.os === "windows" ? "Segoe UI" : "Inter"
-    readonly property int size: 14
-    readonly property int sizeSmall: 12
+    readonly property int size: 14         // labels, fields, buttons
+    readonly property int sizeCaption: 13  // secondary text beside a control
+    readonly property int sizeSmall: 12    // helper lines
+    readonly property int sizeTiny: 11     // tags
     readonly property int sizeTitle: 15
     readonly property int sizeHeading: 22
 }

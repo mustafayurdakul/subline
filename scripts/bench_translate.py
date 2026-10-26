@@ -11,15 +11,13 @@ import argparse
 import statistics
 import sys
 import time
+from pathlib import Path
 
 from gametl.app.credentials import anthropic_api_key, has_anthropic_credentials
 from gametl.translate.base import TranslationRequest
 from gametl.translate.claude import ClaudeTranslator, estimate_cost_usd
 
-TEXTS = [
-    "The bridge is gone. We need another way across.",
-    "Stay close, and keep your voice down.",
-]
+TEXTS = Path(__file__).with_name("fake_game_script.txt").read_text(encoding="utf-8").splitlines()[3:5]
 
 CONFIGS: dict[str, dict] = {
     "adaptive+structured": {"thinking": "adaptive", "structured": True},
@@ -49,7 +47,6 @@ def main() -> int:
             effort=args.effort,
             game="Fake Game",
             source_lang="en",
-            target_lang="tr",
             api_key=anthropic_api_key(),
             **cfg,
         )

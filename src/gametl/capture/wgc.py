@@ -15,24 +15,15 @@ import time
 from windows_capture import WindowsCapture
 
 from .base import Frame
-from .windows import window_rect
 
 
 class WgcWindowCapture:
     """Capture one window by HWND. Use as a context manager, or call
     `start()` and `stop()`."""
 
-    def __init__(
-        self,
-        hwnd: int,
-        min_interval_ms: int | None = None,
-        capture_cursor: bool = False,
-        draw_border: bool = False,
-    ) -> None:
+    def __init__(self, hwnd: int, min_interval_ms: int | None = None) -> None:
         self.hwnd = hwnd
         self._min_interval_ms = min_interval_ms
-        self._capture_cursor = capture_cursor
-        self._draw_border = draw_border
 
         self._frame_ready = threading.Condition()
         self._latest: Frame | None = None
@@ -45,8 +36,8 @@ class WgcWindowCapture:
 
     def start(self) -> WgcWindowCapture:
         capture = WindowsCapture(
-            cursor_capture=self._capture_cursor,
-            draw_border=self._draw_border,
+            cursor_capture=False,  # the cursor is not text
+            draw_border=False,  # no yellow capture frame around the game
             minimum_update_interval=self._min_interval_ms,
             window_hwnd=self.hwnd,
         )
@@ -55,7 +46,7 @@ class WgcWindowCapture:
         def on_frame_arrived(frame, capture_control):
             # frame.frame_buffer is HxWx4 BGRA, zero-copy, valid only here.
             image = frame.frame_buffer[:, :, :3].copy()
-            received = Frame(image=image, timestamp=time.perf_counter(), window_rect=window_rect(self.hwnd))
+            received = Frame(image=image, timestamp=time.perf_counter())
             with self._frame_ready:
                 self._latest = received
                 self.frames_received += 1

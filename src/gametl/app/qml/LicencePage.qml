@@ -3,7 +3,6 @@ import QtQuick.Layouts
 import "Icons.js" as Icons
 
 ColumnLayout {
-    id: root
     spacing: 2 * Theme.space
 
     Card {
@@ -11,21 +10,18 @@ ColumnLayout {
         helper: "Without a key the app runs for a " + backend.trialDays + "-day trial. The key is kept in Windows Credential Manager, never in a profile."
         SettingRow {
             label: "Status"
-            Text { text: backend.licenseText; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: Theme.size; wrapMode: Text.WordWrap; width: 360; horizontalAlignment: Text.AlignRight }
+            Label { text: backend.licenseText; color: Theme.textSoft; wrapMode: Text.WordWrap; width: 360; horizontalAlignment: Text.AlignRight }
         }
         SettingRow {
             label: "Licence key"
             RowLayout {
                 spacing: Theme.space
-                Field { id: keyField; placeholderText: "GAMETL-..."; implicitWidth: 260; onAccepted: activate.clicked() }
+                Field { id: keyField; placeholderText: "GAMETL-..."; onAccepted: activate.clicked() }
                 SecondaryButton { id: activate; text: "Activate"; icon_: Icons.check; onClicked: { backend.activateLicense(keyField.text); keyField.text = "" } }
                 SecondaryButton { text: "Remove"; onClicked: backend.removeLicense() }
             }
         }
-        RowLayout {
-            visible: backend.purchaseUrl !== ""
-            SecondaryButton { text: "Buy a licence"; icon_: Icons.external; onClicked: Qt.openUrlExternally(backend.purchaseUrl) }
-        }
+        SecondaryButton { visible: backend.purchaseUrl !== ""; text: "Buy a licence"; icon_: Icons.external; onClicked: Qt.openUrlExternally(backend.purchaseUrl) }
     }
 
     Card {
@@ -37,10 +33,9 @@ ColumnLayout {
             Item { Layout.fillWidth: true }
             SecondaryButton { text: "Remove all data and quit"; icon_: Icons.trash; danger: true; onClicked: confirm.open() }
         }
-        Text {
+        Caption {
             Layout.fillWidth: true
             text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models, API keys, licence key and trial start. Then the app quits. Nothing of it stays apart from the program folder."
-            color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall; wrapMode: Text.WordWrap
         }
     }
 

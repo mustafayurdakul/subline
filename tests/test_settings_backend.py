@@ -177,17 +177,13 @@ def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch
     assert secrets.get(DEEPL_KEY) is None and backend.deeplKeyStatus == "not set"
 
 
-def test_licence_activates_and_removes_a_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_licence_activates_and_removes_a_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keypair: tuple[bytes, str]
+) -> None:
     from datetime import date
 
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-    private = Ed25519PrivateKey.generate()
-    pem = private.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
-    )
-    monkeypatch.setattr("gametl.app.license.PUBLIC_KEY_HEX", private.public_key().public_bytes_raw().hex())
+    pem, public_hex = keypair
+    monkeypatch.setattr("gametl.app.license.PUBLIC_KEY_HEX", public_hex)
     secrets = MemorySecretStore()
     backend = backend_for(tmp_path, secrets=secrets)
     assert backend.licenseText.startswith("trial: ")
@@ -230,7 +226,7 @@ def test_hotkey_edits_apply_at_once_but_not_while_loading(tmp_path: Path) -> Non
     assert captures == [True, False]
 
 
-def test_combo_from_key_press() -> None:
+def test_combo_from_key_press(tmp_path: Path) -> None:
     ctrl, shift, alt = (
         Qt.KeyboardModifier.ControlModifier,
         Qt.KeyboardModifier.ShiftModifier,
@@ -244,15 +240,16 @@ def test_combo_from_key_press() -> None:
     assert combo_from_key(Qt.Key.Key_Return, Qt.KeyboardModifier.MetaModifier.value) == "win+enter"
     assert combo_from_key(Qt.Key.Key_Control, ctrl.value) == ""  # a modifier alone is not a hotkey
     assert combo_from_key(Qt.Key.Key_Udiaeresis, ctrl.value) == ""  # keys the registrar cannot name
-    assert backend_combo(Qt.Key.Key_A, (ctrl | alt).value) == "ctrl+alt+a"
+    # Through the slot, as QML calls it.
+    assert backend_for(tmp_path).comboFromKey(int(Qt.Key.Key_A), (ctrl | alt).value) == "ctrl+alt+a"
 
 
-def backend_combo(key, modifiers) -> str:
-    """Through the slot, as QML calls it."""
-    import tempfile
+def test_named_keys_match_the_registrar() -> None:
+    """Every key the press-to-set field can name is one the hotkey parser accepts."""
+    from gametl.app.hotkeys import NAMED_KEYS
+    from gametl.app.settings_backend import _NAMED_QT_KEYS
 
-    with tempfile.TemporaryDirectory() as folder:
-        return backend_for(Path(folder)).comboFromKey(int(key), modifiers)
+    assert set(_NAMED_QT_KEYS.values()) <= NAMED_KEYS.keys()
 
 
 def test_status_and_text_for_the_header(tmp_path: Path) -> None:

@@ -1,46 +1,37 @@
 import QtQuick
+import "Format.js" as Format
 
-// Press-to-set: click, press the keys, done. Esc leaves the field as it
-// was, Backspace restores `fallback`. While it records, the backend lets go
-// of the global hotkeys, or the combination in use would never arrive.
+// Press-to-set, bound to `map[key]`: click, press the keys, done. Esc
+// leaves the field as it was, Backspace restores `fallback`. While it
+// records, the backend lets go of the global hotkeys, or the combination
+// in use would never arrive.
 Rectangle {
     id: root
-    property var map: null
+    property var map: backend.settings
     property string key: ""
     property string fallback: ""
-    readonly property string combo: map !== null && key !== "" ? String(map[key] ?? "") : ""
+    readonly property string combo: String(map[key] ?? "")
 
     implicitWidth: 200
     implicitHeight: 34
-    radius: Theme.radiusSmall
+    radius: Theme.radius
     color: Theme.field
     border.color: activeFocus ? Theme.accent : Theme.border
     activeFocusOnTab: true
 
-    function pretty(text) {
-        return text.split("+").map(function(part) {
-            return part.length ? part.charAt(0).toUpperCase() + part.slice(1) : part
-        }).join(" + ")
-    }
-
-    Text {
+    Label {
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        text: root.activeFocus ? "press the keys" : root.pretty(root.combo)
+        text: root.activeFocus ? "press the keys" : Format.hotkey(root.combo)
         color: root.activeFocus ? Theme.muted : Theme.text
-        font.family: Theme.font
-        font.pixelSize: Theme.size
     }
-    Text {
+    Caption {
         anchors.right: parent.right
         anchors.rightMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         visible: root.activeFocus
         text: "Esc"
-        color: Theme.muted
-        font.family: Theme.font
-        font.pixelSize: Theme.sizeSmall
     }
     MouseArea {
         anchors.fill: parent

@@ -66,6 +66,7 @@ Rectangle {
                 radius: 8
                 color: Qt.rgba(0, 0, 0, root.pillOpacity)
             }
+            // The same offsets and strengths the overlay draws with (overlay/window.py: _SHADOW_LAYERS, _OUTLINE_OFFSETS).
             Repeater {
                 model: root.background === "shadow" ? [[1, 1, 0.65], [2, 2, 0.45], [3, 3, 0.25], [0, 2, 0.25], [2, 0, 0.25]]
                      : root.background === "none" ? [[-1, -1, 0.85], [1, -1, 0.85], [-1, 1, 0.85], [1, 1, 0.85], [0, -1, 0.85], [0, 1, 0.85], [-1, 0, 0.85], [1, 0, 0.85]]
@@ -98,6 +99,6 @@ Rectangle {
         width: previewTag.implicitWidth + 16
         height: 22
         color: Qt.rgba(0, 0, 0, 0.45)
-        Text { id: previewTag; anchors.centerIn: parent; text: "Live preview"; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: 11 }
+        Label { id: previewTag; anchors.centerIn: parent; text: "Live preview"; color: Theme.textSoft; font.pixelSize: Theme.sizeTiny }
     }
 }

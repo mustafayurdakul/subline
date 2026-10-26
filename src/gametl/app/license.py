@@ -50,6 +50,19 @@ def _b64decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
+def generate_keypair() -> tuple[bytes, str]:
+    """A fresh Ed25519 signing key as (private PEM, public key hex): the
+    PEM for `make_key`, the hex for PUBLIC_KEY_HEX (developer side)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    pem = private.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    return pem, private.public_key().public_bytes_raw().hex()
+
+
 def make_key(
     private_key_pem: bytes, name: str, email: str, issued: date, expires: date | None = None, seats: int = 1
 ) -> str:
@@ -116,17 +129,18 @@ def trial_start(secrets: SecretStore, store: ProfileStore, today: date) -> date:
     """The first-start date. It is kept both in the secret store and in
     config.json; the earliest copy wins and a missing copy is restored, so
     deleting one of them does not restart the trial."""
+    stored = secrets.get(TRIAL_SECRET)
+    config = store.load_config()
     found: list[date] = []
-    for text in (secrets.get(TRIAL_SECRET), store.load_config().get("trial_start")):
+    for text in (stored, config.get("trial_start")):
         try:
             if text:
                 found.append(date.fromisoformat(str(text)))
         except ValueError:
             continue
     start = min(found) if found else today
-    if secrets.get(TRIAL_SECRET) != start.isoformat():
+    if stored != start.isoformat():
         secrets.set(TRIAL_SECRET, start.isoformat())
-    config = store.load_config()
     if config.get("trial_start") != start.isoformat():
         config["trial_start"] = start.isoformat()
         store.save_config(config)

@@ -18,23 +18,8 @@ Item {
         anchors.rightMargin: 2 * Theme.space
         anchors.verticalCenter: parent.verticalCenter
         spacing: 2
-        Text {
-            width: parent.width
-            text: root.label
-            color: Theme.text
-            font.family: Theme.font
-            font.pixelSize: Theme.size
-            wrapMode: Text.WordWrap
-        }
-        Text {
-            width: parent.width
-            visible: root.helper !== ""
-            text: root.helper
-            color: Theme.muted
-            font.family: Theme.font
-            font.pixelSize: Theme.sizeSmall
-            wrapMode: Text.WordWrap
-        }
+        Label { width: parent.width; text: root.label; wrapMode: Text.WordWrap }
+        Caption { width: parent.width; visible: root.helper !== ""; text: root.helper }
     }
 
     Row {

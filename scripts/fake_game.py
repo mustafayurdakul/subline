@@ -15,18 +15,14 @@ import argparse
 import math
 import sys
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter
 from PySide6.QtWidgets import QApplication, QWidget
 
-LINES = [
-    "Where were you when the lights went out?",
-    "I told you not to open that door.",
-    "We leave at dawn. Pack only what you can carry.",
-    "The bridge is gone. We need another way across.",
-    "Stay close, and keep your voice down.",
-]
+# The same lines `gametl pretranslate` reads from fake_game_script.txt.
+LINES = Path(__file__).with_name("fake_game_script.txt").read_text(encoding="utf-8").splitlines()
 
 
 class FakeGame(QWidget):

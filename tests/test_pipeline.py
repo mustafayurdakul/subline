@@ -18,14 +18,10 @@ from gametl.ocr.base import OcrResult, TextLine
 from gametl.translate.cache import TranslationCache
 from gametl.translate.dummy import UppercaseTranslator
 from gametl.translate.service import TranslationService
+from tests.helpers import line
 
 WIDTH, HEIGHT = 1000, 720
 STRIP = (0, 600, WIDTH, 700)
-
-
-def line(text: str, x0: int, y0: int, x1: int, y1: int) -> TextLine:
-    quad = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
-    return TextLine(text, quad, 0.95)
 
 
 class FakeEngine:

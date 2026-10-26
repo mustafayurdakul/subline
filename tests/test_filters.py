@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-import numpy as np
-
 from gametl.app.config import NO_LETTERS_PATTERN
-from gametl.ocr.base import TextLine
 from gametl.tracking.filters import LineFilter
-
-
-def line(text: str, x0: int, y0: int, x1: int, y1: int, confidence: float = 0.9) -> TextLine:
-    quad = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
-    return TextLine(text, quad, confidence)
+from tests.helpers import line
 
 
 def test_empty_filter_passes_everything() -> None:

@@ -5,19 +5,10 @@ import "Icons.js" as Icons
 // The left rail: app name, pages, the overlay's last word, and the profile at the bottom.
 Rectangle {
     id: root
-    property string current: "firstrun"
+    property var pages: []  // Main's page table: key, label, icon
+    property string current: ""
     signal navigate(string page)
     signal profileClicked()
-
-    readonly property var entries: [
-        { key: "firstrun", label: "Set up", icon: Icons.sparkles },
-        { key: "game", label: "Game", icon: Icons.gamepad },
-        { key: "translation", label: "Translation", icon: Icons.translate },
-        { key: "appearance", label: "Appearance", icon: Icons.palette },
-        { key: "hotkeys", label: "Hotkeys", icon: Icons.keyboard },
-        { key: "licence", label: "Licence", icon: Icons.key },
-        { key: "advanced", label: "Advanced", icon: Icons.sliders },
-    ]
 
     width: Theme.sidebarWidth
     color: Theme.sidebar
@@ -33,7 +24,8 @@ Rectangle {
             Layout.fillWidth: true
             Layout.bottomMargin: 2 * Theme.space
             spacing: 10
-            // The mark: a window frame with the subtitle strip along its bottom.
+            // The mark: a window frame with the subtitle strip along its
+            // bottom (app/icon.py draws the same for the tray).
             Item {
                 width: 30; height: 30
                 Rectangle { anchors.fill: parent; color: "transparent"; border.color: Theme.accent; border.width: 2 }
@@ -41,37 +33,32 @@ Rectangle {
             }
             ColumnLayout {
                 spacing: 0
-                Text { text: backend.appName; color: Theme.text; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.DemiBold }
-                Text { text: backend.version; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall }
+                Label { text: backend.appName; font.pixelSize: 16; font.weight: Font.DemiBold }
+                Caption { text: backend.version }
             }
         }
 
         Repeater {
-            model: root.entries
+            model: root.pages
             delegate: Rectangle {
+                id: entry
                 required property var modelData
                 readonly property bool active: modelData.key === root.current
                 Layout.fillWidth: true
                 height: 36
-                radius: Theme.radiusSmall
+                radius: Theme.radius
                 color: active ? Theme.accentSoft : mouse.containsMouse ? Theme.card : "transparent"
 
-                Rectangle {
-                    visible: parent.active
-                    x: 0; y: 0; width: 3; height: parent.height
-                    color: Theme.accent
-                }
+                Rectangle { visible: entry.active; width: 3; height: parent.height; color: Theme.accent }
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 14
                     spacing: 10
-                    Icon { path: modelData.icon; color: parent.parent.active ? Theme.accent : Theme.muted; size: 18; anchors.verticalCenter: parent.verticalCenter }
-                    Text {
-                        text: modelData.label
-                        color: parent.parent.active ? Theme.text : Theme.textSoft
-                        font.family: Theme.font
-                        font.pixelSize: Theme.size
-                        font.weight: parent.parent.active ? Font.DemiBold : Font.Normal
+                    Icon { path: entry.modelData.icon; color: entry.active ? Theme.accent : Theme.muted; size: 18; anchors.verticalCenter: parent.verticalCenter }
+                    Label {
+                        text: entry.modelData.label
+                        color: entry.active ? Theme.text : Theme.textSoft
+                        font.weight: entry.active ? Font.DemiBold : Font.Normal
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -80,7 +67,7 @@ Rectangle {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.navigate(parent.modelData.key)
+                    onClicked: root.navigate(entry.modelData.key)
                 }
             }
         }
@@ -88,15 +75,11 @@ Rectangle {
         Item { Layout.fillHeight: true }
 
         // The overlay's last status line, as the tray shows it.
-        Text {
+        Caption {
             Layout.fillWidth: true
             Layout.bottomMargin: Theme.space
             visible: backend.statusText !== ""
             text: backend.statusText
-            color: Theme.muted
-            font.family: Theme.font
-            font.pixelSize: Theme.sizeSmall
-            wrapMode: Text.WordWrap
             maximumLineCount: 3
             elide: Text.ElideRight
         }
@@ -104,28 +87,26 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             height: 56
-            radius: Theme.radiusSmall
+            radius: Theme.radius
             color: profileMouse.containsMouse ? Theme.cardRaised : Theme.card
             border.color: Theme.border
-            Row {
+            Icon { id: folder; x: 12; anchors.verticalCenter: parent.verticalCenter; path: Icons.folder; color: Theme.muted; size: 18 }
+            Column {
+                anchors.left: folder.right
+                anchors.right: chevron.left
+                anchors.leftMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
-                x: 12
-                spacing: 10
-                Icon { path: Icons.folder; color: Theme.muted; size: 18; anchors.verticalCenter: parent.verticalCenter }
-                Column {
-                    spacing: 1
-                    anchors.verticalCenter: parent.verticalCenter
-                    Text { text: "Profile"; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall }
-                    Text {
-                        text: backend.profileName !== "" ? backend.profileName : "not saved"
-                        color: backend.profileName !== "" ? Theme.text : Theme.muted
-                        font.family: Theme.font; font.pixelSize: Theme.size; font.weight: Font.DemiBold
-                        width: Theme.sidebarWidth - 4 * Theme.space - 60
-                        elide: Text.ElideRight
-                    }
+                spacing: 1
+                Caption { text: "Profile" }
+                Label {
+                    width: parent.width
+                    text: backend.profileName !== "" ? backend.profileName : "not saved"
+                    color: backend.profileName !== "" ? Theme.text : Theme.muted
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
                 }
             }
-            Icon { path: Icons.chevron; color: Theme.muted; size: 16; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter }
+            Icon { id: chevron; path: Icons.chevron; color: Theme.muted; size: 16; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter }
             MouseArea {
                 id: profileMouse
                 anchors.fill: parent

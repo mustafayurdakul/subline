@@ -95,7 +95,6 @@ class ClaudeTranslator:
         glossary: dict[str, str] | None = None,
         tone: str | None = None,  # notes on tone and formality
         source_lang: str | None = None,
-        target_lang: str = "tr",
         max_tokens: int = 2048,
         timeout: float = 20.0,
         structured: bool = False,  # True: server-side structured output (measured ~0.5 s slower per call)
@@ -110,7 +109,6 @@ class ClaudeTranslator:
         self.glossary = dict(glossary or {})
         self.tone = tone
         self.source_lang = source_lang
-        self.target_lang = target_lang
         self.max_tokens = max_tokens
         self.last_usage: Any = None
         self.calls = 0
@@ -121,7 +119,7 @@ class ClaudeTranslator:
             import anthropic
 
             client = anthropic.Anthropic(api_key=api_key, timeout=timeout, max_retries=1)
-        self._client = client
+        self.client = client  # also used by batch pre-translation, so the same key serves both
 
     # -- prompt ----------------------------------------------------------------
 
@@ -169,10 +167,8 @@ class ClaudeTranslator:
         """Plain-JSON mode: the answer is the first text block (after any
         thinking blocks), possibly wrapped in a code fence."""
         text = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            text = text.removeprefix("json")
+        # The object between the outermost braces: a code fence or chatter
+        # around it is ignored by the slice itself.
         start, end = text.find("{"), text.rfind("}")
         if start < 0 or end < 0:
             raise TranslationError("no JSON object in response text")
@@ -180,42 +176,54 @@ class ClaudeTranslator:
             data = json.loads(text[start : end + 1])
         except ValueError as exc:
             raise TranslationError(f"malformed JSON in response: {exc}") from exc
-        items = data.get("items") if isinstance(data, dict) else data
+        items = data.get("items")
         if not isinstance(items, list):
             raise TranslationError("no items list in response")
-        normalised: list[dict[str, Any]] = []
-        for index, item in enumerate(items):
-            if isinstance(item, str):
-                normalised.append({"id": index, "text": item})
-            elif isinstance(item, dict) and "text" in item:
-                normalised.append({"id": int(item.get("id", index)), "text": str(item["text"])})
-            else:
-                raise TranslationError(f"unexpected item in response: {item!r}")
+        parsed: list[TranslatedItem] = []
         try:
-            return TranslationBatch.model_validate({"items": normalised})
+            for index, item in enumerate(items):
+                if isinstance(item, str):
+                    parsed.append(TranslatedItem(id=index, text=item))
+                elif isinstance(item, dict) and "text" in item:
+                    parsed.append(TranslatedItem(id=int(item.get("id", index)), text=str(item["text"])))
+                else:
+                    raise TranslationError(f"unexpected item in response: {item!r}")
         except (ValueError, TypeError) as exc:
             raise TranslationError(f"malformed items in response: {exc}") from exc
+        return TranslationBatch(items=parsed)
+
+    @staticmethod
+    def results_from(batch: TranslationBatch, count: int) -> list[str | None]:
+        """The batch's texts back in input order; a missing or blank item
+        stays None (retried later)."""
+        out: list[str | None] = [None] * count
+        for item in batch.items:
+            if 0 <= item.id < count and item.text.strip():
+                out[item.id] = item.text
+        return out
+
+    def request_params(self, request: TranslationRequest) -> dict[str, Any]:
+        """The Messages API call for `request`: cached system prompt, one user
+        message with the items, and the thinking and output settings."""
+        params: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": self.system_blocks(request.source_lang or self.source_lang, request.target_lang),
+            "messages": [{"role": "user", "content": self.user_payload(request)}],
+            "output_config": {"effort": self.effort},
+        }
+        if self.structured:
+            params["output_format"] = TranslationBatch
+        if self.thinking == "disabled" and supports_disabled_thinking(self.model):
+            params["thinking"] = {"type": "disabled"}
+        return params
 
     # -- call ------------------------------------------------------------------
 
     def translate(self, request: TranslationRequest) -> list[str | None]:
         if not request.texts:
             return []
-        source_lang = request.source_lang or self.source_lang
-        target_lang = request.target_lang or self.target_lang
-
-        # The request: cached system prompt, one user message with the items.
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": self.max_tokens,
-            "system": self.system_blocks(source_lang, target_lang),
-            "messages": [{"role": "user", "content": self.user_payload(request)}],
-            "output_config": {"effort": self.effort},
-        }
-        if self.structured:
-            kwargs["output_format"] = TranslationBatch
-        if self.thinking == "disabled" and supports_disabled_thinking(self.model):
-            kwargs["thinking"] = {"type": "disabled"}
+        kwargs = self.request_params(request)
 
         try:
             import anthropic
@@ -224,9 +232,9 @@ class ClaudeTranslator:
 
         try:
             if self.structured:
-                response = self._client.messages.parse(**kwargs)
+                response = self.client.messages.parse(**kwargs)
             else:
-                response = self._client.messages.create(**kwargs)
+                response = self.client.messages.create(**kwargs)
         except Exception as exc:
             if anthropic is not None and isinstance(exc, (anthropic.APIConnectionError, anthropic.APIStatusError)):
                 raise TranslationError(f"{type(exc).__name__}: {exc}") from exc
@@ -253,10 +261,4 @@ class ClaudeTranslator:
                 raise TranslationError("no structured output in response")
         else:
             batch = self._parse_text_json(response)
-
-        # Back into input order; a missing or blank item stays None (retried later).
-        out: list[str | None] = [None] * len(request.texts)
-        for item in batch.items:
-            if 0 <= item.id < len(out) and item.text.strip():
-                out[item.id] = item.text
-        return out
+        return self.results_from(batch, len(request.texts))

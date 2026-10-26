@@ -19,7 +19,7 @@ from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-Box = tuple[int, int, int, int]
+from ..geometry import Box
 
 MIN_SIZE = 8  # px; smaller drags count as a cancel
 NUDGE = 1  # px per arrow key
@@ -56,7 +56,6 @@ class AreaSelector(QWidget):
     def __init__(
         self,
         target_rect: Box,
-        hint: str | None = None,
         mirror_x: bool = False,
         center_x: int | None = None,
     ) -> None:
@@ -71,7 +70,6 @@ class AreaSelector(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         x0, y0, x1, y1 = target_rect
         self.setGeometry(x0, y0, x1 - x0, y1 - y0)
-        self._hint = hint
         # mirror_x: keep the selection symmetric about center_x by default; Shift inverts it for one drag.
         self.mirror_x = mirror_x
         self.center_x = center_x if center_x is not None else (x1 - x0) // 2
@@ -90,8 +88,6 @@ class AreaSelector(QWidget):
     # -- state -------------------------------------------------------------------
 
     def hint(self) -> str:
-        if self._hint is not None:
-            return self._hint
         if self._rect is not None:
             return "Enter confirms. Arrow keys nudge (Shift: 10 px, Ctrl: resize). Drag again to redo. Esc cancels."
         shift = "frees it" if self.mirror_x else "keeps it centred"
@@ -115,25 +111,27 @@ class AreaSelector(QWidget):
 
     # -- events ----------------------------------------------------------------
 
+    def _track(self, event) -> None:
+        """The pointer and the Shift state, as of this mouse event."""
+        self._shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        self._current = event.position().toPoint()
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._rect = None  # a new drag replaces a finished selection
-            self._shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self._origin = event.position().toPoint()
-            self._current = self._origin
+            self._track(event)
+            self._origin = self._current
             self.update()
 
     def mouseMoveEvent(self, event) -> None:
         if self._origin is not None:
-            self._shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self._current = event.position().toPoint()
+            self._track(event)
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self._origin is None:
             return
-        self._shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-        self._current = event.position().toPoint()
+        self._track(event)
         rect = self.selection()
         self._origin = self._current = None
         if rect is None or rect.width() < MIN_SIZE or rect.height() < MIN_SIZE:

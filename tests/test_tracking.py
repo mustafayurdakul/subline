@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
-
-from gametl.ocr.base import TextLine
 from gametl.tracking.blocks import (
     BlockTracker,
     containment,
@@ -11,12 +8,7 @@ from gametl.tracking.blocks import (
     merge_row_fragments,
     text_similarity,
 )
-
-
-def line(text: str, x0: int, y0: int, x1: int, y1: int, conf: float = 0.95) -> TextLine:
-    quad = np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float32)
-    return TextLine(text, quad, conf)
-
+from tests.helpers import line
 
 # -- helpers -------------------------------------------------------------------
 

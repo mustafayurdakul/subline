@@ -49,13 +49,12 @@ class TrayApp(QObject):
         self.start_action.triggered.connect(self.toggle)
         self.pause_action = self.menu.addAction("Pause")
         self.pause_action.setCheckable(True)
-        self.pause_action.triggered.connect(lambda checked: self.controller.set_paused(bool(checked)))
+        self.pause_action.triggered.connect(self.controller.set_paused)
         self.rescan_action = self.menu.addAction("Rescan screen")
         self.rescan_action.triggered.connect(self.controller.rescan)
         self.menu.addSeparator()
         self.menu.addAction("Select area to translate...").triggered.connect(self.select_area)
-        self.clear_area_action = self.menu.addAction("Clear area (whole window)")
-        self.clear_area_action.triggered.connect(self.clear_area)
+        self.menu.addAction("Clear area (whole window)").triggered.connect(self.controller.clear_area)
         self.menu.addSeparator()
         self.menu.addAction("Settings...").triggered.connect(self.open_settings)
         self.profiles_menu = self.menu.addMenu("Profiles")
@@ -69,8 +68,8 @@ class TrayApp(QObject):
         self.tray.activated.connect(self._on_activated)
 
         controller.status.connect(self._on_status)
-        controller.running_changed.connect(self._on_running)
-        controller.starting_changed.connect(self._on_starting)
+        controller.running_changed.connect(self._refresh_labels)
+        controller.starting_changed.connect(self._refresh_labels)
         controller.paused_changed.connect(self._on_paused)
         controller.area_selected.connect(self._on_area_selected)
 
@@ -85,19 +84,13 @@ class TrayApp(QObject):
         self.controller.toggle(self.settings)
 
     def toggle_pause(self) -> None:
-        if self.controller.running:
-            self.controller.set_paused(not self.controller.paused)
+        self.controller.set_paused(not self.controller.paused)
 
     def select_area(self) -> None:
         self.controller.select_area(self.settings)
 
-    def clear_area(self) -> None:
-        self.controller.clear_area()
-
     def _on_area_selected(self, spec: str) -> None:
-        self.settings.roi = spec
-        if spec:
-            self.settings.full_scan_every = 0
+        self.settings.set_area(spec)
         if self.window is not None:
             self.window.backend.set("roi", spec)
         if self.profile_name:
@@ -169,31 +162,40 @@ class TrayApp(QObject):
             self._on_status("hotkeys not registered: " + ", ".join(failed))
 
     def load_profile(self, name: str) -> None:
+        """A profile picked from the tray menu."""
         try:
-            self.settings = self.store.load(name)
+            settings = self.store.load(name)
         except (OSError, ValueError) as exc:
             self._on_status(f"could not load profile {name}: {exc}")
             return
-        self.profile_name = name
         self.store.last_profile = name
-        self.apply_hotkeys(self.settings)
         if self.window is not None:
-            self.window.backend.load(self.settings)
+            self.window.backend.load(settings)
             self.window.backend.set_profile_name(name)
-        self._on_status(f"profile {name} loaded")
+        self._on_profile_loaded(name, settings)
 
     def remove_all_data(self) -> None:
         """Wipe everything gametl keeps on this computer, then quit. The
         settings window has already asked for confirmation."""
-        self.controller.close()
-        self.hotkeys.unregister_all()
-        if self.window is not None:
-            self.window.close()
+        self._shutdown()
         report = remove_all_data(self.store, self.controller.secrets)
         if not report.complete:
             QMessageBox.warning(None, APP_NAME, "Some data could not be removed:\n" + "\n".join(report.failed))
         self.tray.hide()
         self.app.quit()
+
+    def quit(self) -> None:
+        self._shutdown()
+        self.tray.hide()
+        self.app.quit()
+
+    def _shutdown(self) -> None:
+        """Stop the overlay (letting a start in progress run out), release
+        the hotkeys and close the settings window."""
+        self.controller.close()
+        self.hotkeys.unregister_all()
+        if self.window is not None:
+            self.window.close()
 
     # -- signals -----------------------------------------------------------------
 
@@ -208,12 +210,6 @@ class TrayApp(QObject):
         self.status_action.setText(f"{APP_NAME}: {text}"[:80])
         self.tray.setToolTip(f"{APP_NAME}\n{text}"[:127])
 
-    def _on_running(self, running: bool) -> None:
-        self._refresh_labels()
-
-    def _on_starting(self, starting: bool) -> None:
-        self._refresh_labels()
-
     def _on_paused(self, paused: bool) -> None:
         self.pause_action.setChecked(paused)
         self._refresh_labels()
@@ -222,15 +218,9 @@ class TrayApp(QObject):
         self.profile_name = name
         self._on_status(f"profile {name} saved")
 
-    def quit(self) -> None:
-        self.controller.close()
-        self.hotkeys.unregister_all()
-        if self.window is not None:
-            self.window.close()
-        self.tray.hide()
-        self.app.quit()
-
-    def _refresh_labels(self) -> None:
+    def _refresh_labels(self, *_changed: object) -> None:
+        """Menu labels, enabled state and icon from the controller's state
+        (connected to its signals, whose argument is not needed)."""
         running, starting = self.controller.running, self.controller.starting
         # While the models load on their thread, the same action abandons the start.
         label = "Cancel start" if starting else ("Stop overlay" if running else "Start overlay")

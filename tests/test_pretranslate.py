@@ -15,6 +15,7 @@ from gametl.translate.pretranslate import (
     pretranslate_sync,
     submit_batch,
 )
+from tests.helpers import text_response
 
 
 def test_load_txt_dedupes_and_strips_tags(tmp_path: Path) -> None:
@@ -58,17 +59,12 @@ class StubMessages:
         self.created.append(kwargs)
         payload = json.loads(kwargs["messages"][0]["content"])
         body = json.dumps({"items": [t.upper() for t in payload["items"]]})
-        return SimpleNamespace(
-            stop_reason="end_turn",
-            stop_details=None,
-            content=[SimpleNamespace(type="text", text=body)],
-            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
-        )
+        return text_response(body, usage=SimpleNamespace(input_tokens=10, output_tokens=5))
 
 
 def test_pretranslate_sync_fills_cache_and_skips_known(tmp_path: Path) -> None:
     client = SimpleNamespace(messages=StubMessages())
-    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr")
+    translator = ClaudeTranslator(client=client, source_lang="en")
     cache = TranslationCache(tmp_path / "c.json")
     cache.put("Known line", "tr", "Bilinen")
     added = pretranslate_sync(["Known line", "Stay close.", "Open the door."], translator, cache, "tr", chunk_size=1)
@@ -104,7 +100,7 @@ class StubBatches:
 def test_batch_submit_save_and_collect(tmp_path: Path) -> None:
     batches = StubBatches()
     client = SimpleNamespace(messages=SimpleNamespace(batches=batches))
-    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr", game="Fake Game")
+    translator = ClaudeTranslator(client=client, source_lang="en", game="Fake Game")
     cache = TranslationCache(tmp_path / "c.json")
 
     requests, chunks = build_batch_requests(["a", "b", "c"], translator, "tr", chunk_size=2)
@@ -134,6 +130,6 @@ def test_batch_goes_through_the_translators_own_client_by_default(tmp_path: Path
     a fresh anthropic.Anthropic() would only see the environment."""
     batches = StubBatches()
     client = SimpleNamespace(messages=SimpleNamespace(batches=batches))
-    translator = ClaudeTranslator(client=client, source_lang="en", target_lang="tr")
+    translator = ClaudeTranslator(client=client, source_lang="en")
     job = submit_batch(["Stay close."], translator, TranslationCache(tmp_path / "c.json"), "tr")
     assert job is not None and [r["custom_id"] for r in batches.requests] == ["chunk-00000"]

@@ -62,9 +62,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.resume:
         job = BatchJob.load(Path(args.resume))
-        game = Path(args.resume).stem.split(".")[0]
-        cache = TranslationCache(store.cache_dir / f"{game}.{job.target_lang}.claude.json")
-        ended, added, failed = wait_for_batch(job, cache, args.wait, client=anthropic_client(), progress=say)
+        game = job.game or Path(args.resume).stem.split(".")[0]  # job files from before 0.1.4 carry no game
+        cache = TranslationCache(store.cache_path(game, job.target_lang, "claude"))
+        ended, added, failed = wait_for_batch(job, cache, args.wait, client=anthropic_client(), say=say)
         if not ended:
             say("batch still running; run --resume again later")
             return 3
@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
 
     glossary = json.loads(Path(args.glossary).read_text(encoding="utf-8")) if args.glossary else None
     lines = load_lines(args.script)
-    cache_path = store.cache_dir / f"{slug(args.game)}.{args.target_lang}.claude.json"
+    cache_path = store.cache_path(args.game, args.target_lang, "claude")
     cache = TranslationCache(cache_path)
     translator = ClaudeTranslator(
         model=args.model,
@@ -82,7 +82,6 @@ def main(argv: list[str] | None = None) -> int:
         glossary=glossary,
         tone=args.tone,
         source_lang=args.source_lang,
-        target_lang=args.target_lang,
         api_key=anthropic_api_key(),
     )
     say(f"{len(lines)} lines from {args.script}; cache {cache_path} ({len(cache)} entries)")
@@ -93,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"added {added} lines; tokens {totals['input']} in / {totals['output']} out over {translator.calls} calls")
         return 0
 
-    client = translator._client  # carries the app's key; the batch calls reuse it
-    job = submit_batch(lines, translator, cache, args.target_lang, args.chunk_size, client=client)
+    client = translator.client  # carries the app's key; the batch calls reuse it
+    job = submit_batch(lines, translator, cache, args.target_lang, args.chunk_size, client=client, game=args.game)
     if job is None:
         say("every line is already in the cache")
         return 0
@@ -104,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.wait <= 0:
         say(f'collect later with: gametl-pretranslate --resume "{job_path}"')
         return 0
-    ended, added, failed = wait_for_batch(job, cache, args.wait, client=client, progress=say)
+    ended, added, failed = wait_for_batch(job, cache, args.wait, client=client, say=say)
     if not ended:
         say(f'still running after {args.wait:.0f}s; collect later with: gametl-pretranslate --resume "{job_path}"')
         return 3

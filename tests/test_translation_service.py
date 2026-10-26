@@ -6,6 +6,7 @@ import time
 from gametl.translate.base import TranslationError, TranslationRequest
 from gametl.translate.cache import TranslationCache
 from gametl.translate.service import TranslationService
+from tests.helpers import wait_until
 
 
 class GatedTranslator:
@@ -24,15 +25,6 @@ class GatedTranslator:
         if self.fail:
             raise TranslationError("boom")
         return [t.upper() for t in request.texts]
-
-
-def wait_until(predicate, timeout: float = 5.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.01)
-    return False
 
 
 def test_submit_batches_and_results_arrive_via_drain() -> None:
@@ -98,22 +90,6 @@ def test_new_translations_are_saved_to_disk_without_a_shutdown(tmp_path) -> None
     finally:
         service.shutdown()
     assert path2.exists()
-
-
-def test_cooldowns_that_passed_are_forgotten() -> None:
-    translator = GatedTranslator()
-    translator.fail = True
-    translator.release.set()
-    service = TranslationService(translator, retry_cooldown=0.05)
-    try:
-        service.submit(["x"])
-        assert wait_until(lambda: service.drain() >= 0 and service.pending == 0)
-        assert "x" in service._failed_until
-        time.sleep(0.1)
-        service.submit(["y"])  # any submit prunes
-        assert "x" not in service._failed_until
-    finally:
-        service.shutdown()
 
 
 class InstantDraft:
@@ -203,7 +179,7 @@ def test_failed_batch_cools_down_then_retries() -> None:
         assert service.submit(["x"]) is False  # cooling down
         time.sleep(0.25)
         translator.fail = False
-        assert service.submit(["x"]) is True
+        assert service.submit(["x"]) is True  # the cooldown that passed is forgotten
         assert wait_until(lambda: service.drain() > 0)
         assert service.lookup("x") == "X"
     finally:

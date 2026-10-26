@@ -99,7 +99,7 @@ def test_in_place_layout_fits_the_width(qapp: QApplication, target: QWidget) -> 
     overlay = OverlayWindow(int(target.winId()))
     block = RenderBlock((0, 0, 300, 60), ["A fairly long translated subtitle line", "second"], source_lines=2)
     layout = overlay.layout_for(block)
-    assert all(overlay.measure(line, layout.font_px) <= 300 for line in layout.lines)
+    assert all(overlay.measurer(False)(line, layout.font_px) <= 300 for line in layout.lines)
     assert layout.font_px >= 6
     assert overlay.layout_for(block) is layout  # cached
     short = overlay.layout_for(RenderBlock((0, 0, 1000, 50), ["Hi"]))

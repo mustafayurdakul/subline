@@ -1,18 +1,17 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// A multi-line field, one entry per line (ignore patterns, zones). With
-// `map` and `key` it follows and writes that settings entry.
+// A multi-line field bound to `map[key]`, one entry per line (ignore
+// patterns, zones).
 Rectangle {
     id: root
     property string placeholderText: ""
-    property var map: null
+    property var map: backend.settings
     property string key: ""
-    readonly property bool bound: map !== null && key !== ""
 
     implicitWidth: 300
     implicitHeight: 84
-    radius: Theme.radiusSmall
+    radius: Theme.radius
     color: Theme.field
     border.color: area.activeFocus ? Theme.accent : Theme.border
 
@@ -34,8 +33,8 @@ Rectangle {
             rightPadding: 11
             topPadding: 7
             background: null
-            Binding on text { when: root.bound; value: root.bound ? String(root.map[root.key] ?? "") : "" }
-            onTextChanged: if (activeFocus && root.bound) root.map[root.key] = text
+            Binding on text { value: String(root.map[root.key] ?? "") }
+            onTextChanged: if (activeFocus) root.map[root.key] = text  // the user's edits, not the binding's
         }
     }
 }

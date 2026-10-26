@@ -12,13 +12,6 @@ def test_exact_hit_is_case_and_whitespace_insensitive() -> None:
     assert cache.get("Stay close, and keep your voice down.", "de") is None
 
 
-def test_fuzzy_hit_absorbs_ocr_noise() -> None:
-    cache = TranslationCache()
-    cache.put("Stay close, and keep your voice down.", "tr", "X")
-    assert cache.get("Stay close, and keep your vo1ce down.", "tr") == "X"
-    assert cache.get("Stay close, and keep your voice down", "tr") == "X"
-
-
 def test_fuzzy_never_crosses_different_lines() -> None:
     cache = TranslationCache()
     cache.put("Go left at the bridge.", "tr", "left")
@@ -32,6 +25,7 @@ def test_fuzzy_needs_a_long_line_and_the_same_word_count() -> None:
     cache.put("Stay close, and keep your voice down.", "tr", "X")
     assert cache.get("Stay close, and keep your voice down now.", "tr") is None  # an added word
     assert cache.get("Stay close, and keep your vo1ce down.", "tr") == "X"  # OCR slip, same words
+    assert cache.get("Stay close, and keep your voice down", "tr") == "X"  # a dropped full stop
 
 
 def test_damaged_cache_file_is_set_aside_and_the_cache_starts_empty(tmp_path: Path) -> None:
