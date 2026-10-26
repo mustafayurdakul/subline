@@ -12,8 +12,8 @@ TextField {
     rightPadding: 12
     color: Theme.text
     placeholderTextColor: Theme.muted
-    selectionColor: Theme.accent
-    selectedTextColor: Theme.textOnAccent
+    selectionColor: Theme.selection
+    selectedTextColor: Theme.text
     font.family: Theme.font
     font.pixelSize: Theme.size
     echoMode: secret ? TextInput.Password : TextInput.Normal
@@ -21,7 +21,7 @@ TextField {
     background: Rectangle {
         radius: Theme.radiusSmall
         color: Theme.field
-        border.color: root.activeFocus ? Theme.accent : Theme.border
+        border.color: root.activeFocus ? Theme.muted : Theme.border
         border.width: 1
     }
 }

@@ -28,7 +28,7 @@ Rectangle {
         property bool subtitleBold: false
         property int subtitleBackgroundIndex: 0  // pill | shadow | none
         property string status: "running"
-        property string statusText: "Running on Alan Wake 2 · DeepL · en → tr"
+        property string statusText: "Translating Alan Wake 2 · DeepL · en → tr"
     }
 
     readonly property var titles: ({

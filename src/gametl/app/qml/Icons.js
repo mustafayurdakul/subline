@@ -18,3 +18,7 @@ var check = "<path d='M5 12.5l4.5 4.5L19 7'/>";
 var chevron = "<path d='M9 6l6 6-6 6'/>";
 var eye = "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z'/><circle cx='12' cy='12' r='3'/>";
 var shield = "<path d='M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'/>";
+var activity = "<path d='M3 12h4l3-7 4 14 3-7h4'/>";
+var pause = "<path d='M8 5v14M16 5v14'/>";
+var power = "<path d='M12 3v8'/><path d='M6.3 6.3a8 8 0 1 0 11.4 0'/>";
+var loader = "<path d='M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.2 2.2M16.2 16.2l2.2 2.2M5.6 18.4l2.2-2.2M16.2 7.8l2.2-2.2'/>";

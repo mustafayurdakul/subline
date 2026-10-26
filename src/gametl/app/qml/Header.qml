@@ -2,13 +2,17 @@ import QtQuick
 import QtQuick.Layouts
 import "Icons.js" as Icons
 
-// Page title on the left; the live status and the Start/Stop button on the right.
+// Page title on the left; the state of the overlay and its one button on the right.
 Item {
     id: root
     property string title: ""
     property string subtitle: ""
     property string status: "idle"  // "idle" | "starting" | "running" | "paused"
-    property string statusText: "Idle"
+    property string statusText: "Overlay off"
+
+    readonly property string statusIcon: status === "running" ? Icons.activity
+                                       : status === "starting" ? Icons.loader
+                                       : status === "paused" ? Icons.pause : Icons.power
 
     implicitHeight: 72
 
@@ -26,30 +30,40 @@ Item {
         }
 
         Rectangle {
-            height: 30
-            width: chip.implicitWidth + 24
-            radius: 15
-            color: Theme.card
-            border.color: Theme.border
+            height: 32
+            width: chip.implicitWidth + 26
+            radius: 16
+            color: root.status === "running" ? Theme.cardRaised : Theme.card
+            border.color: root.status === "running" ? Theme.borderStrong : Theme.border
             Row {
                 id: chip
                 anchors.centerIn: parent
                 spacing: 8
-                Rectangle {
-                    width: 8; height: 8; radius: 4
+                Icon {
+                    path: root.statusIcon
+                    size: 15
+                    color: root.status === "running" ? Theme.text : Theme.muted
                     anchors.verticalCenter: parent.verticalCenter
-                    color: root.status === "running" ? Theme.success
-                         : root.status === "starting" ? Theme.accent
-                         : root.status === "paused" ? Theme.warning : Theme.muted
                 }
-                Text { text: root.statusText; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: Theme.sizeSmall + 1; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                    text: root.statusText
+                    color: root.status === "running" ? Theme.text : Theme.textSoft
+                    font.family: Theme.font
+                    font.pixelSize: Theme.sizeSmall + 1
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
         }
 
         PrimaryButton {
-            text: root.status === "running" ? "Stop" : root.status === "starting" ? "Cancel" : "Start"
-            icon_: root.status === "running" ? Icons.stop : Icons.play
-            fill: root.status === "running" ? Theme.danger : Theme.accent
+            visible: root.status === "idle"
+            text: "Start"
+            icon_: Icons.play
+        }
+        SecondaryButton {
+            visible: root.status !== "idle"
+            text: root.status === "starting" ? "Cancel" : "Stop"
+            icon_: Icons.stop
         }
     }
 

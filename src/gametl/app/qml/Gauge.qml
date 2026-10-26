@@ -31,15 +31,15 @@ Row {
                 width: slider.visualPosition * parent.width
                 height: parent.height
                 radius: 2
-                color: Theme.accent
+                color: Theme.textSoft
             }
         }
         handle: Rectangle {
             x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
             y: slider.topPadding + slider.availableHeight / 2 - height / 2
             width: 16; height: 16; radius: 8
-            color: "#FFFFFF"
-            border.color: Theme.accent
+            color: Theme.text
+            border.color: Theme.window
             border.width: 2
         }
     }

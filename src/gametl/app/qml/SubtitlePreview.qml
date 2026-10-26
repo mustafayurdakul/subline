@@ -24,12 +24,12 @@ Rectangle {
         anchors.fill: parent
         radius: root.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#1B2535" }
-            GradientStop { position: 0.55; color: "#2C2C3B" }
-            GradientStop { position: 1.0; color: "#0D0F14" }
+            GradientStop { position: 0.0; color: "#26262C" }
+            GradientStop { position: 0.55; color: "#34323A" }
+            GradientStop { position: 1.0; color: "#0E0E11" }
         }
     }
-    Rectangle { x: parent.width * 0.62; y: parent.height * 0.18; width: 110; height: 110; radius: 55; color: "#C9B47A"; opacity: 0.25 }
+    Rectangle { x: parent.width * 0.62; y: parent.height * 0.18; width: 110; height: 110; radius: 55; color: "#D8CBA0"; opacity: 0.22 }
     Repeater {
         model: 9
         Rectangle {
@@ -39,10 +39,10 @@ Rectangle {
             width: root.width / 6
             height: root.height * 0.6
             radius: 40
-            color: "#101418"
+            color: "#121215"
         }
     }
-    Rectangle { x: parent.width * 0.74; y: parent.height * 0.66; width: 22; height: 30; color: "#F0C36B"; opacity: 0.8 }
+    Rectangle { x: parent.width * 0.74; y: parent.height * 0.66; width: 22; height: 30; color: "#E8C27A"; opacity: 0.8 }
 
     Item {
         id: zone

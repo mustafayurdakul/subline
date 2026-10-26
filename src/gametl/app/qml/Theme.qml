@@ -2,24 +2,23 @@ pragma Singleton
 import QtQuick
 
 // The design tokens every component reads: one palette, one spacing grid,
-// one type scale. Dark by default; a light palette can swap the colours.
+// one type scale. Neutral zinc greys on near-black; no hue anywhere in the
+// chrome, so the game's own colours in the preview are the only colour.
 QtObject {
-    readonly property color window: "#0E1116"
-    readonly property color sidebar: "#121620"
-    readonly property color card: "#171C26"
-    readonly property color cardRaised: "#1C2230"
-    readonly property color border: "#252C3A"
-    readonly property color borderStrong: "#333C4E"
-    readonly property color field: "#0F131A"
-    readonly property color text: "#E9ECF2"
-    readonly property color textSoft: "#B6BDCB"
-    readonly property color muted: "#8690A4"
-    readonly property color accent: "#4C8DFF"
-    readonly property color accentSoft: "#1D2C47"
-    readonly property color textOnAccent: "#FFFFFF"
-    readonly property color success: "#3DD68C"
-    readonly property color warning: "#F2B84B"
-    readonly property color danger: "#EF6470"
+    readonly property color window: "#09090B"
+    readonly property color sidebar: "#0C0C0E"
+    readonly property color card: "#131316"
+    readonly property color cardRaised: "#1C1C21"
+    readonly property color border: "#27272A"
+    readonly property color borderStrong: "#3F3F46"
+    readonly property color field: "#0F0F12"
+    readonly property color text: "#FAFAFA"
+    readonly property color textSoft: "#D4D4D8"
+    readonly property color muted: "#8E8E97"
+    readonly property color primary: "#E4E4E7"      // filled buttons, switches that are on
+    readonly property color textOnPrimary: "#09090B"
+    readonly property color selection: "#52525B"
+    readonly property color danger: "#E5484D"       // destructive actions only
 
     readonly property int space: 8
     readonly property int radius: 12

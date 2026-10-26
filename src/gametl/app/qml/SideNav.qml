@@ -35,8 +35,8 @@ Rectangle {
             spacing: 10
             Rectangle {
                 width: 30; height: 30; radius: 8
-                color: "#1E2A44"
-                Text { anchors.centerIn: parent; text: "T"; color: "#FFFFFF"; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.Bold }
+                color: Theme.primary
+                Text { anchors.centerIn: parent; text: "T"; color: Theme.textOnPrimary; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.Bold }
             }
             ColumnLayout {
                 spacing: 0
@@ -53,18 +53,18 @@ Rectangle {
                 Layout.fillWidth: true
                 height: 36
                 radius: Theme.radiusSmall
-                color: active ? Theme.accentSoft : mouse.containsMouse ? Theme.card : "transparent"
+                color: active ? Theme.cardRaised : mouse.containsMouse ? Theme.card : "transparent"
 
                 Rectangle {
                     visible: parent.active
                     x: 0; y: 9; width: 3; height: 18; radius: 2
-                    color: Theme.accent
+                    color: Theme.text
                 }
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 14
                     spacing: 10
-                    Icon { path: modelData.icon; color: parent.parent.active ? Theme.accent : Theme.muted; size: 18; anchors.verticalCenter: parent.verticalCenter }
+                    Icon { path: modelData.icon; color: parent.parent.active ? Theme.text : Theme.muted; size: 18; anchors.verticalCenter: parent.verticalCenter }
                     Text {
                         text: modelData.label
                         color: parent.parent.active ? Theme.text : Theme.textSoft
