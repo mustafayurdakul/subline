@@ -28,7 +28,6 @@ Rectangle {
         property bool subtitleBold: false
         property int subtitleBackgroundIndex: 0  // pill | shadow | none
         property string status: "running"
-        property string statusText: "Translating Alan Wake 2 · DeepL · en → tr"
     }
 
     readonly property var titles: ({
@@ -62,7 +61,6 @@ Rectangle {
                 title: root.titles[root.page][0]
                 subtitle: root.titles[root.page][1]
                 status: backend.status
-                statusText: backend.statusText
             }
 
             Flickable {
