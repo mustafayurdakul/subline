@@ -2,12 +2,12 @@ import QtQuick
 import QtQuick.Layouts
 import "Icons.js" as Icons
 
-// The left rail: app name, pages, and the profile at the bottom.
+// The left rail: app name, pages, the overlay's last word, and the profile at the bottom.
 Rectangle {
     id: root
     property string current: "firstrun"
-    property string profileName: "Alan Wake 2"
     signal navigate(string page)
+    signal profileClicked()
 
     readonly property var entries: [
         { key: "firstrun", label: "Set up", icon: Icons.sparkles },
@@ -41,8 +41,8 @@ Rectangle {
             }
             ColumnLayout {
                 spacing: 0
-                Text { text: "Subline"; color: Theme.text; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.DemiBold }
-                Text { text: "0.1.2"; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall }
+                Text { text: backend.appName; color: Theme.text; font.family: Theme.font; font.pixelSize: 16; font.weight: Font.DemiBold }
+                Text { text: backend.version; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall }
             }
         }
 
@@ -87,11 +87,25 @@ Rectangle {
 
         Item { Layout.fillHeight: true }
 
+        // The overlay's last status line, as the tray shows it.
+        Text {
+            Layout.fillWidth: true
+            Layout.bottomMargin: Theme.space
+            visible: backend.statusText !== ""
+            text: backend.statusText
+            color: Theme.muted
+            font.family: Theme.font
+            font.pixelSize: Theme.sizeSmall
+            wrapMode: Text.WordWrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+        }
+
         Rectangle {
             Layout.fillWidth: true
             height: 56
             radius: Theme.radiusSmall
-            color: Theme.card
+            color: profileMouse.containsMouse ? Theme.cardRaised : Theme.card
             border.color: Theme.border
             Row {
                 anchors.verticalCenter: parent.verticalCenter
@@ -102,10 +116,23 @@ Rectangle {
                     spacing: 1
                     anchors.verticalCenter: parent.verticalCenter
                     Text { text: "Profile"; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall }
-                    Text { text: root.profileName; color: Theme.text; font.family: Theme.font; font.pixelSize: Theme.size; font.weight: Font.DemiBold }
+                    Text {
+                        text: backend.profileName !== "" ? backend.profileName : "not saved"
+                        color: backend.profileName !== "" ? Theme.text : Theme.muted
+                        font.family: Theme.font; font.pixelSize: Theme.size; font.weight: Font.DemiBold
+                        width: Theme.sidebarWidth - 4 * Theme.space - 60
+                        elide: Text.ElideRight
+                    }
                 }
             }
             Icon { path: Icons.chevron; color: Theme.muted; size: 16; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter }
+            MouseArea {
+                id: profileMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.profileClicked()
+            }
         }
     }
 }

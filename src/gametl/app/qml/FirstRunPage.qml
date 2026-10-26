@@ -5,8 +5,10 @@ import "Icons.js" as Icons
 // Four steps on one page: window, area, translator, start.
 ColumnLayout {
     id: root
-    property var backend
+    readonly property var s: backend.settings
     spacing: 2 * Theme.space
+
+    Component.onCompleted: backend.refreshWindows()
 
     Card {
         step: 1
@@ -16,8 +18,8 @@ ColumnLayout {
             label: "Game window"
             RowLayout {
                 spacing: Theme.space
-                Field { text: backend.windowMatch; implicitWidth: 300 }
-                SecondaryButton { text: "Refresh"; icon_: Icons.refresh }
+                Combo { map: root.s; key: "window_match"; options: backend.windows; implicitWidth: 300 }
+                SecondaryButton { text: "Refresh"; icon_: Icons.refresh; onClicked: backend.refreshWindows() }
             }
         }
     }
@@ -28,11 +30,11 @@ ColumnLayout {
         helper: "Most games draw them in the bottom quarter. Select on screen if yours differ: drag, nudge with the arrow keys, Enter."
         SettingRow {
             label: "Area to translate"
-            helper: backend.roi === "" ? "whole window" : backend.roi
+            helper: root.s.roi === "" ? "whole window" : root.s.roi
             RowLayout {
                 spacing: Theme.space
-                SecondaryButton { text: "Bottom strip" }
-                SecondaryButton { text: "Select on screen"; icon_: Icons.crosshair }
+                SecondaryButton { text: "Bottom strip"; onClicked: backend.useBottomStrip() }
+                SecondaryButton { text: "Select on screen"; icon_: Icons.crosshair; onClicked: backend.selectArea() }
             }
         }
     }
@@ -43,34 +45,52 @@ ColumnLayout {
         helper: "DeepL is fast and free for 500k characters a month. Claude keeps names and tone consistent. Offline needs no key."
         SettingRow {
             label: "Translator"
-            Segmented { options: ["DeepL", "Claude", "Offline"]; current: backend.translatorIndex }
+            Segmented { map: root.s; key: "translator"; options: ["DeepL", "Claude", "Offline"]; values: ["deepl", "claude", "offline"] }
         }
         SettingRow {
             label: "Target language"
-            Field { text: backend.targetLang; implicitWidth: 100 }
+            Field { map: root.s; key: "target_lang"; implicitWidth: 100 }
         }
         SettingRow {
-            label: "API key"
-            helper: backend.keyStatus
+            visible: root.s.translator === "deepl" || root.s.translator === "claude"
+            label: root.s.translator === "deepl" ? "DeepL key" : "Anthropic key"
+            helper: root.s.translator === "deepl" ? backend.deeplKeyStatus : backend.anthropicKeyStatus
             RowLayout {
                 spacing: Theme.space
-                Field { placeholderText: "paste the key"; secret: true; implicitWidth: 300 }
-                SecondaryButton { text: "Save" }
+                Field { id: keyField; placeholderText: "paste the key"; secret: true; implicitWidth: 300; onAccepted: saveKey.clicked() }
+                SecondaryButton {
+                    id: saveKey
+                    text: "Save"
+                    onClicked: {
+                        backend.saveKey(root.s.translator === "deepl" ? "DEEPL_AUTH_KEY" : "ANTHROPIC_API_KEY", keyField.text)
+                        keyField.text = ""
+                    }
+                }
             }
+        }
+        SettingRow {
+            visible: root.s.translator === "offline"
+            label: "Offline model"
+            helper: backend.downloadStatus !== "" ? backend.downloadStatus : "Downloaded once per language pair, about 100 MB."
+            SecondaryButton { text: "Download"; icon_: Icons.download; enabled: !backend.downloading; onClicked: backend.downloadModel() }
         }
     }
 
     Card {
         step: 4
         title: "Play"
-        helper: "Press Ctrl+Shift+T in the game at any time to start or stop. The settings on the left refine the rest."
+        helper: "Press " + hotkeyText(root.s.hotkey_toggle) + " in the game at any time to start or stop. The pages on the left refine the rest."
+        function hotkeyText(combo) {
+            return String(combo).split("+").map(function(p) { return p.charAt(0).toUpperCase() + p.slice(1) }).join("+")
+        }
         RowLayout {
             Layout.fillWidth: true
             spacing: 2 * Theme.space
-            PrimaryButton { text: "Start overlay"; icon_: Icons.play }
-            SecondaryButton { text: "Save as profile"; icon_: Icons.folder }
+            PrimaryButton { visible: backend.status === "idle"; text: "Start overlay"; icon_: Icons.play; onClicked: backend.start() }
+            SecondaryButton { visible: backend.status !== "idle"; text: "Stop overlay"; icon_: Icons.stop; onClicked: backend.stop() }
+            SecondaryButton { text: "Save as profile"; icon_: Icons.folder; onClicked: backend.saveProfile("") }
             Item { Layout.fillWidth: true }
-            Text { text: "Trial: 14 days left"; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall + 1 }
+            Text { text: backend.licenseText; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.sizeSmall + 1; elide: Text.ElideRight; Layout.maximumWidth: 240 }
         }
     }
 }

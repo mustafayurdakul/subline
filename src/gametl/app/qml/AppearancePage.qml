@@ -3,18 +3,19 @@ import QtQuick.Layouts
 
 ColumnLayout {
     id: root
-    property var backend
+    readonly property var s: backend.settings
+    readonly property bool ownColour: String(root.s.subtitle_color) === ""
+    readonly property string swatch: /^#[0-9a-fA-F]{6}$/.test(String(root.s.subtitle_color)) ? String(root.s.subtitle_color) : "#D9B86A"
     spacing: 2 * Theme.space
 
     SubtitlePreview {
-        id: preview
         Layout.fillWidth: true
-        fontPx: fontSize.value === 0 ? 22 : fontSize.value
-        bold: boldToggle.checked
-        background: ["pill", "shadow", "none"][backgroundPick.current]
-        pillOpacity: pillAlpha.value / 255
-        position: ["bottom", "source", "center"][positionPick.current]
-        textColor: ownColour.checked ? "#F2F2F2" : "#D9B86A"
+        fontPx: Number(root.s.subtitle_font_px) === 0 ? 22 : Number(root.s.subtitle_font_px)
+        bold: Boolean(root.s.subtitle_bold)
+        background: String(root.s.subtitle_background)
+        pillOpacity: Number(root.s.subtitle_pill_alpha) / 255
+        position: String(root.s.subtitle_position)
+        textColor: root.ownColour ? "#F2F2F2" : root.swatch
     }
 
     Card {
@@ -22,22 +23,23 @@ ColumnLayout {
         SettingRow {
             label: "Font size"
             helper: "Learned from the game's first lines and then held, or a fixed size."
-            Stepper { id: fontSize; value: backend.subtitleFontPx; from: 0; to: 120; step: 2; suffix: " px"; specialText: "game's own" }
+            Stepper { map: root.s; key: "subtitle_font_px"; from: 0; to: 200; step: 2; suffix: " px"; specialText: "game's own" }
         }
         SettingRow {
             label: "Colour"
             helper: "The game's own subtitle colour, sampled, or one of yours."
             RowLayout {
                 spacing: Theme.space
-                Toggle { id: ownColour; checked: true }
+                Toggle { checked: root.ownColour; onToggled: root.s.subtitle_color = checked ? "" : "#FFFFFF" }
                 Text { text: "game's own"; color: Theme.textSoft; font.family: Theme.font; font.pixelSize: Theme.sizeSmall + 1 }
-                Rectangle { width: 28; height: 28; color: "#D9B86A"; border.color: Theme.borderStrong; opacity: ownColour.checked ? 0.35 : 1 }
+                Field { visible: !root.ownColour; map: root.s; key: "subtitle_color"; placeholderText: "#RRGGBB"; implicitWidth: 110 }
+                Rectangle { width: 28; height: 28; color: root.swatch; border.color: Theme.borderStrong; opacity: root.ownColour ? 0.35 : 1 }
             }
         }
-        SettingRow { label: "Bold"; Toggle { id: boldToggle; checked: backend.subtitleBold } }
+        SettingRow { label: "Bold"; Toggle { map: root.s; key: "subtitle_bold" } }
         SettingRow {
             label: "Font"
-            Field { text: "Segoe UI"; implicitWidth: 200 }
+            Field { map: root.s; key: "font"; implicitWidth: 200 }
         }
     }
 
@@ -46,11 +48,11 @@ ColumnLayout {
         SettingRow {
             label: "Style"
             helper: "A dark pill, a soft shadow like the game's own text, or bare outlined text."
-            Segmented { id: backgroundPick; options: ["Pill", "Shadow", "None"]; current: backend.subtitleBackgroundIndex }
+            Segmented { map: root.s; key: "subtitle_background"; options: ["Pill", "Shadow", "None"]; values: ["pill", "shadow", "none"] }
         }
         SettingRow {
             label: "Pill opacity"
-            Gauge { id: pillAlpha; value: 230; from: 0; to: 255 }
+            Gauge { map: root.s; key: "subtitle_pill_alpha"; from: 0; to: 255 }
         }
     }
 
@@ -59,12 +61,12 @@ ColumnLayout {
         SettingRow {
             label: "Position"
             helper: "Bottom gives a steady baseline. Source follows where the game drew the line."
-            Segmented { id: positionPick; options: ["Bottom", "Source", "Centre"]; current: 0 }
+            Segmented { map: root.s; key: "subtitle_position"; options: ["Bottom", "Source", "Centre"]; values: ["bottom", "source", "center"] }
         }
         SettingRow {
             label: "Hide the original line"
             helper: "When the subtitle is drawn elsewhere, cover the game's own text."
-            Toggle { checked: true }
+            Toggle { map: root.s; key: "subtitle_hide_source" }
         }
     }
 
@@ -74,12 +76,12 @@ ColumnLayout {
         SettingRow {
             label: "Only centred text"
             helper: "Tolerance as a share of the area's width."
-            Gauge { value: 10; from: 0; to: 50; suffix: " %"; specialText: "off" }
+            Gauge { map: root.s; key: "subtitle_center_tolerance"; from: 0; to: 50; suffix: " %"; specialText: "off" }
         }
         SettingRow {
             label: "Only subtitle-sized text"
             helper: "How far a line's height may differ from the learned size."
-            Gauge { value: 35; from: 0; to: 100; suffix: " %"; specialText: "off" }
+            Gauge { map: root.s; key: "subtitle_size_tolerance"; from: 0; to: 100; suffix: " %"; specialText: "off" }
         }
     }
 
@@ -88,7 +90,13 @@ ColumnLayout {
         SettingRow {
             label: "Render"
             helper: "Subtitle: one style in the area. In place: each translation on its own box, in the game's colours."
-            Segmented { options: ["Subtitle", "In place"]; current: 0 }
+            Segmented { map: root.s; key: "render"; options: ["Subtitle", "In place"]; values: ["subtitle", "inplace"] }
+        }
+        SettingRow {
+            visible: String(root.s.render) === "inplace"
+            label: "In-place style"
+            helper: "Auto patches the original out in its own colours, or uses a pill where the background is busy."
+            Segmented { map: root.s; key: "style"; options: ["Auto", "Patch", "Pill", "Outline"]; values: ["auto", "patch", "pill", "outline"] }
         }
     }
 }

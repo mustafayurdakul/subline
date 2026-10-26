@@ -16,6 +16,11 @@ var crosshair = "<circle cx='12' cy='12' r='7'/><path d='M12 2v4M12 18v4M2 12h4M
 var folder = "<path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/>";
 var check = "<path d='M5 12.5l4.5 4.5L19 7'/>";
 var chevron = "<path d='M9 6l6 6-6 6'/>";
+var chevronDown = "<path d='M6 9l6 6 6-6'/>";
+var close = "<path d='M6 6l12 12M18 6L6 18'/>";
+var trash = "<path d='M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3'/>";
+var external = "<path d='M14 4h6v6M20 4l-9 9'/><path d='M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'/>";
+var download = "<path d='M12 4v11M7 10l5 5 5-5'/><path d='M4 19h16'/>";
 var eye = "<path d='M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z'/><circle cx='12' cy='12' r='3'/>";
 var shield = "<path d='M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z'/>";
 var activity = "<path d='M3 12h4l3-7 4 14 3-7h4'/>";

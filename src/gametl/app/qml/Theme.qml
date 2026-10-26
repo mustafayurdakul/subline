@@ -29,7 +29,7 @@ QtObject {
     readonly property int sidebarWidth: 224
     readonly property int contentWidth: 680
 
-    readonly property string font: "Inter"  // Segoe UI Variable on Windows; Inter is the bundled fallback
+    readonly property string font: Qt.platform.os === "windows" ? "Segoe UI" : "Inter"
     readonly property int size: 14
     readonly property int sizeSmall: 12
     readonly property int sizeTitle: 15

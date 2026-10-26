@@ -3,42 +3,19 @@ hotkeys; status in the tooltip."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt, QUrl
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QObject, QUrl
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
+from .. import APP_NAME
 from .cleanup import remove_all_data
 from .config import ProfileStore, Settings
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
+from .icon import make_icon
 from .license import license_status
-from .settings_dialog import SettingsDialog
-
-
-def make_icon(running: bool, paused: bool = False, starting: bool = False) -> QIcon:
-    """A rounded square with a 'T', with a status dot (green running, amber
-    paused, blue starting): drawn in code so the app needs no image assets."""
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pixmap)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor(30, 40, 70))
-    p.drawRoundedRect(4, 4, 56, 56, 12, 12)
-    p.setPen(QColor(255, 255, 255))
-    font = QFont("Segoe UI", 30)
-    font.setBold(True)
-    p.setFont(font)
-    p.drawText(pixmap.rect().adjusted(0, -2, 0, -2), Qt.AlignmentFlag.AlignCenter, "T")
-    if running or starting:
-        p.setPen(Qt.PenStyle.NoPen)
-        if starting:
-            p.setBrush(QColor(80, 160, 250))
-        else:
-            p.setBrush(QColor(250, 200, 60) if paused else QColor(80, 220, 120))
-        p.drawEllipse(42, 42, 16, 16)
-    p.end()
-    return QIcon(pixmap)
+from .settings_backend import SettingsBackend
+from .settings_window import SettingsWindow
 
 
 class TrayApp(QObject):
@@ -56,7 +33,7 @@ class TrayApp(QObject):
         self.store = store
         self.settings = settings
         self.profile_name = profile_name
-        self.dialog: SettingsDialog | None = None
+        self.window: SettingsWindow | None = None
         self._last_status = ""
 
         self.hotkeys = GlobalHotkeys()
@@ -64,7 +41,7 @@ class TrayApp(QObject):
 
         self.tray = QSystemTrayIcon(make_icon(False))
         self.menu = QMenu()
-        self.status_action = QAction("gametl: idle", self.menu)
+        self.status_action = QAction(f"{APP_NAME}: idle", self.menu)
         self.status_action.setEnabled(False)
         self.menu.addAction(self.status_action)
         self.menu.addSeparator()
@@ -121,29 +98,52 @@ class TrayApp(QObject):
         self.settings.roi = spec
         if spec:
             self.settings.full_scan_every = 0
-        if self.dialog is not None:
-            self.dialog.roi.setText(spec)
+        if self.window is not None:
+            self.window.backend.set("roi", spec)
         if self.profile_name:
             self.store.save(self.profile_name, self.settings)
             self._on_status(f"area {'set' if spec else 'cleared'} and saved to profile {self.profile_name}")
 
     def open_settings(self) -> None:
-        if self.dialog is None:
-            self.dialog = SettingsDialog(self.settings, self.store, self.controller.secrets)
-            self.dialog.applied.connect(self.apply)
-            self.dialog.profile_saved.connect(self._on_profile_saved)
-            self.dialog.select_area_requested.connect(self._select_area_from_dialog)
-            self.dialog.remove_all_data_requested.connect(self.remove_all_data)
-        else:
-            self.dialog.load_settings(self.settings)
-        self.dialog.show()
-        self.dialog.raise_()
-        self.dialog.activateWindow()
+        if self.window is None:
+            backend = SettingsBackend(self.settings, self.store, self.controller.secrets, self.profile_name)
+            backend.applied.connect(self.apply)
+            backend.stop_requested.connect(self.controller.stop)
+            backend.profile_saved.connect(self._on_profile_saved)
+            backend.profile_loaded.connect(self._on_profile_loaded)
+            backend.select_area_requested.connect(self._select_area_from_window)
+            backend.hotkeys_changed.connect(self._on_hotkeys_edited)
+            backend.hotkey_capture_changed.connect(self._on_hotkey_capture)
+            backend.remove_all_data_requested.connect(self.remove_all_data)
+            backend.set_status_text(self._last_status)
+            self.window = SettingsWindow(backend)
+            self._refresh_labels()
+        elif not self.window.isVisible():
+            self.window.backend.load(self.settings)  # closed since: show the settings in force, not stale edits
+        self.window.present()
 
-    def _select_area_from_dialog(self) -> None:
-        assert self.dialog is not None
-        self.settings = self.dialog.to_settings(self.settings)
+    def _select_area_from_window(self) -> None:
+        assert self.window is not None
+        self.settings = self.window.backend.to_settings(self.settings)
         self.controller.select_area(self.settings)
+
+    def _on_hotkeys_edited(self, settings: Settings) -> None:
+        """A hotkey field changed: the new combinations take effect at once."""
+        self.settings.hotkeys = dict(settings.hotkeys)
+        self.apply_hotkeys(self.settings)
+
+    def _on_hotkey_capture(self, capturing: bool) -> None:
+        """While a field records a key press, no global hotkey may swallow it."""
+        if capturing:
+            self.hotkeys.unregister_all()
+        else:
+            self.apply_hotkeys(self.settings)
+
+    def _on_profile_loaded(self, name: str, settings: Settings) -> None:
+        self.settings = settings
+        self.profile_name = name
+        self.apply_hotkeys(settings)
+        self._on_status(f"profile {name} loaded")
 
     def apply(self, settings: Settings, hwnd: int | None = None) -> None:
         self.settings = settings
@@ -177,8 +177,9 @@ class TrayApp(QObject):
         self.profile_name = name
         self.store.last_profile = name
         self.apply_hotkeys(self.settings)
-        if self.dialog is not None:
-            self.dialog.load_settings(self.settings)
+        if self.window is not None:
+            self.window.backend.load(self.settings)
+            self.window.backend.set_profile_name(name)
         self._on_status(f"profile {name} loaded")
 
     def remove_all_data(self) -> None:
@@ -186,17 +187,11 @@ class TrayApp(QObject):
         settings window has already asked for confirmation."""
         self.controller.close()
         self.hotkeys.unregister_all()
-        if self.dialog is not None:
-            self.dialog.close()
+        if self.window is not None:
+            self.window.close()
         report = remove_all_data(self.store, self.controller.secrets)
         if not report.complete:
-            QMessageBox.warning(None, "gametl", "Some data could not be removed:\n" + "\n".join(report.failed))
-        self.tray.hide()
-        self.app.quit()
-
-    def quit(self) -> None:
-        self.controller.close()
-        self.hotkeys.unregister_all()
+            QMessageBox.warning(None, APP_NAME, "Some data could not be removed:\n" + "\n".join(report.failed))
         self.tray.hide()
         self.app.quit()
 
@@ -208,8 +203,10 @@ class TrayApp(QObject):
 
     def _on_status(self, text: str) -> None:
         self._last_status = text
-        self.status_action.setText(f"gametl: {text}"[:80])
-        self.tray.setToolTip(f"gametl\n{text}"[:127])
+        if self.window is not None:
+            self.window.backend.set_status_text(text)
+        self.status_action.setText(f"{APP_NAME}: {text}"[:80])
+        self.tray.setToolTip(f"{APP_NAME}\n{text}"[:127])
 
     def _on_running(self, running: bool) -> None:
         self._refresh_labels()
@@ -225,6 +222,14 @@ class TrayApp(QObject):
         self.profile_name = name
         self._on_status(f"profile {name} saved")
 
+    def quit(self) -> None:
+        self.controller.close()
+        self.hotkeys.unregister_all()
+        if self.window is not None:
+            self.window.close()
+        self.tray.hide()
+        self.app.quit()
+
     def _refresh_labels(self) -> None:
         running, starting = self.controller.running, self.controller.starting
         # While the models load on their thread, the same action abandons the start.
@@ -233,6 +238,8 @@ class TrayApp(QObject):
         self.pause_action.setEnabled(running)
         self.rescan_action.setEnabled(running)
         self.tray.setIcon(make_icon(running, self.controller.paused, starting))
+        if self.window is not None:
+            self.window.backend.set_status(running, starting, self.controller.paused)
 
     def _rebuild_profiles_menu(self) -> None:
         self.profiles_menu.clear()

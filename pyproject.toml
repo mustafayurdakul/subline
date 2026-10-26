@@ -69,3 +69,4 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402"]  # Qt env setup before the PySide6 imports
+"src/gametl/app/settings_backend.py" = ["N815"]  # Qt properties and signals carry the camelCase names QML reads

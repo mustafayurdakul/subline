@@ -1,16 +1,24 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// A slider with the value shown beside it.
+// A slider with the value shown beside it. With `map` and `key` it follows
+// and writes that settings entry; `scale` shows a 0..1 setting as 0..100.
 Row {
     id: root
     property real value: 0
     property real from: 0
     property real to: 100
     property real stepSize: 1
+    property int decimals: 0
+    property real scale: 1
     property string suffix: ""
     property string specialText: ""  // shown at `from`
+    property var map: null
+    property string key: ""
+    readonly property bool bound: map !== null && key !== ""
     spacing: Theme.space + 2
+
+    Binding on value { when: root.bound; value: root.bound ? Number(root.map[root.key]) * root.scale : 0 }
 
     Slider {
         id: slider
@@ -18,7 +26,13 @@ Row {
         height: 24
         from: root.from; to: root.to; stepSize: root.stepSize
         value: root.value
-        onMoved: root.value = value
+        onMoved: {
+            var shown = Math.round(value / root.stepSize) * root.stepSize
+            if (root.bound)
+                root.map[root.key] = Math.round(shown / root.scale * 1000) / 1000
+            else
+                root.value = shown
+        }
 
         background: Rectangle {
             x: slider.leftPadding
@@ -44,7 +58,7 @@ Row {
     Text {
         anchors.verticalCenter: parent.verticalCenter
         width: 56
-        text: root.value === root.from && root.specialText !== "" ? root.specialText : Math.round(root.value) + root.suffix
+        text: root.value === root.from && root.specialText !== "" ? root.specialText : root.value.toFixed(root.decimals) + root.suffix
         color: Theme.textSoft
         font.family: Theme.font
         font.pixelSize: Theme.sizeSmall + 1

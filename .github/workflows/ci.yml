@@ -20,11 +20,29 @@ jobs:
           uv run ruff check src tests scripts
           uv run ruff format --check src tests scripts
       - name: Tests
-        # The overlay, selector, settings-window and hotkey tests need an
-        # interactive desktop session, which hosted runners do not provide.
+        # The overlay, selector and hotkey tests need an interactive desktop
+        # session, which hosted runners do not provide.
         run: >
           uv run pytest -q
           --ignore=tests/test_overlay_window.py
           --ignore=tests/test_selector.py
-          --ignore=tests/test_settings_dialog.py
           --ignore=tests/test_hotkeys.py
+
+  build:
+    # The frozen app must still find its QML pages and Qt's QML modules:
+    # build it as a release would and load every settings page from the exe.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --group build
+      - name: Build
+        run: uv run --group build python scripts/build.py
+      - name: Settings window in the frozen app
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: dist\gametl\gametl-cli.exe --check-ui

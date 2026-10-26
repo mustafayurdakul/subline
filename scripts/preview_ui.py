@@ -4,8 +4,10 @@
   uv run python scripts/preview_ui.py --page appearance --out out/ui
 
 Uses the offscreen platform and Qt Quick's software renderer, so it runs
-on a machine (or a CI runner) with no GPU and no desktop. Made for looking
-at the design while it is being built; also a cheap visual check later.
+on a machine (or a CI runner) with no GPU and no desktop. The pages show a
+sample Alan Wake 2 profile through the real backend, with an in-memory
+secret store and a temporary data folder. Made for looking at the design
+while it is being built; also a cheap visual check later.
 """
 
 from __future__ import annotations
@@ -13,14 +15,40 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-QML_DIR = Path(__file__).resolve().parents[1] / "src" / "gametl" / "app" / "qml"
-PAGES = ["firstrun", "game", "appearance"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from gametl.app.settings_window import PAGES
+
+
+def sample_backend(folder: Path, background: str):
+    from gametl.app.config import ProfileStore, Settings
+    from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
+    from gametl.app.settings_backend import SettingsBackend
+
+    settings = Settings(
+        window_match="Alan Wake 2",
+        game="Alan Wake 2",
+        roi="0.0000,0.7500,1.0000,0.2500",
+        translator="deepl",
+        target_lang="tr",
+        subtitle_background=background,
+        ignore_patterns=[r"^[\W\d_]*$", r"^(Objective|Press)\b"],
+    )
+    secrets = MemorySecretStore()
+    secrets.set(DEEPL_KEY, "sample")
+    store = ProfileStore(folder)
+    store.save("Alan Wake 2", settings)
+    backend = SettingsBackend(settings, store, secrets, profile_name="alan-wake-2")
+    backend.set_status(running=True)
+    backend.set_status_text("translating Alan Wake 2 · deepl · en → tr")
+    return backend
 
 
 def main() -> int:
@@ -35,43 +63,41 @@ def main() -> int:
     )
     args = p.parse_args()
 
-    from PySide6.QtCore import QUrl
     from PySide6.QtGui import QGuiApplication
-    from PySide6.QtQuick import QQuickView
+
+    from gametl.app.settings_window import SettingsWindow
 
     app = QGuiApplication([])
-    view = QQuickView()
-    view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
-    view.engine().addImportPath(str(QML_DIR.parent))  # the gametl.ui module lives in qml/
-    view.setSource(QUrl.fromLocalFile(str(QML_DIR / "Main.qml")))
-    if view.status() != QQuickView.Status.Ready:
-        for error in view.errors():
-            print(error.toString())
-        return 2
-    view.resize(args.width, args.height)
-    view.show()
-
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    pages = PAGES if args.page == "all" else [args.page]
-    backend = view.rootObject().property("backend")
-    backend.setProperty("subtitleBackgroundIndex", ["pill", "shadow", "none"].index(args.background))
-    for page in pages:
-        root = view.rootObject()
-        root.setProperty("page", page)
-        for _ in range(20):
-            app.processEvents()
-        if args.full:
-            view.resize(args.width, max(args.height, int(root.property("fullHeight"))))
+    with tempfile.TemporaryDirectory() as folder:
+        backend = sample_backend(Path(folder), args.background)
+        view = SettingsWindow(backend)
+        if view.problems:
+            print("\n".join(view.problems))
+            return 2
+        view.resize(args.width, args.height)
+        view.show()
+        pages = PAGES if args.page == "all" else [args.page]
+        for page in pages:
+            view.show_page(page)
+            root = view.rootObject()
             for _ in range(20):
                 app.processEvents()
-        image = view.grabWindow()
-        suffix = f"-{args.background}" if page == "appearance" and args.background != "pill" else ""
-        path = out / f"{page}{suffix}.png"
-        if not image.save(str(path)):
-            print(f"could not write {path}")
+            if args.full:
+                view.resize(args.width, max(args.height, int(root.property("fullHeight"))))
+                for _ in range(20):
+                    app.processEvents()
+            image = view.grabWindow()
+            suffix = f"-{args.background}" if page == "appearance" and args.background != "pill" else ""
+            path = out / f"{page}{suffix}.png"
+            if not image.save(str(path)):
+                print(f"could not write {path}")
+                return 2
+            print(f"wrote {path} ({image.width()}x{image.height()})")
+        if view.problems:
+            print("\n".join(view.problems))
             return 2
-        print(f"wrote {path} ({image.width()}x{image.height()})")
     return 0
 
 

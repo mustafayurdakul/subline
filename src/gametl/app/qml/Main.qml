@@ -3,32 +3,16 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
 // The settings window's content: side navigation, header, the current page.
-// `backend` is the object the pages read and write; until the Python side
-// provides it, `mock` stands in with an Alan Wake 2 profile.
+// `backend` (a SettingsBackend, set as a context property by the window)
+// is what the pages read and write.
 Rectangle {
     id: root
     property string page: "firstrun"
-    property var backend: mock
     // The height at which the current page shows whole (for full-page renders).
-    readonly property int fullHeight: header.height + pageLoader.y + pageLoader.height + 4 * Theme.space
+    readonly property int fullHeight: header.height + banner.height + pageLoader.y + pageLoader.height + 4 * Theme.space
     width: 1000
     height: 680
     color: Theme.window
-
-    QtObject {
-        id: mock
-        property string windowMatch: "Alan Wake 2"
-        property string game: "Alan Wake 2"
-        property string roi: "0.0000,0.7500,1.0000,0.2500"
-        property bool centerZone: false
-        property int translatorIndex: 0
-        property string targetLang: "tr"
-        property string keyStatus: "DeepL key set (Windows Credential Manager)"
-        property int subtitleFontPx: 0
-        property bool subtitleBold: false
-        property int subtitleBackgroundIndex: 0  // pill | shadow | none
-        property string status: "running"
-    }
 
     readonly property var titles: ({
         "firstrun": ["Set up", "Four steps, then play."],
@@ -37,7 +21,11 @@ Rectangle {
         "appearance": ["Appearance", "How the subtitles look."],
         "hotkeys": ["Hotkeys", "Global shortcuts; press the keys to set one."],
         "licence": ["Licence", "Trial, key and the data on this computer."],
-        "advanced": ["Advanced", "Timing, filters and debugging."]
+        "advanced": ["Advanced", "Timing, filters and diagnostics."]
+    })
+    readonly property var pages: ({
+        "firstrun": firstRun, "game": game, "translation": translation, "appearance": appearance,
+        "hotkeys": hotkeys, "licence": licence, "advanced": advanced
     })
 
     RowLayout {
@@ -48,6 +36,7 @@ Rectangle {
             Layout.fillHeight: true
             current: root.page
             onNavigate: function(key) { root.page = key }
+            onProfileClicked: profiles.open()
         }
 
         ColumnLayout {
@@ -63,21 +52,36 @@ Rectangle {
                 status: backend.status
             }
 
+            Banner {
+                id: banner
+                Layout.fillWidth: true
+                Layout.leftMargin: 4 * Theme.space
+                Layout.rightMargin: 4 * Theme.space
+                Layout.topMargin: visible ? 2 * Theme.space : 0
+                Layout.preferredWidth: Math.min(Theme.contentWidth, parent.width - 8 * Theme.space)
+                Layout.maximumWidth: Theme.contentWidth
+                Layout.alignment: Qt.AlignLeft
+                text: backend.problem
+                onDismissed: backend.clearProblem()
+            }
+
             Flickable {
+                id: flick
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentHeight: pageLoader.height + 6 * Theme.space
                 clip: true
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    contentItem: Rectangle { implicitWidth: 6; color: Theme.borderStrong }
+                }
 
                 Loader {
                     id: pageLoader
                     x: 4 * Theme.space
                     y: 3 * Theme.space
                     width: Math.min(Theme.contentWidth, parent.width - 8 * Theme.space)
-                    sourceComponent: root.page === "firstrun" ? firstRun
-                                   : root.page === "game" ? game
-                                   : root.page === "appearance" ? appearance : placeholder
-                    onLoaded: item.backend = root.backend
+                    sourceComponent: root.pages[root.page]
                 }
             }
         }
@@ -85,14 +89,11 @@ Rectangle {
 
     Component { id: firstRun; FirstRunPage { width: pageLoader.width } }
     Component { id: game; GamePage { width: pageLoader.width } }
+    Component { id: translation; TranslationPage { width: pageLoader.width } }
     Component { id: appearance; AppearancePage { width: pageLoader.width } }
-    Component {
-        id: placeholder
-        Item {
-            property var backend
-            width: pageLoader.width
-            height: 80
-            Text { text: "This page comes with the wiring step."; color: Theme.muted; font.family: Theme.font; font.pixelSize: Theme.size }
-        }
-    }
+    Component { id: hotkeys; HotkeysPage { width: pageLoader.width } }
+    Component { id: licence; LicencePage { width: pageLoader.width } }
+    Component { id: advanced; AdvancedPage { width: pageLoader.width } }
+
+    ProfilePopup { id: profiles }
 }

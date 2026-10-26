@@ -16,3 +16,13 @@ SubtitlePreview 1.0 SubtitlePreview.qml
 FirstRunPage 1.0 FirstRunPage.qml
 GamePage 1.0 GamePage.qml
 AppearancePage 1.0 AppearancePage.qml
+Combo 1.0 Combo.qml
+MultiField 1.0 MultiField.qml
+HotkeyField 1.0 HotkeyField.qml
+Confirm 1.0 Confirm.qml
+ProfilePopup 1.0 ProfilePopup.qml
+Banner 1.0 Banner.qml
+TranslationPage 1.0 TranslationPage.qml
+HotkeysPage 1.0 HotkeysPage.qml
+LicencePage 1.0 LicencePage.qml
+AdvancedPage 1.0 AdvancedPage.qml

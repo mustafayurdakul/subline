@@ -38,6 +38,7 @@ Item {
             visible: root.status === "idle"
             text: "Start"
             icon_: Icons.play
+            onClicked: backend.start()
         }
         SecondaryButton {
             id: stop
@@ -46,6 +47,7 @@ Item {
             visible: root.status !== "idle"
             text: root.status === "starting" ? "Cancel" : "Stop"
             icon_: Icons.stop
+            onClicked: backend.stop()
         }
     }
 
