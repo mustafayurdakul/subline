@@ -26,7 +26,7 @@ from PySide6.QtQml import QQmlPropertyMap
 
 from .. import APP_NAME, __version__
 from .cleanup import describe_data
-from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
+from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 from .hotkeys import parse_combo
 from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
@@ -36,7 +36,6 @@ OCR_LANGS = [
     "en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it", "pt", "pl", "nl", "tr", "cyrillic", "arabic",
 ]
 # fmt: on
-BOTTOM_STRIP = "0,0.75,1,0.25"  # the area preset most games' subtitles fall in
 CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
 HOTKEY_LABELS = {
     "toggle": "Start / stop overlay",

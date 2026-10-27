@@ -49,7 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--hwnd", help="window handle (decimal or 0x hex)")
     target.add_argument("--wait", type=float, default=10.0, help="seconds to wait for the window to appear")
     target.add_argument(
-        "--roi", help="the only area to read and translate: x,y,w,h as fractions or pixels of the client area"
+        "--roi",
+        help="the only area to read and translate: x,y,w,h as fractions or pixels of the client area "
+        f"(default {Settings.roi}, the bottom quarter; empty = the whole area)",
     )
     target.add_argument(
         "--include-frame", action="store_true", default=None, help="also read the title bar / window frame"
@@ -124,10 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
         f"(default {Settings.short_line_confidence}; 0 = off)",
     )
     look.add_argument(
-        "--show-source",
+        "--hide-source",
         action="store_true",
         default=None,
-        help="do not cover the original line when the subtitle is drawn elsewhere",
+        help="cover the original line when the subtitle is drawn elsewhere",
     )
     look.add_argument(
         "--no-center-zone",
@@ -198,7 +200,7 @@ _VALUE_OPTIONS = {
 _FLAG_OPTIONS = {
     "no_center_zone": ("center_zone", False),
     "subtitle_bold": ("subtitle_bold", True),
-    "show_source": ("subtitle_hide_source", False),
+    "hide_source": ("subtitle_hide_source", True),
     "include_frame": ("include_frame", True),
     "structured": ("structured", True),
     "no_cache_file": ("use_cache_file", False),

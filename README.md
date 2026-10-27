@@ -104,8 +104,9 @@ development install; the packaged app downloads it on demand instead.
 1. Run Subline. A tray icon appears and the settings window opens on its
    **Game** page.
 2. Pick the game window from the list (press **Refresh** after launching
-   the game), then press **Bottom strip**, or **Select on screen** and
-   drag a rectangle over the subtitle area.
+   the game). The bottom quarter of the window is read by default; press
+   **Select on screen** and drag a rectangle if the subtitles sit
+   elsewhere.
 3. On the **Translation** page, paste the DeepL key and press **Save**.
    Claude and the offline model are there too. Keys are kept in Windows
    Credential Manager, never in a profile file.
@@ -210,7 +211,8 @@ Every setting has a command-line equivalent; `gametl --help` lists them.
   sits on a steady baseline at the bottom of the area (**Position**
   `bottom`; `source` follows the game's own line), and the background is a
   `pill` (opacity below it), a `shadow` like the game's own text, or
-  `none`.
+  `none`. **Hide the original line** covers the game's own text when the
+  translation is drawn elsewhere; off by default.
 - **Only centred text** and **Only subtitle-sized text** (Appearance page)
   keep HUD prompts and objectives that share the area out of the
   subtitles: text whose centre is more than 10 % of the area's width off

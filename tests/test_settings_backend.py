@@ -127,11 +127,11 @@ def test_area_presets_and_window_handle(tmp_path: Path, monkeypatch: pytest.Monk
         lambda: [SimpleNamespace(title="Fake Game", hwnd=0x1234), SimpleNamespace(title="Editor", hwnd=0x99)],
     )
     backend = backend_for(tmp_path)
+    assert backend.settings.value("roi") == BOTTOM_STRIP  # the default area
+    backend.useWholeWindow()
     assert backend.settings.value("roi") == ""
     backend.useBottomStrip()
     assert backend.settings.value("roi") == BOTTOM_STRIP == "0,0.75,1,0.25"
-    backend.useWholeWindow()
-    assert backend.settings.value("roi") == ""
     backend.refreshWindows()
     assert backend.windows == ["Editor", "Fake Game"]
     backend.settings.insert("window_match", "Fake Game")

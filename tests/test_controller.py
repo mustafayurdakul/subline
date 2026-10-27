@@ -147,7 +147,8 @@ def controller(qapp: QApplication, fakes, tmp_path) -> OverlayController:
 
 
 def settings(**overrides) -> Settings:
-    base = {"window_match": "Fake Game", "translator": "uppercase", "use_cache_file": False, "lang": "en"}
+    # The whole window: the fake engine answers in crop coordinates, and these tests are about the lifecycle.
+    base = {"window_match": "Fake Game", "translator": "uppercase", "use_cache_file": False, "lang": "en", "roi": ""}
     return Settings(**{**base, **overrides})
 
 
