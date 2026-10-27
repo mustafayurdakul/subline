@@ -26,9 +26,10 @@ from a recording with the same pipeline the live overlay uses (see
   on a dark pill centred in the area, placed on the line the game drew.
   Long translations wrap at the same size.
 - **Three translators.** DeepL (fast, strong for European languages,
-  free tier), Claude (glossary, tone notes, context between lines, any
-  language), or an offline CTranslate2 model (no network at all). A faster
-  translator can show a draft while a slower one answers.
+  free tier; the default), Claude (glossary, tone notes, context between
+  lines, any language), or an offline CTranslate2 model (no network at
+  all; an optional download). A faster translator can show a draft while a
+  slower one answers.
 - **Nothing is translated twice.** A per-game cache answers repeated lines
   instantly; a game's script can be pre-translated in one batch.
 - **Stays out of the way.** Tray icon, global hotkeys, per-game profiles,
@@ -92,16 +93,16 @@ uv run gametl
 ## Quick start
 
 1. Run gametl. A tray icon appears and the settings window (shown in the
-   app as **Subline**) opens on its **Set up** page.
-2. Step 1: pick the game window from the list (Refresh after launching the
-   game). Step 2: press **Bottom strip**, or **Select on screen** and drag
-   a rectangle over the subtitle area. Step 3: pick the translator, the
-   target language, and paste the DeepL or Anthropic key into its field
-   and press Save. Keys are kept in Windows Credential Manager, never in a
-   profile file.
-3. Step 4: **Start overlay**, and **Save as profile** so the game is
-   recognised next time. The **Start** button at the top right of every
-   page does the same; while the overlay runs it reads **Stop**.
+   app as **Subline**) opens on its **Game** page.
+2. Pick the game window from the list (Refresh after launching the game),
+   then press **Bottom strip**, or **Select on screen** and drag a
+   rectangle over the subtitle area. On the **Translation** page paste the
+   DeepL key (the default translator; Claude and the offline model are
+   there too) and press Save. Keys are kept in Windows Credential Manager,
+   never in a profile file.
+3. Press **Start** at the top right; while the overlay runs the button
+   reads **Stop**. Save the settings as a profile from the box at the
+   bottom left, so the game is recognised next time.
 4. With the game in front, **Ctrl+Shift+A** selects the area at any time:
    drag a rectangle, arrow keys nudge it (Shift: 10 px, Ctrl: resize),
    Enter confirms, Esc cancels; holding Shift while dragging keeps the
@@ -109,12 +110,14 @@ uv run gametl
    appear in that area from then on, and the area is saved with the
    profile.
 
-The other pages refine the rest: **Game** (window, area, what to ignore),
-**Translation** (languages, draft, keys, Claude options), **Appearance**
-(size, colour, pill or shadow, placement, with a live preview),
+The pages: **Game** (window, area, what to ignore), **Translation**
+(languages, translator, draft, keys, Claude options), **Appearance**
+(size, colour, font, pill or shadow, placement, with a live preview),
 **Hotkeys** (click a field and press the keys), **Licence** and
-**Advanced** (capture rate, timing, the data folder). Changes take effect
-at the next Start; hotkeys at once. The profile box at the bottom left
+**Advanced** (capture rate, timing, the data folder). Every change takes
+effect as soon as the typing pauses, on the running overlay too: the area,
+the filters, the timing and the look reach it directly, and a new window,
+language or translator restarts it. The profile box at the bottom left
 lists the saved profiles and saves the current settings under a name.
 
 Next time, start the game from the tray's Profiles menu or let the
@@ -147,11 +150,16 @@ Latencies measured from this machine for English to Turkish. Use the
 **Draft** setting to show the offline or DeepL translation at once and
 replace it when the main translator answers.
 
-The offline models live under `%APPDATA%\gametl\models`: the OPUS-MT model
-for a pair, converted once with
+The offline translator is not in the app itself: the **Download** button
+on the Translation page (or `gametl --download-model`) fetches its runtime
+(CTranslate2 and SentencePiece, about 20 MB, once) into
+`%APPDATA%\gametl\runtime` and the Argos model for the language pair
+into `%APPDATA%\gametl\models`. A better OPUS-MT model for a pair can be
+converted once with
 `uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr`
-(about 230 MB; the conversion needs PyTorch, the app does not), or the
-smaller and weaker Argos package from the "Download offline model" button.
+(about 230 MB; the conversion needs PyTorch, the app does not) and is
+preferred when present. A development install gets the runtime with
+`uv sync --extra offline`.
 
 If the game's script can be extracted (a text file with one line per
 entry, an .srt, a JSON file or a CSV), translate it once up front so every
@@ -193,12 +201,15 @@ the one the overlay runs with.
   card. Measured on an RTX 3080 Ti, a full 1280x720 frame drops from 204 ms
   to 105 ms, but a subtitle strip goes from 54 ms to 71 ms, so leave it off
   for a strip and turn it on for large areas.
-- **Skip unchanged frames below** (Appearance tab, `--diff-threshold`): OCR
-  runs only when the read area has changed since the frame last read (mean
-  difference of a small grey thumbnail, 0-255; default 1). A static screen
-  costs no OCR. Lower it if a subtitle change is ever missed; 0 reads every
-  frame. `--autosave-seconds` (default 10) says how soon new translations
-  reach the cache file.
+- **Change that wakes OCR** (Advanced tab, `--change-threshold`): OCR runs
+  only when something in the read area has changed since the frame last
+  read (the strongest local change in a small grey thumbnail, 0-255;
+  default 20), so a short word appearing in a wide strip counts in full
+  and a static screen costs no OCR. Lower it if a line is ever missed; 0
+  reads every frame. A line's translation is requested the first time it
+  is seen and shown once a second frame confirms it, so the answer is
+  usually there by then. `--autosave-seconds` (default 10) says how soon
+  new translations reach the cache file.
 - **Keep the overlay out of screen recordings** (Game tab): off by default,
   so recordings, streams and screenshots include the translations. Turn it
   on if a capture tool should not see the overlay.
@@ -231,9 +242,9 @@ pipeline thread (`app/pipeline.py`):
    hands over a BGR frame plus the window's screen rectangle.
 2. `ocr/` reads the selected area (or the whole client area) with
    RapidOCR's PP-OCR models on ONNX Runtime and returns text lines with
-   pixel boxes. A frame whose area looks like the last one read (a
-   small grey thumbnail barely differs) and whose blocks are all settled
-   is not read at all: a static screen costs no OCR.
+   pixel boxes. A frame in whose area nothing has changed since the last
+   one read (judged on a small grey thumbnail) and whose blocks are all
+   settled is not read at all: a static screen costs no OCR.
 3. `tracking/filters.py` drops lines in ignore zones or matching ignore
    patterns; `tracking/blocks.py` groups lines into blocks and matches them
    to the blocks seen in earlier frames, so each block keeps its id, a
@@ -257,11 +268,15 @@ the three ways of driving it. The slow part of a start (waiting for the
 window, loading or downloading models) runs on a thread, so the tray and
 the settings window stay responsive. `app/credentials.py` finds API keys.
 
-The settings window is Qt Quick: the pages are QML files under
-`app/qml/`, styled by hand (`Theme.qml` holds the colours and sizes), and
+The settings window is Qt Quick, drawn by its software renderer (a form
+needs no GPU, and a Direct3D window opening beside a game made some
+displays flicker): the pages are QML files under `app/qml/`, styled by
+hand (`Theme.qml` holds the colours and sizes), and
 `app/settings_backend.py` is what they read and write: a property map
 with one entry per setting, plus the actions (start, select an area, save
-a key, activate a licence) that go to the tray as signals.
+a key, activate a licence) that go to the tray as signals. Edits go out
+as a signal once the typing pauses; the controller applies them to the
+running session.
 
 ```
 src/gametl/

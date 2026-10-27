@@ -4,6 +4,9 @@
 #   gametl-cli.exe  console build of the same entry point, for command-line
 #                   use and `gametl-cli pretranslate ...`
 # Models are not bundled; they download on first run into %APPDATA%\gametl\models.
+# Neither is the offline translator's runtime (CTranslate2, SentencePiece, 60 MB
+# for a translator most players never turn on): translate/offline.py fetches
+# its wheels into %APPDATA%\gametl\runtime on the first download.
 # The settings window is Qt Quick: its QML pages ship under gametl/app/qml and
 # the Qt QML modules they import (QtQuick, Controls.Basic, Layouts) come from
 # PySide6's qml folder, pruned to those modules.
@@ -19,7 +22,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, co
 
 RUNTIME_DEPENDENCIES = [
     "windows-capture", "rapidocr", "onnxruntime-directml", "opencv-python-headless", "numpy", "pillow",
-    "pyside6", "anthropic", "requests", "ctranslate2", "sentencepiece", "cryptography",
+    "pyside6", "anthropic", "requests", "cryptography",
 ]  # fmt: skip
 
 
@@ -78,15 +81,16 @@ datas = [
 datas += [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
 datas += [(str(path), "gametl/app/qml") for path in Path("src/gametl/app/qml").iterdir() if path.is_file()]
 datas += licence_files()
-binaries = collect_dynamic_libs("ctranslate2") + collect_dynamic_libs("onnxruntime")
+binaries = collect_dynamic_libs("onnxruntime")
 hiddenimports = (
     collect_submodules("rapidocr")
     + collect_submodules("gametl")
-    + ["shapely", "pyclipper", "omegaconf", "sentencepiece", "ctranslate2", "windows_capture"]
+    + ["shapely", "pyclipper", "omegaconf", "windows_capture"]
     + ["PySide6.QtQml", "PySide6.QtQuick"]
 )
 excludes = [
     "tkinter", "unittest", "pydoc", "matplotlib", "IPython", "notebook", "torch", "transformers",
+    "ctranslate2", "sentencepiece",  # downloaded on demand, see above
     "PySide6.QtPdf",
     "PySide6.QtSvg", "PySide6.QtMultimedia", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebChannel", "PySide6.QtPositioning", "PySide6.QtLocation", "PySide6.QtQuickWidgets",

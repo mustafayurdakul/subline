@@ -3,8 +3,8 @@
   uv run python scripts/preview_ui.py --out out/ui            # every page
   uv run python scripts/preview_ui.py --page appearance --out out/ui
 
-Uses the offscreen platform and Qt Quick's software renderer, so it runs
-on a machine (or a CI runner) with no GPU and no desktop. The pages show a
+Uses the offscreen platform (the window renders in software anyway), so
+it runs on a machine or a CI runner with no GPU and no desktop. The pages show a
 sample Alan Wake 2 profile through the real backend, with an in-memory
 secret store and a temporary data folder. Made for looking at the design
 while it is being built; also a cheap visual check later.
@@ -19,10 +19,9 @@ import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-from gametl.app.settings_window import PAGES
+from gametl.app.settings_window import PAGES, WINDOW_SIZE
 
 
 def sample_backend(folder: Path, background: str):
@@ -53,14 +52,15 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--page", choices=[*PAGES, "all"], default="all")
     p.add_argument("--out", default="out/ui", help="folder for <page>.png")
-    p.add_argument("--width", type=int, default=1000)
-    p.add_argument("--height", type=int, default=680)
+    p.add_argument("--width", type=int, default=WINDOW_SIZE.width())
+    p.add_argument("--height", type=int, default=WINDOW_SIZE.height())
     p.add_argument("--full", action="store_true", help="tall enough to show the whole page, no scrolling")
     p.add_argument(
         "--background", choices=["pill", "shadow", "none"], default="pill", help="subtitle background in the preview"
     )
     args = p.parse_args()
 
+    from PySide6.QtCore import QSize
     from PySide6.QtGui import QGuiApplication
 
     from gametl.app.settings_window import SettingsWindow
@@ -79,6 +79,8 @@ def main() -> int:
         if view.problems:
             print("\n".join(view.problems))
             return 2
+        view.setMinimumSize(QSize(0, 0))  # the app's window is fixed; a render may be any size
+        view.setMaximumSize(QSize(16384, 16384))
         view.resize(args.width, args.height)
         view.show()
         pages = PAGES if args.page == "all" else [args.page]

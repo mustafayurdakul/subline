@@ -19,8 +19,8 @@ carry; the build collects the rest from the installed packages.
 | [Pillow](https://python-pillow.org/) | images, screenshots | MIT-CMU (HPND) |
 | [Qt for Python](https://doc.qt.io/qtforpython-6/) (PySide6, shiboken6) and Qt 6 | overlay window, settings window, tray | LGPL-3.0 (see below) |
 | [windows-capture](https://github.com/NiiightmareXD/windows-capture) | Windows Graphics Capture | MIT |
-| [CTranslate2](https://github.com/OpenNMT/CTranslate2) | offline translation | MIT |
-| [SentencePiece](https://github.com/google/sentencepiece) | tokenisation for offline models | Apache-2.0 |
+| [CTranslate2](https://github.com/OpenNMT/CTranslate2) | offline translation; not bundled, downloaded on demand (see below) | MIT |
+| [SentencePiece](https://github.com/google/sentencepiece) | tokenisation for offline models; downloaded with CTranslate2 | Apache-2.0 |
 | [anthropic](https://github.com/anthropics/anthropic-sdk-python) SDK, with pydantic, httpx, anyio, jiter, distro, sniffio, typing-extensions | Claude translation | MIT, BSD-3-Clause, Apache-2.0, PSF |
 | [requests](https://requests.readthedocs.io/), with urllib3, certifi, charset-normalizer, idna | DeepL translation, downloads | Apache-2.0, MIT, MPL-2.0, BSD-3-Clause |
 | [cryptography](https://cryptography.io/) (with OpenSSL) | licence-key signatures | Apache-2.0 or BSD-3-Clause; OpenSSL under Apache-2.0 |
@@ -35,8 +35,14 @@ build, so you can replace them with your own build of the same Qt version
 by copying it over the files in `_internal/PySide6`. The LGPL text is in
 `licenses/qt`. Qt source code is available from [qt.io](https://www.qt.io/).
 
-## Models downloaded at run time (not bundled)
+## Downloaded at run time (not bundled)
 
+- The offline translator's runtime, fetched from PyPI into
+  `%APPDATA%\gametl\runtime` when the user first presses Download on the
+  Translation page: the CTranslate2 wheel (MIT; it carries Intel's OpenMP
+  runtime, `libiomp5md.dll`, under the Intel Simplified Software License)
+  and the SentencePiece wheel (Apache-2.0). Each wheel's licence texts
+  unpack with it.
 - PP-OCR detection and recognition models: Apache-2.0.
 - OPUS-MT translation models by Helsinki-NLP (converted with
   `scripts/convert_offline_model.py`): CC-BY-4.0; the model id is

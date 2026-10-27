@@ -87,9 +87,10 @@ class FakeOverlay(QObject):
     target_lost = Signal()
     instances: list[FakeOverlay] = []
 
-    def __init__(self, hwnd: int, **_kwargs) -> None:
+    def __init__(self, hwnd: int, font_family: str = "Segoe UI", **_kwargs) -> None:
         super().__init__()
         self.hwnd = hwnd
+        self.font_family = font_family
         self.blocks: list = []
         self.started = self.closed = False
         self.target_rect = FRAME
@@ -97,6 +98,9 @@ class FakeOverlay(QObject):
 
     def start(self) -> None:
         self.started = True
+
+    def apply(self, font_family: str, hide_when_unfocused: bool, exclude_from_capture: bool) -> None:
+        self.font_family = font_family
 
     def close(self) -> None:
         self.closed = True
@@ -155,7 +159,7 @@ def test_start_runs_on_a_thread_then_translations_reach_the_overlay(qapp, contro
     assert controller.hwnd == HWND and controller.title == TITLE
     assert controller.running_log == [True]
     assert controller.starting_log == [True, False]
-    assert controller.worker is not None and controller.worker.cfg.diff_threshold == 1.0
+    assert controller.worker is not None and controller.worker.cfg.change_threshold == 20.0
     assert controller.service is not None and controller.service.autosave_seconds == 10.0
     assert any(m.startswith("running on 'Fake Game'") for m in controller.messages)
     assert len(FakeEngine.created) == 1
@@ -171,10 +175,10 @@ def test_start_runs_on_a_thread_then_translations_reach_the_overlay(qapp, contro
     assert controller.worker is None and controller.service is None
 
 
-def test_area_selection_restarts_on_the_same_engine(qapp, controller) -> None:
+def test_area_selection_reaches_the_running_pipeline(qapp, controller) -> None:
     controller.start(settings())
     wait_for(qapp, lambda: controller.running)
-    first_worker = controller.worker
+    worker = controller.worker
     specs: list[str] = []
     controller.area_selected.connect(specs.append)
 
@@ -183,9 +187,25 @@ def test_area_selection_restarts_on_the_same_engine(qapp, controller) -> None:
     assert specs == ["0.1250,0.7895,0.7500,0.1754"]
     assert controller.settings is not None and controller.settings.roi == specs[0]
     assert controller.settings.full_scan_every == 0
-    wait_for(qapp, lambda: controller.running and controller.worker is not first_worker)
-    assert len(FakeEngine.created) == 1  # the loaded engine is reused
-    assert controller.worker.cfg.roi == (100, 480, 700, 580)
+    wait_for(qapp, lambda: worker.cfg.roi == (100, 480, 700, 580))  # taken up on the pipeline thread
+    assert controller.worker is worker and controller.running_log == [True]  # no restart
+
+
+def test_edits_apply_at_once_or_restart_the_session(qapp, controller) -> None:
+    controller.start(settings())
+    wait_for(qapp, lambda: controller.running)
+    worker, (overlay,) = controller.worker, FakeOverlay.instances
+
+    controller.apply(settings(font="Arial", subtitle_bold=True, hide_when_unfocused=False))
+    wait_for(qapp, lambda: worker.cfg.subtitle_bold)
+    assert overlay.font_family == "Arial" and controller.worker is worker
+    assert controller.settings is not None and controller.settings.font == "Arial"
+
+    controller.apply(settings(font="Arial", subtitle_bold=True, target_lang="de"))  # a new session is needed
+    wait_for(qapp, lambda: controller.running and controller.worker is not worker)
+    assert "settings changed: restarting" in controller.messages
+    assert controller.settings.target_lang == "de" and controller.worker.cfg.subtitle_bold
+    assert len(FakeEngine.created) == 1 and len(FakeOverlay.instances) == 2
     assert controller.running_log == [True, False, True]
 
 

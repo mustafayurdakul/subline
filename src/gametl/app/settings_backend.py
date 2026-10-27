@@ -5,9 +5,10 @@ field the window shows: a page binds a control to `backend.settings.roi`
 and writes back the same way. Lists hold one entry per line and the
 hotkeys are flattened to `hotkey_<name>`. `to_settings()` reads the map
 onto the settings last loaded, so fields without a control (stable_frames,
-debug, ...) keep their values. What the window cannot do alone (run the
-overlay, select an area, wipe the data) goes out as a signal to the tray,
-which owns the controller.
+debug, ...) keep their values. Every edit goes out as `settings_changed`
+once the typing pauses, so a running overlay follows the window. What the
+window cannot do alone (run the overlay, select an area, wipe the data)
+goes out as a signal to the tray, which owns the controller.
 """
 
 from __future__ import annotations
@@ -19,8 +20,8 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Property, QObject, Qt, QThread, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Property, QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
 from PySide6.QtQml import QQmlPropertyMap
 
 from .. import APP_NAME, __version__
@@ -46,7 +47,14 @@ HOTKEY_LABELS = {
 }
 LIST_FIELDS = ("ignore_zones", "ignore_patterns")  # one entry per line in the window
 # An emptied text control means the default, not an empty value.
-EMPTY_DEFAULTS = {"lang": "en", "target_lang": "tr", "model": CLAUDE_MODELS[0], "font": "Segoe UI"}
+EMPTY_DEFAULTS = {
+    "lang": "en",
+    "target_lang": "tr",
+    "translator": "deepl",
+    "model": CLAUDE_MODELS[0],
+    "font": "Segoe UI",
+}
+EDIT_DELAY_MS = 500  # an edit reaches the running overlay this long after the last keystroke
 
 _FIELD_TYPES = typing.get_type_hints(Settings)
 _FIELDS = [f.name for f in dataclasses.fields(Settings) if f.name != "hotkeys"]
@@ -147,28 +155,33 @@ def combo_from_key(key: int, modifiers: int) -> str:
     return "+".join([*parts, name])
 
 
-class ModelDownloadThread(QThread):
+class OfflineDownloadThread(QThread):
+    """Fetches the offline translator's runtime and the model for a pair."""
+
     progress = Signal(str)
     finished_ok = Signal(bool, str)
 
-    def __init__(self, source: str, target: str, models_dir, parent=None) -> None:
+    def __init__(self, source: str, target: str, store: ProfileStore, parent=None) -> None:
         super().__init__(parent)
-        self.source, self.target, self.models_dir = source, target, models_dir
+        self.source, self.target, self.store = source, target, store
 
     def run(self) -> None:
-        from ..translate.offline import ensure_model
+        from ..translate.offline import ensure_offline
 
         try:
-            model_dir = ensure_model(self.source, self.target, self.models_dir, self.progress.emit)
+            model_dir = ensure_offline(
+                self.source, self.target, self.store.models_dir, self.store.runtime_dir, self.progress.emit
+            )
         except Exception as exc:  # reported in the window
             self.finished_ok.emit(False, f"download failed: {exc}")
             return
-        self.finished_ok.emit(True, f"offline model ready: {model_dir}")
+        self.finished_ok.emit(True, f"offline translation ready: {model_dir}")
 
 
 class SettingsBackend(QObject):
     # To the tray, which owns the controller.
     applied = Signal(object, object)  # Settings, hwnd or None: run the overlay with these
+    settings_changed = Signal(object)  # Settings: an edit, once the typing has paused; a running overlay follows it
     stop_requested = Signal()
     select_area_requested = Signal()
     profile_saved = Signal(str)
@@ -208,9 +221,14 @@ class SettingsBackend(QObject):
         self._profile_name = profile_name or ""
         self._windows: dict[str, int] = {}  # title -> hwnd, from the last refresh
         self._license_text = ""
-        self._download: ModelDownloadThread | None = None
+        self._download: OfflineDownloadThread | None = None
         self._download_status = ""
         self._problem = ""
+        self._edit_problem = False  # the banner shows a problem an edit caused (cleared once corrected)
+        self._edit_timer = QTimer(self)
+        self._edit_timer.setSingleShot(True)
+        self._edit_timer.setInterval(EDIT_DELAY_MS)
+        self._edit_timer.timeout.connect(self._emit_edit)
         self.load(settings)
         self._map.valueChanged.connect(self._on_value_changed)
         self._refresh_license_status()
@@ -252,6 +270,22 @@ class SettingsBackend(QObject):
     def _on_value_changed(self, key: str, _value: Any) -> None:
         if key.startswith("hotkey_"):
             self.hotkeys_changed.emit(self.to_settings())
+        else:
+            self._edit_timer.start()
+
+    def _emit_edit(self) -> None:
+        """The typing has paused: the settings go out if they are valid; a
+        problem shows in the banner until the edit is corrected."""
+        settings = self.to_settings()
+        problem = invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
+        if problem:
+            self._edit_problem = True
+            self.report_problem(problem)
+            return
+        if self._edit_problem:
+            self._edit_problem = False
+            self.clearProblem()
+        self.settings_changed.emit(settings)
 
     def _checked_settings(self) -> Settings | None:
         """The map's settings when they can run, else None with the problem reported."""
@@ -280,6 +314,15 @@ class SettingsBackend(QObject):
     hotkeyNames = Property("QStringList", lambda self: list(DEFAULT_HOTKEYS), constant=True)  # in menu order
     defaultHotkeys = Property("QVariantMap", lambda self: dict(DEFAULT_HOTKEYS), constant=True)
     hotkeyLabels = Property("QVariantMap", lambda self: dict(HOTKEY_LABELS), constant=True)
+
+    def _font_families(self) -> list[str]:
+        """The fonts on this computer, for the Appearance page ("@" names
+        are Windows' vertical variants)."""
+        if QGuiApplication.instance() is None:
+            return []
+        return [name for name in QFontDatabase.families() if not name.startswith("@")]
+
+    fontFamilies = Property("QStringList", _font_families, constant=True)
 
     # -- overlay state -------------------------------------------------------------------
 
@@ -461,7 +504,7 @@ class SettingsBackend(QObject):
         deletes everything and quits."""
         self.remove_all_data_requested.emit()
 
-    # -- offline model --------------------------------------------------------------------------------
+    # -- offline translation ----------------------------------------------------------------------------
 
     def _get_download_status(self) -> str:
         return self._download_status
@@ -473,19 +516,20 @@ class SettingsBackend(QObject):
     downloading = Property(bool, _get_downloading, notify=downloadChanged)
 
     @Slot()
-    def downloadModel(self) -> None:
+    def downloadOffline(self) -> None:
+        """Fetch the offline translator (its runtime, once) and the model for the language pair."""
         if self._get_downloading():
             return
         settings = self.to_settings()
         source, target = settings.effective_source_lang, settings.target_lang
-        thread = ModelDownloadThread(source, target, self.store.models_dir, self)
+        thread = OfflineDownloadThread(source, target, self.store, self)
         thread.progress.connect(self._set_download_status)
         thread.finished_ok.connect(self._download_done)
         thread.finished.connect(self.downloadChanged)  # `downloading` turns false once the thread has ended
         thread.finished.connect(thread.deleteLater)
         self._download = thread
         thread.start()
-        self._set_download_status(f"downloading offline model for {source} -> {target}...")
+        self._set_download_status(f"downloading offline translation for {source} -> {target}...")
 
     def _set_download_status(self, text: str) -> None:
         self._download_status = text

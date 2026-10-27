@@ -13,8 +13,8 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QSize, QUrl
-from PySide6.QtQuick import QQuickView
+from PySide6.QtCore import QSize, Qt, QUrl
+from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 
 from .. import APP_NAME
 from .config import ProfileStore, Settings
@@ -22,20 +22,34 @@ from .credentials import MemorySecretStore
 from .icon import make_icon
 from .settings_backend import SettingsBackend, qml_dir
 
-PAGES = ["firstrun", "game", "translation", "appearance", "hotkeys", "licence", "advanced"]
+PAGES = ["game", "translation", "appearance", "hotkeys", "licence", "advanced"]
+WINDOW_SIZE = QSize(1000, 680)  # fixed; every page scrolls inside it
 _app = None  # the application check() made, kept for the life of the process
 
 
 class SettingsWindow(QQuickView):
     def __init__(self, backend: SettingsBackend) -> None:
+        # Drawn by Qt Quick's software renderer: a settings form needs no
+        # GPU, and a Direct3D swap chain opening beside a running game made
+        # some displays flicker. (Set before the first Quick window exists.)
+        QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.Software)
         super().__init__()
         self.backend = backend
         self.problems: list[str] = []  # QML errors and warnings, as they come
         self.setTitle(APP_NAME)
         self.setIcon(make_icon(False))
+        self.setFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.MSWindowsFixedSizeDialogHint
+        )
         self.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
-        self.setMinimumSize(QSize(880, 600))
-        self.resize(1000, 680)
+        self.setMinimumSize(WINDOW_SIZE)
+        self.setMaximumSize(WINDOW_SIZE)
+        self.resize(WINDOW_SIZE)
         self.engine().warnings.connect(self._on_warnings)
         self.rootContext().setContextProperty("backend", backend)
         self.setSource(QUrl.fromLocalFile(str(qml_dir() / "Main.qml")))
@@ -61,7 +75,6 @@ def check(pages: Sequence[str] = PAGES) -> list[str]:
     found, empty when all is well. Sets up the offscreen platform itself,
     so call it before any Qt application exists."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    os.environ.setdefault("QT_QUICK_BACKEND", "software")
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
     from PySide6.QtGui import QGuiApplication  # after the platform is chosen above
 

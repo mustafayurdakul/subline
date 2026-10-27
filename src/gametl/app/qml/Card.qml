@@ -6,7 +6,6 @@ Rectangle {
     id: root
     property string title: ""
     property string helper: ""
-    property int step: 0  // 1..n numbers the card (first-run flow)
     default property alias content: body.data
 
     Layout.fillWidth: true
@@ -25,21 +24,10 @@ Rectangle {
         width: root.width - 2 * root.padding
         spacing: Theme.space
 
-        // Title block. A step number shows as a small accent line above the
-        // title ("STEP 1"), so the heading itself stays clean.
         ColumnLayout {
             Layout.fillWidth: true
             visible: root.title !== ""
             spacing: 2
-            Label {
-                visible: root.step > 0
-                text: "STEP " + root.step
-                color: Theme.accent
-                font.pixelSize: Theme.sizeTiny
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1.2
-                Layout.bottomMargin: 2
-            }
             Label { text: root.title; font.pixelSize: Theme.sizeTitle; font.weight: Font.DemiBold }
             Caption { visible: root.helper !== ""; text: root.helper; Layout.fillWidth: true }
         }

@@ -7,12 +7,16 @@ import pytest
 
 from gametl.translate.base import TranslationRequest
 from gametl.translate.offline import (
+    RUNTIME_PACKAGES,
     OfflineTranslator,
+    activate_runtime,
+    ensure_runtime,
     find_model,
     find_package,
     locate_model_files,
     opus_dir,
     package_dir,
+    runtime_available,
     split_sentences,
 )
 
@@ -112,3 +116,28 @@ def test_offline_translator_keeps_lines_and_batches_sentences() -> None:
 def test_missing_model_raises_with_hint(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="download-model"):
         OfflineTranslator.from_models_dir(tmp_path, "en", "tr")
+
+
+def test_an_unpacked_runtime_goes_on_the_import_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    activate_runtime(tmp_path)
+    assert str(tmp_path) not in sys.path  # nothing unpacked there yet
+    for name in RUNTIME_PACKAGES:
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "__init__.py").write_text("")
+    assert runtime_available(tmp_path)
+    assert sys.path.count(str(tmp_path)) == 1
+    activate_runtime(tmp_path)
+    assert sys.path.count(str(tmp_path)) == 1  # once
+
+
+def test_the_runtime_download_is_for_the_packaged_build_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import gametl.translate.offline as offline
+
+    monkeypatch.setattr(offline, "runtime_available", lambda runtime_dir: False)
+    monkeypatch.setattr(offline.sys, "platform", "linux")
+    with pytest.raises(RuntimeError, match="uv sync --extra offline"):
+        ensure_runtime(tmp_path)
+    assert not tmp_path.exists() or not any(tmp_path.iterdir())  # nothing fetched

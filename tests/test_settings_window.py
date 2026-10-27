@@ -17,7 +17,6 @@ def test_every_page_loads_clean() -> None:
     env = {
         **os.environ,
         "QT_QPA_PLATFORM": "offscreen",
-        "QT_QUICK_BACKEND": "software",
         "QT_ENABLE_HIGHDPI_SCALING": "0",
         "PYTHONPATH": os.pathsep.join(
             filter(None, [str(Path(gametl.__file__).parents[1]), os.environ.get("PYTHONPATH")])
@@ -31,4 +30,4 @@ def test_every_page_loads_clean() -> None:
         timeout=300,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "7 pages loaded, 0 problems" in result.stdout, result.stdout
+    assert "6 pages loaded, 0 problems" in result.stdout, result.stdout

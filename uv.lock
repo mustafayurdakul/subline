@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.12.*"
 
 [[package]]
@@ -236,7 +236,6 @@ source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "cryptography" },
-    { name = "ctranslate2" },
     { name = "numpy" },
     { name = "onnxruntime-directml" },
     { name = "opencv-python-headless" },
@@ -244,8 +243,13 @@ dependencies = [
     { name = "pyside6" },
     { name = "rapidocr" },
     { name = "requests" },
-    { name = "sentencepiece" },
     { name = "windows-capture" },
+]
+
+[package.optional-dependencies]
+offline = [
+    { name = "ctranslate2" },
+    { name = "sentencepiece" },
 ]
 
 [package.dev-dependencies]
@@ -261,7 +265,7 @@ dev = [
 requires-dist = [
     { name = "anthropic" },
     { name = "cryptography", specifier = ">=42" },
-    { name = "ctranslate2", specifier = ">=4.0" },
+    { name = "ctranslate2", marker = "extra == 'offline'", specifier = ">=4.0" },
     { name = "numpy" },
     { name = "onnxruntime-directml", specifier = ">=1.19" },
     { name = "opencv-python-headless", specifier = ">=4.9" },
@@ -269,9 +273,10 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.8" },
     { name = "rapidocr", specifier = ">=3.0" },
     { name = "requests", specifier = ">=2.31" },
-    { name = "sentencepiece", specifier = ">=0.2" },
+    { name = "sentencepiece", marker = "extra == 'offline'", specifier = ">=0.2" },
     { name = "windows-capture" },
 ]
+provides-extras = ["offline"]
 
 [package.metadata.requires-dev]
 build = [{ name = "pyinstaller", specifier = ">=6.10" }]

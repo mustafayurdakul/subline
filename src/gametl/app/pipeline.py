@@ -56,13 +56,29 @@ class PipelineConfig:
     short_text_letters: int = 4
     short_text_frames: int = 2
     grow_margin: int = 4  # px kept between a grown box and its neighbours
-    # Frame diff: OCR is skipped while the read region looks the same as the
-    # last frame read (mean absolute difference of a 1/8-scale grey thumbnail,
-    # 0..255, below the threshold) and every tracked block is settled.
-    diff_threshold: float = 1.0  # 0 = OCR every frame
+    # Frame change: OCR is skipped while the read region looks the same as the
+    # last frame read (the strongest local change in a 1/8-scale grey
+    # thumbnail, 0..255, is under the threshold) and every tracked block is
+    # settled.
+    change_threshold: float = 20.0  # 0 = OCR every frame
     max_skipped: int = 20  # frames skipped in a row before OCR runs regardless
     debug: bool = False  # also emit outlines of every tracked block and per-frame stats
     dump_dir: str | None = None  # debug: save each frame with OCR lines and block boxes drawn
+
+
+def _tracking_fields(cfg: PipelineConfig) -> tuple:
+    """What decides which region is read and which blocks live; a change in
+    these starts the tracking afresh, a change of look alone does not."""
+    return (
+        cfg.area,
+        cfg.roi,
+        cfg.full_scan_every,
+        cfg.stable_frames,
+        cfg.max_missing,
+        cfg.line_filter,
+        cfg.subtitle_center_tolerance,
+        cfg.subtitle_size_tolerance,
+    )
 
 
 class PipelineThread(QThread):
@@ -90,6 +106,7 @@ class PipelineThread(QThread):
         self.ocr_ms: deque[float] = deque(maxlen=2000)  # bounded: a long session must not grow memory
         self._stop = False
         self._reset = False
+        self._next_cfg: PipelineConfig | None = None  # handed over by update_config, taken up on this thread
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
@@ -100,6 +117,19 @@ class PipelineThread(QThread):
     def rescan(self) -> None:
         """Forget every tracked block on the next frame and read afresh."""
         self._reset = True
+
+    def update_config(self, cfg: PipelineConfig) -> None:
+        """Settings edited while the loop runs: taken up at the next frame.
+        The blocks are kept unless what is read or how it is tracked changed."""
+        self._next_cfg = cfg
+
+    def _adopt_config(self) -> None:
+        cfg, self._next_cfg = self._next_cfg, None
+        if cfg is None:
+            return
+        old, self.cfg = self.cfg, cfg
+        if _tracking_fields(cfg) != _tracking_fields(old):
+            self._forget_blocks(reset_style=cfg.roi != old.roi)
 
     # -- loop ----------------------------------------------------------------
 
@@ -144,6 +174,7 @@ class PipelineThread(QThread):
     def _process(self, frame: Frame) -> list[RenderBlock]:
         """One frame: OCR and tracking (unless the frame is unchanged), then
         translations and what to draw."""
+        self._adopt_config()
         cfg = self.cfg
         if self.unchanged(frame):
             self.skipped += 1
@@ -166,7 +197,7 @@ class PipelineThread(QThread):
             render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
         return render
 
-    # -- frame diff ------------------------------------------------------------
+    # -- frame change ----------------------------------------------------------
 
     def _area(self, frame: Frame) -> Box:
         """The part of the frame that is read: the client area, or all of it."""
@@ -180,14 +211,22 @@ class PipelineThread(QThread):
         grey = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
         return cv2.resize(grey, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
 
+    @staticmethod
+    def _change(last: np.ndarray, thumb: np.ndarray) -> float:
+        """The strongest change anywhere between two thumbnails: the largest
+        3x3 mean of the pixel differences. A short word appearing in a wide
+        strip counts in full (the mean over the strip would bury it), one
+        flickering pixel does not."""
+        return float(cv2.blur(cv2.absdiff(last, thumb), (3, 3)).max())
+
     def unchanged(self, frame: Frame) -> bool:
-        """True when the read region looks like the frame last read and no
-        tracked block is waiting for another sighting (a new reading to
-        confirm, a block not yet stable, or one that has just gone missing
-        and must age out). Then OCR has nothing new to say and is skipped;
-        translations that arrive meanwhile are still drawn."""
+        """True when nothing in the read region has changed since the frame
+        last read and no tracked block is waiting for another sighting (a
+        new reading to confirm, a block not yet stable, or one that has just
+        gone missing and must age out). Then OCR has nothing new to say and
+        is skipped; translations that arrive meanwhile are still drawn."""
         cfg = self.cfg
-        if cfg.diff_threshold <= 0:
+        if cfg.change_threshold <= 0:
             return False
         thumb = self._thumbnail(frame)
         last = self._last_thumb
@@ -196,7 +235,7 @@ class PipelineThread(QThread):
             or last.shape != thumb.shape
             or self._skip_run >= cfg.max_skipped
             or not self._settled()
-            or float(np.mean(cv2.absdiff(last, thumb))) >= cfg.diff_threshold
+            or self._change(last, thumb) >= cfg.change_threshold
         ):
             self._last_thumb, self._skip_run = thumb, 0
             return False
@@ -278,14 +317,20 @@ class PipelineThread(QThread):
         return lines, roi
 
     def _translate_ready(self, blocks: list[TextBlock], frame: Frame) -> None:
-        """Fill in translations that are ready; queue the rest. Never blocks."""
+        """Fill in translations that are ready; queue the rest. Never blocks.
+        A block one sighting short of confirmed is requested already, so the
+        answer is there the moment it is; it is shown only then."""
         self.service.drain()
         misses: list[str] = []
         for block in blocks:
+            if not self.is_subtitle(block):
+                continue
             needed = self.cfg.stable_frames
             if letter_count(block.text) < self.cfg.short_text_letters:
                 needed = max(needed, self.cfg.short_text_frames)  # a fragment rarely survives a second look
-            if block.stable_frames < needed or not self.is_subtitle(block):
+            if block.stable_frames < needed:
+                if block.stable_frames >= needed - 1 and block.translation is None:
+                    misses.append(block.text)
                 continue
             if block.translation is not None and not block.draft:
                 continue  # final translation in place

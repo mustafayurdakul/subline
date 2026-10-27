@@ -38,7 +38,10 @@ ColumnLayout {
             }
         }
         SettingRow { label: "Bold"; Toggle { key: "subtitle_bold" } }
-        SettingRow { label: "Font"; Field { key: "font"; implicitWidth: 200 } }
+        SettingRow {
+            label: "Font"
+            Combo { key: "font"; options: backend.fontFamilies; editable: false; fontPreview: true; implicitWidth: 220 }
+        }
     }
 
     Card {

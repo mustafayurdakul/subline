@@ -21,6 +21,12 @@ def test_hotkeys_fill_in_defaults() -> None:
     assert s.hotkeys["select"] == "ctrl+shift+a"  # added later: older profiles get it too
 
 
+def test_defaults_for_a_new_profile() -> None:
+    s = Settings()
+    assert (s.translator, s.source_lang, s.target_lang, s.draft) == ("deepl", "en", "tr", "")
+    assert s.change_threshold == 20.0 and s.fps == 10.0
+
+
 def test_zone_only_is_the_default() -> None:
     assert Settings().full_scan_every == 0
     assert Settings().roi == ""
@@ -45,8 +51,9 @@ def test_saved_profiles_keep_their_own_patterns() -> None:
 
 
 def test_effective_source_lang() -> None:
-    assert Settings(lang="japan").effective_source_lang == "japan"
+    assert Settings(lang="japan", source_lang="").effective_source_lang == "japan"  # empty follows the OCR language
     assert Settings(lang="japan", source_lang="ja").effective_source_lang == "ja"
+    assert Settings(lang="japan").effective_source_lang == "en"  # the default source language
 
 
 def test_slug() -> None:
@@ -82,3 +89,4 @@ def test_profile_store_save_load_list_match_delete(tmp_path: Path) -> None:
     store.delete("other")
     assert store.list() == ["fake-game"]
     assert store.cache_dir == tmp_path / "cache"
+    assert store.models_dir == tmp_path / "models" and store.runtime_dir == tmp_path / "runtime"

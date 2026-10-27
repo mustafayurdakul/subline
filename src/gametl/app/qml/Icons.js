@@ -8,7 +8,6 @@ var palette = "<path d='M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.6 0-.8-.6-1.2-.6
 var keyboard = "<rect x='2' y='6' width='20' height='12' rx='2'/><path d='M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8'/>";
 var key = "<circle cx='8' cy='15' r='4'/><path d='M10.8 12.2 20 3M17 6l2 2M14 9l2 2'/>";
 var sliders = "<path d='M4 6h10M18 6h2M4 12h3M11 12h9M4 18h12M20 18h0'/><circle cx='16' cy='6' r='2'/><circle cx='9' cy='12' r='2'/><circle cx='18' cy='18' r='2'/>";
-var sparkles = "<path d='M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z'/><path d='M19 17l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z'/>";
 var play = "<path d='M7 4.5v15l12-7.5z'/>";
 var stop = "<rect x='6' y='6' width='12' height='12' rx='2'/>";
 var refresh = "<path d='M20 11a8 8 0 0 0-14.5-4.5L4 8'/><path d='M4 3v5h5'/><path d='M4 13a8 8 0 0 0 14.5 4.5L20 16'/><path d='M20 21v-5h-5'/>";

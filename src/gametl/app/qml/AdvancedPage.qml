@@ -13,9 +13,9 @@ ColumnLayout {
             Gauge { key: "fps"; from: 1; to: 60; suffix: " fps" }
         }
         SettingRow {
-            label: "Skip unchanged frames below"
-            helper: "OCR waits while the area looks the same as last time. Lower it if a change is ever missed."
-            Gauge { key: "diff_threshold"; from: 0; to: 50; stepSize: 0.5; decimals: 1; specialText: "off" }
+            label: "Change that wakes OCR"
+            helper: "OCR waits while nothing in the area changes this much (0 to 255). Lower it if a line is ever missed."
+            Gauge { key: "change_threshold"; from: 0; to: 100; stepSize: 5; specialText: "off" }
         }
         SettingRow {
             label: "Stable frames"
