@@ -252,8 +252,12 @@ def test_edits_go_out_once_the_typing_pauses_and_only_when_valid(qapp, tmp_path:
 
 
 def test_font_families_come_from_the_font_database(qapp, tmp_path: Path) -> None:
-    families = backend_for(tmp_path).fontFamilies
-    assert families and all(isinstance(name, str) and not name.startswith("@") for name in families)
+    from PySide6.QtGui import QFontDatabase
+
+    # The offscreen platform knows no fonts on Windows and fontconfig's on Linux: whatever it has, minus the
+    # "@" vertical variants.
+    expected = [name for name in QFontDatabase.families() if not name.startswith("@")]
+    assert backend_for(tmp_path).fontFamilies == expected
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:
