@@ -80,6 +80,7 @@ datas = [
 ]
 datas += [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
 datas += [(str(path), "gametl/app/qml") for path in Path("src/gametl/app/qml").iterdir() if path.is_file()]
+datas += [(str(path), "gametl/fonts") for path in Path("src/gametl/fonts").glob("*.ttf")]
 datas += licence_files()
 binaries = collect_dynamic_libs("onnxruntime")
 hiddenimports = (

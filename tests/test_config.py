@@ -38,6 +38,7 @@ def test_subtitle_defaults_favour_a_steady_look() -> None:
     s = Settings()
     assert s.subtitle_position == "bottom" and s.subtitle_color == "" and s.subtitle_font_px == 0
     assert s.subtitle_hide_source is False  # the game's own line stays visible
+    assert (s.font, s.subtitle_weight, s.subtitle_grain) == ("Source Sans 3", "semibold", 10)
     assert s.center_zone is False  # free selection; Shift centres
     assert (s.subtitle_center_tolerance, s.subtitle_size_tolerance) == (10, 35)
     assert s.short_line_confidence == 0.9
@@ -45,6 +46,8 @@ def test_subtitle_defaults_favour_a_steady_look() -> None:
     old = Settings.from_dict({"window_match": "Alan Wake 2", "subtitle_position": "source", "center_zone": True})
     assert old.subtitle_position == "source" and old.center_zone is True
     assert old.subtitle_background == "pill" and old.subtitle_pill_alpha == 230
+    assert Settings.from_dict({"subtitle_bold": True}).subtitle_weight == "bold"  # the switch before weights
+    assert Settings.from_dict({"subtitle_bold": False}).subtitle_weight == "semibold"
 
 
 def test_saved_profiles_keep_their_own_patterns() -> None:

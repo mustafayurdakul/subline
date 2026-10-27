@@ -46,7 +46,8 @@ def test_map_round_trips_settings(tmp_path: Path) -> None:
         subtitle_color="#FFEE00",
         subtitle_background="shadow",
         subtitle_pill_alpha=120,
-        subtitle_bold=True,
+        subtitle_weight="bold",
+        subtitle_grain=4,
         subtitle_position="source",
         subtitle_hide_source=False,
         subtitle_center_tolerance=0,
@@ -251,13 +252,36 @@ def test_edits_go_out_once_the_typing_pauses_and_only_when_valid(qapp, tmp_path:
     assert not wait_until(lambda: len(changed) > 2, timeout=0.8, tick=qapp.processEvents)
 
 
-def test_font_families_come_from_the_font_database(qapp, tmp_path: Path) -> None:
+def test_font_families_are_the_bundled_ones_then_the_computers(qapp, tmp_path: Path) -> None:
     from PySide6.QtGui import QFontDatabase
 
-    # The offscreen platform knows no fonts on Windows and fontconfig's on Linux: whatever it has, minus the
-    # "@" vertical variants.
-    expected = [name for name in QFontDatabase.families() if not name.startswith("@")]
-    assert backend_for(tmp_path).fontFamilies == expected
+    from gametl.app.fonts import BUNDLED_FAMILIES, load_bundled_fonts
+
+    load_bundled_fonts()
+    assert set(BUNDLED_FAMILIES) <= set(QFontDatabase.families())  # registered from src/gametl/fonts
+    families = backend_for(tmp_path).fontFamilies
+    assert families[:3] == list(BUNDLED_FAMILIES)
+    # Then the computer's: the offscreen platform knows no fonts on Windows and fontconfig's on Linux.
+    rest = [n for n in QFontDatabase.families() if not n.startswith("@") and n not in BUNDLED_FAMILIES]
+    assert families[3:] == rest
+
+
+def test_the_preview_follows_every_edit(qapp, tmp_path: Path) -> None:
+    from PySide6.QtCore import QSize
+
+    from gametl.app.preview import PreviewImageProvider
+
+    backend = backend_for(tmp_path)
+    first = backend.previewStamp  # loading counts as a change too
+    stamps: list[int] = []
+    backend.previewChanged.connect(lambda: stamps.append(backend.previewStamp))
+    backend.set("subtitle_weight", "bold")
+    backend.set("subtitle_grain", 20)
+    assert stamps == [first + 1, first + 2]
+    size = QSize()
+    image = PreviewImageProvider(backend).requestImage("2", size, QSize(400, 225))
+    assert (image.width(), image.height()) == (400, 225) == (size.width(), size.height())
+    assert any(image.pixelColor(x, 190).alpha() > 0 for x in range(0, 400, 4))  # the line sits near the bottom
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:

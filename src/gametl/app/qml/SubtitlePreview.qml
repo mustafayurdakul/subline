@@ -1,18 +1,10 @@
 import QtQuick
 
-// A game-like frame with the subtitle drawn as the overlay would draw it:
-// pill, soft shadow or bare outline, the chosen size, colour and weight.
-// Shadows are offset copies of the text, as in the overlay itself, so the
-// preview renders without shader effects.
+// A game-like frame with the subtitle on it as the overlay would draw it:
+// the image comes from the window's preview provider, painted by the same
+// code as the overlay, and is asked for again on every edit.
 Rectangle {
     id: root
-    property string line: "Nereye gidiyorsun? Işıklar söndüğünde buradaydın."
-    property int fontPx: 22
-    property color textColor: "#F2F2F2"
-    property bool bold: false
-    property string background: "pill"  // "pill" | "shadow" | "none"
-    property real pillOpacity: 230 / 255
-    property string position: "bottom"
 
     implicitHeight: width * 9 / 16
     clip: true
@@ -42,54 +34,17 @@ Rectangle {
     }
     Rectangle { x: parent.width * 0.74; y: parent.height * 0.66; width: 22; height: 30; color: "#E8B45A"; opacity: 0.85 }
 
-    Item {
+    // The subtitle zone: the bottom third, as a bottom-strip area would be.
+    Image {
         id: zone
         x: 24
         width: parent.width - 48
-        y: parent.height * 0.70
-        height: parent.height * 0.30
-
-        Item {
-            id: subtitle
-            width: label.implicitWidth
-            height: label.implicitHeight
-            x: (zone.width - width) / 2
-            y: root.position === "bottom" ? zone.height - height - 14
-             : root.position === "center" ? (zone.height - height) / 2 : 10
-
-            Rectangle {
-                visible: root.background === "pill"
-                anchors.fill: parent
-                anchors.margins: -root.fontPx / 2
-                anchors.topMargin: -root.fontPx / 5
-                anchors.bottomMargin: -root.fontPx / 5
-                radius: 8
-                color: Qt.rgba(0, 0, 0, root.pillOpacity)
-            }
-            // The same offsets and strengths the overlay draws with (overlay/window.py: _SHADOW_LAYERS, _OUTLINE_OFFSETS).
-            Repeater {
-                model: root.background === "shadow" ? [[1, 1, 0.65], [2, 2, 0.45], [3, 3, 0.25], [0, 2, 0.25], [2, 0, 0.25]]
-                     : root.background === "none" ? [[-1, -1, 0.85], [1, -1, 0.85], [-1, 1, 0.85], [1, 1, 0.85], [0, -1, 0.85], [0, 1, 0.85], [-1, 0, 0.85], [1, 0, 0.85]]
-                     : []
-                Text {
-                    required property var modelData
-                    x: modelData[0]; y: modelData[1]
-                    text: root.line
-                    color: Qt.rgba(0, 0, 0, modelData[2])
-                    font.family: Theme.font
-                    font.pixelSize: root.fontPx
-                    font.bold: root.bold
-                }
-            }
-            Text {
-                id: label
-                text: root.line
-                color: root.textColor
-                font.family: Theme.font
-                font.pixelSize: root.fontPx
-                font.bold: root.bold
-            }
-        }
+        y: parent.height * 0.64
+        height: parent.height * 0.36
+        sourceSize.width: width
+        sourceSize.height: height
+        cache: false
+        source: "image://overlay/" + backend.previewStamp
     }
 
     Rectangle {

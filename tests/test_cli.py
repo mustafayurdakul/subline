@@ -20,6 +20,10 @@ def test_cli_options_override_profile_only_when_given() -> None:
             "0",
             "--autosave-seconds",
             "2.5",
+            "--subtitle-weight",
+            "bold",
+            "--subtitle-grain",
+            "0",
         ]
     )
     s = settings_from_args(args, base)
@@ -28,6 +32,7 @@ def test_cli_options_override_profile_only_when_given() -> None:
     assert s.fps == 5.0
     assert s.target_lang == "tr"  # overridden
     assert s.change_threshold == 0.0 and s.autosave_seconds == 2.5
+    assert s.subtitle_weight == "bold" and s.subtitle_grain == 0
     assert settings_from_args(build_parser().parse_args([]), base).change_threshold == 20.0  # untouched when absent
     assert s.ignore_zones == ["0,0,1,0.1"]
     assert s.hide_when_unfocused is False
