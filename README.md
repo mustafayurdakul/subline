@@ -1,86 +1,92 @@
-# gametl
+# Subline
+
+Real-time translation of in-game subtitles for Windows.
+
+Subline captures a game window, reads the subtitle area with local OCR,
+translates each line through DeepL, Claude or an offline model, and draws
+the translation over the game in place of the original, about half a
+second after a line appears. The package and the executable are named
+`gametl`; the app presents itself as Subline.
 
 Copyright (c) 2026 Mustafa Yurdakul. Proprietary software: free to try for
-14 days, then a licence key is needed (see [Licence](#licence)).
+14 days, then a licence key is required (see [Licensing](#licensing)).
 
-Real-time translation of in-game subtitles for Windows. gametl captures a
-game window, reads the subtitle area with local OCR, translates each line
-(DeepL, Claude, or an offline model), and draws the translation over the
-game in place of the original, about half a second after a line appears.
+![Alan Wake 2: the game's English subtitle above, the same moment with Subline's Turkish subtitle below](docs/demo.gif)
 
-![Alan Wake 2: the game's English subtitle above, the same moment with gametl's Turkish subtitle below](docs/demo.gif)
-
-*Alan Wake 2, English to Turkish: the game above, gametl below. Rendered
+*Alan Wake 2, English to Turkish: the game above, Subline below. Rendered
 from a recording with the same pipeline the live overlay uses (see
-[Recording a demo](#recording-a-demo)).*
+[Rendering a demo](#rendering-a-demo)).*
 
-## What it does
+## Contents
 
-- **Any game that runs windowed or borderless.** Capture goes through
-  Windows Graphics Capture, so the game window alone is read, whatever
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Getting started](#getting-started)
+- [Translators](#translators)
+- [Settings](#settings)
+- [Command line](#command-line)
+- [Rendering a demo](#rendering-a-demo)
+- [Architecture](#architecture)
+- [Development](#development)
+- [Releases](#releases)
+- [Acknowledgements](#acknowledgements)
+- [Licensing](#licensing)
+
+## Features
+
+- **Works with any windowed or borderless game.** Capture goes through
+  Windows Graphics Capture, so only the game window is read, whatever
   else is on screen.
-- **You choose the area.** Press a hotkey, drag a rectangle over the
-  subtitle strip, and from then on only that strip is read. The choice is
-  saved per game as fractions of the window.
-- **Subtitles look like subtitles.** One fixed size and colour, outlined,
-  on a dark pill centred in the area, placed on the line the game drew.
-  Long translations wrap at the same size.
-- **Three translators.** DeepL (fast, strong for European languages,
-  free tier; the default), Claude (glossary, tone notes, context between
-  lines, any language), or an offline CTranslate2 model (no network at
-  all; an optional download). A faster translator can show a draft while a
-  slower one answers.
+- **Reads the area you choose.** Press a hotkey, drag a rectangle over
+  the subtitle strip, and from then on only that strip is read. The choice
+  is saved per game as fractions of the window, so it survives resizes.
+- **Subtitles that look like subtitles.** One fixed size and colour,
+  learned from the game's own text, drawn on a dark pill, with a soft
+  shadow, or bare with an outline, centred in the area. Long translations
+  wrap at the same size.
+- **Three translators.** DeepL (the default: fast, strong for European
+  languages, free tier), Claude (glossary, tone notes, context between
+  lines, any language), or an offline CTranslate2 model (no network; an
+  optional download). A faster translator can show a draft while a slower
+  one answers.
 - **Nothing is translated twice.** A per-game cache answers repeated lines
-  instantly; a game's script can be pre-translated in one batch.
+  instantly, and a game's script can be translated up front in one batch.
+- **Settings apply as you change them.** Edits in the settings window
+  reach the running overlay as soon as the typing pauses.
 - **Stays out of the way.** Tray icon, global hotkeys, per-game profiles,
-  pause and rescan, hides when the game is not in front.
+  pause and rescan; the overlay hides when the game is not in front.
 
 ## Requirements
 
-- Windows 10 (build 18362 or later) or Windows 11.
-- The game in windowed or borderless-window mode (exclusive fullscreen
-  cannot be captured or drawn over).
-- For DeepL or Claude: an API key from [deepl.com](https://www.deepl.com/pro-api)
-  (free tier: 500k characters a month) or
+- Windows 10 (build 18362 or later) or Windows 11, 64-bit.
+- The game in windowed or borderless-window mode. Exclusive fullscreen can
+  be neither captured nor drawn over.
+- For DeepL or Claude, an API key from [deepl.com](https://www.deepl.com/pro-api)
+  (the free tier covers 500,000 characters a month) or
   [console.anthropic.com](https://console.anthropic.com/). The offline
   translator needs neither.
 
-## Install
+## Installation
 
-**Packaged build:** unzip the release folder anywhere and run `gametl.exe`.
-The OCR models (about 20 MB) download on first run into
-`%APPDATA%\gametl\models`. The app runs as a 14-day trial until a licence
-key is entered on the Licence tab. To build the folder yourself from a
-checkout:
+### Packaged build
 
-```
-uv run --group build python scripts/build.py
-```
+Unzip the release folder anywhere and run `gametl.exe`. The OCR models
+(about 20 MB) download on first run into `%APPDATA%\gametl\models`. The
+app runs as a 14-day trial until a licence key is entered on the Licence
+page.
 
-**Releases** are built by GitHub Actions (`.github/workflows/release.yml`).
-Bump `version` in `pyproject.toml` and merge to `main`: the workflow sees
-a version with no tag yet, builds `dist/gametl` on a Windows runner,
-creates the tag `v0.1.0` at the merge commit and attaches
-`gametl-v0.1.0-win64.zip` to its release. A merge whose version is already
-tagged builds nothing. Pushing a tag by hand (`git tag v0.2.0-beta1 &&
-git push origin v0.2.0-beta1`; a dash makes a pre-release) or "Run
-workflow" on the Release action with a tag name does the same; with the
-tag left empty, "Run workflow" builds without releasing and keeps the zip
-as a seven-day artifact. The tag must match the `pyproject.toml` version.
-The releases of a private repository are visible to its collaborators
-only; for buyers, publish the zip elsewhere or from a public repository.
-The executables are not code-signed, so Windows warns about an unknown
-publisher until a signing step is added.
-
-**Uninstall:** delete the unzipped folder. Everything else gametl keeps
+**Uninstall:** delete the unzipped folder. Everything else Subline keeps
 lives in `%APPDATA%\gametl` (profiles, translation caches, downloaded
-models, `config.json`, the log) and in four Windows Credential Manager
-entries (`gametl/DEEPL_AUTH_KEY`, `gametl/ANTHROPIC_API_KEY`,
-`gametl/LICENSE_KEY`, `gametl/TRIAL_START`). The Licence tab's **Remove
-all data and quit**, or `gametl --remove-all-data`, deletes both. Nothing
+models and runtime, `config.json`, the log) and in four Windows Credential
+Manager entries (`gametl/DEEPL_AUTH_KEY`, `gametl/ANTHROPIC_API_KEY`,
+`gametl/LICENSE_KEY`, `gametl/TRIAL_START`). **Remove all data and quit**
+on the Licence page, or `gametl --remove-all-data`, deletes both. Nothing
 is written to the registry or to `%TEMP%`.
 
-**From source**, for licensed use (needs [uv](https://docs.astral.sh/uv/)):
+### From source
+
+Needs [uv](https://docs.astral.sh/uv/) and a licence for use beyond the trial.
 
 ```
 git clone git@github.com:mustafayurdakul/yurdakuls-gameclt.git
@@ -90,25 +96,28 @@ uv sync
 uv run gametl
 ```
 
-## Quick start
+`uv sync --extra offline` adds the offline translator's runtime to a
+development install; the packaged app downloads it on demand instead.
 
-1. Run gametl. A tray icon appears and the settings window (shown in the
-   app as **Subline**) opens on its **Game** page.
-2. Pick the game window from the list (Refresh after launching the game),
-   then press **Bottom strip**, or **Select on screen** and drag a
-   rectangle over the subtitle area. On the **Translation** page paste the
-   DeepL key (the default translator; Claude and the offline model are
-   there too) and press Save. Keys are kept in Windows Credential Manager,
-   never in a profile file.
-3. Press **Start** at the top right; while the overlay runs the button
+## Getting started
+
+1. Run Subline. A tray icon appears and the settings window opens on its
+   **Game** page.
+2. Pick the game window from the list (press **Refresh** after launching
+   the game), then press **Bottom strip**, or **Select on screen** and
+   drag a rectangle over the subtitle area.
+3. On the **Translation** page, paste the DeepL key and press **Save**.
+   Claude and the offline model are there too. Keys are kept in Windows
+   Credential Manager, never in a profile file.
+4. Press **Start** at the top right. While the overlay runs the button
    reads **Stop**. Save the settings as a profile from the box at the
    bottom left, so the game is recognised next time.
-4. With the game in front, **Ctrl+Shift+A** selects the area at any time:
-   drag a rectangle, arrow keys nudge it (Shift: 10 px, Ctrl: resize),
-   Enter confirms, Esc cancels; holding Shift while dragging keeps the
-   rectangle centred, so one edge and the height are enough. Translations
-   appear in that area from then on, and the area is saved with the
-   profile.
+
+With the game in front, **Ctrl+Shift+A** selects the area at any time:
+drag a rectangle, nudge it with the arrow keys (Shift: 10 px, Ctrl:
+resize), Enter confirms, Esc cancels; holding Shift while dragging keeps
+the rectangle centred, so one edge and the height are enough. Translations
+appear in that area from then on, and the area is saved with the profile.
 
 The pages: **Game** (window, area, what to ignore), **Translation**
 (languages, translator, draft, keys, Claude options), **Appearance**
@@ -117,74 +126,83 @@ The pages: **Game** (window, area, what to ignore), **Translation**
 **Advanced** (capture rate, timing, the data folder). Every change takes
 effect as soon as the typing pauses, on the running overlay too: the area,
 the filters, the timing and the look reach it directly, and a new window,
-language or translator restarts it. The profile box at the bottom left
-lists the saved profiles and saves the current settings under a name.
+language or translator restarts it.
 
-Next time, start the game from the tray's Profiles menu or let the
+Next time, start the game from the tray's **Profiles** menu or let the
 window title match: the profile whose window it names loads on its own.
-
-The **Licence** page shows how many trial days are left; paste your key
-there and press Activate. The key is kept in Windows Credential Manager.
-From the command line, `gametl --activate KEY` stores a key and
-`gametl --license-status` prints the state.
 
 Default hotkeys (changeable on the Hotkeys page):
 
 | Hotkey | Action |
 | --- | --- |
-| Ctrl+Shift+A | select the area to translate (drag, arrows nudge, Enter confirms, Esc cancels) |
+| Ctrl+Shift+A | select the area to translate |
 | Ctrl+Shift+T | start / stop the overlay |
 | Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
 | Ctrl+Shift+R | rescan: forget tracked lines and read the screen afresh |
 | Ctrl+Shift+S | open settings |
 
-## Choosing a translator
+### Licence key
+
+The Licence page shows how many trial days are left. Paste the key there
+and press **Activate**; it is kept in Windows Credential Manager. From the
+command line, `gametl --activate KEY` stores a key and
+`gametl --license-status` prints the state.
+
+## Translators
 
 | Translator | Latency per line | Best for |
 | --- | --- | --- |
-| DeepL | about 0.2 s | Turkish and other European languages; the recommended default when a key is at hand |
-| Claude Haiku 5.5 | about 0.9 s | glossaries, tone notes, consistency between lines, languages DeepL lacks; `claude-opus-5-5` for quality |
-| Offline (OPUS-MT) | about 0.02 s | no network; good short lines, weaker on long ones |
+| DeepL (default) | about 0.2 s | Turkish and other European languages |
+| Claude Haiku 5.5 | about 0.9 s | glossaries, tone notes, consistency between lines, languages DeepL lacks; `claude-opus-5-5` for the best quality |
+| Offline (OPUS-MT) | about 0.02 s | no network; good on short lines, weaker on long ones |
 
-Latencies measured from this machine for English to Turkish. Use the
-**Draft** setting to show the offline or DeepL translation at once and
-replace it when the main translator answers.
+Latencies measured for English to Turkish on a desktop PC. The **Draft**
+setting shows the offline or DeepL translation at once and replaces it
+when the main translator answers.
 
-The offline translator is not in the app itself: the **Download** button
-on the Translation page (or `gametl --download-model`) fetches its runtime
+### Offline translation
+
+The offline translator is not part of the app itself. **Download** on the
+Translation page (or `gametl --download-model`) fetches its runtime
 (CTranslate2 and SentencePiece, about 20 MB, once) into
-`%APPDATA%\gametl\runtime` and the Argos model for the language pair
-into `%APPDATA%\gametl\models`. A better OPUS-MT model for a pair can be
+`%APPDATA%\gametl\runtime` and the Argos model for the language pair into
+`%APPDATA%\gametl\models`. A stronger OPUS-MT model for a pair can be
 converted once with
-`uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr`
+
+```
+uv run --with torch --with transformers --with huggingface_hub python scripts/convert_offline_model.py --source en --target tr
+```
+
 (about 230 MB; the conversion needs PyTorch, the app does not) and is
-preferred when present. A development install gets the runtime with
-`uv sync --extra offline`.
+preferred when present.
+
+### Translating a script up front
 
 If the game's script can be extracted (a text file with one line per
-entry, an .srt, a JSON file or a CSV), translate it once up front so every
-line is instant in play:
+entry, an `.srt`, a JSON file or a CSV), translate it once so every line
+is instant in play:
 
 ```
 uv run gametl-pretranslate script.txt --game "Fake Game"
 ```
 
-This uses Opus 5.5 through the Batches API at half price and waits up to
-ten minutes (`--wait 0` submits and exits, `--resume JOBFILE` collects
-later, `--sync` uses the normal API at once). The `--game` name must match
-the one the overlay runs with.
+This uses Claude Opus 5.5 through the Batches API at half price and waits
+up to ten minutes (`--wait 0` submits and exits, `--resume JOBFILE`
+collects later, `--sync` uses the normal API at once). The `--game` name
+must match the one the overlay runs with.
 
-## Settings worth knowing
+## Settings
 
-- **Ignore patterns** (Game tab): regular expressions, one per line,
+Every setting has a command-line equivalent; `gametl --help` lists them.
+
+- **Ignore patterns** (Game page): regular expressions, one per line,
   case-insensitive. Every new profile starts with one that drops any OCR
   line without a letter, which removes the stray digits OCR sometimes
   reads out of background detail. **Ignore zones** exclude rectangles.
-  **Short lines need OCR confidence** (default 0.9) drops one- and
-  two-letter lines OCR is unsure about, the fragments that would otherwise
-  be translated on their own; texts under four letters also need a second
-  stable frame.
-- **Render** (Appearance tab): `subtitle` draws every line in one style
+  **Short lines need OCR confidence** (default 90 %) drops one- and
+  two-letter lines OCR is unsure about; texts under four letters also
+  need a second stable frame.
+- **Render** (Appearance page): `subtitle` draws every line in one style
   centred in the selected area; `inplace` puts each translation on its own
   OCR box in the game's own colours. In subtitle mode the font size and
   the text colour are learned from the game's first lines and then held
@@ -192,34 +210,42 @@ the one the overlay runs with.
   sits on a steady baseline at the bottom of the area (**Position**
   `bottom`; `source` follows the game's own line), and the background is a
   `pill` (opacity below it), a `shadow` like the game's own text, or
-  `none`. **Only centred text** and **Only subtitle-sized text** keep HUD
-  prompts and objectives that share the area out of the subtitles: text
-  whose centre is more than 10 % of the area's width off centre, or whose
-  line height differs more than 35 % from the learned size, is left alone.
-  Set either to 0 for games that left-align their subtitles.
-- **Run OCR on the GPU** (Translation tab): DirectML on any DirectX 12
-  card. Measured on an RTX 3080 Ti, a full 1280x720 frame drops from 204 ms
-  to 105 ms, but a subtitle strip goes from 54 ms to 71 ms, so leave it off
-  for a strip and turn it on for large areas.
-- **Change that wakes OCR** (Advanced tab, `--change-threshold`): OCR runs
+  `none`.
+- **Only centred text** and **Only subtitle-sized text** (Appearance page)
+  keep HUD prompts and objectives that share the area out of the
+  subtitles: text whose centre is more than 10 % of the area's width off
+  centre, or whose line height differs more than 35 % from the learned
+  size, is left alone. Set either to 0 for games that left-align their
+  subtitles.
+- **Read on the GPU** (Translation page): DirectML on any DirectX 12 card.
+  On an RTX 3080 Ti a full 1280x720 frame drops from 204 ms to 105 ms, but
+  a subtitle strip goes from 54 ms to 71 ms: leave it off for a strip, turn
+  it on for large areas.
+- **Change that wakes OCR** (Advanced page, `--change-threshold`): OCR runs
   only when something in the read area has changed since the frame last
-  read (the strongest local change in a small grey thumbnail, 0-255;
+  read (the strongest local change in a small grey thumbnail, 0 to 255;
   default 20), so a short word appearing in a wide strip counts in full
   and a static screen costs no OCR. Lower it if a line is ever missed; 0
   reads every frame. A line's translation is requested the first time it
   is seen and shown once a second frame confirms it, so the answer is
-  usually there by then. `--autosave-seconds` (default 10) says how soon
-  new translations reach the cache file.
-- **Keep the overlay out of screen recordings** (Game tab): off by default,
-  so recordings, streams and screenshots include the translations. Turn it
+  usually there by then.
+- **Keep the overlay out of recordings** (Game page): off by default, so
+  recordings, streams and screenshots include the translations. Turn it
   on if a capture tool should not see the overlay.
+- **Write the cache every** (Advanced page, `--autosave-seconds`, default
+  10 s): how soon new translations reach the cache file.
 
-Every setting has a command-line equivalent; `gametl --help` lists them.
-`gametl --window "Part of the title" --translator deepl` runs without the
-tray, `--profile NAME` loads a profile, and `--debug` outlines every tracked
-block and prints per-frame timings.
+## Command line
 
-## Recording a demo
+`gametl --window "Part of the title" --translator deepl` runs on that
+window without the tray; `--profile NAME` loads a profile first;
+`--tray --window ...` runs with the tray and starts at once;
+`--save-profile NAME` saves the resulting settings; `--debug` outlines
+every tracked block and prints per-frame timings; `--list-windows` lists
+the capturable windows. Options given on the command line override the
+profile, or the defaults.
+
+## Rendering a demo
 
 Window-capture recorders (Xbox Game Bar, OBS "Game Capture") record the
 game window only, so the overlay, a separate window, is not in the
@@ -233,18 +259,18 @@ uv run python scripts/render_demo.py capture.mp4 --start 508 --end 520 --out doc
 
 This is also a way to try a game from a recording without running it.
 
-## How it fits together
+## Architecture
 
 One frame goes through these steps, about ten times a second, on the
 pipeline thread (`app/pipeline.py`):
 
 1. `capture/` grabs the game window with Windows Graphics Capture and
-   hands over a BGR frame plus the window's screen rectangle.
+   hands over a BGR frame.
 2. `ocr/` reads the selected area (or the whole client area) with
    RapidOCR's PP-OCR models on ONNX Runtime and returns text lines with
    pixel boxes. A frame in whose area nothing has changed since the last
    one read (judged on a small grey thumbnail) and whose blocks are all
-   settled is not read at all: a static screen costs no OCR.
+   settled is not read at all.
 3. `tracking/filters.py` drops lines in ignore zones or matching ignore
    patterns; `tracking/blocks.py` groups lines into blocks and matches them
    to the blocks seen in earlier frames, so each block keeps its id, a
@@ -252,9 +278,9 @@ pipeline thread (`app/pipeline.py`):
 4. `translate/service.py` answers from the per-game cache at once and sends
    new text to the translator on a worker thread (with an optional faster
    draft translator); the pipeline never waits for a reply. New
-   translations are written to the cache file within seconds, so a crash
-   loses nothing; a cache file that cannot be read is set aside as `.bad`
-   and the game starts with an empty one.
+   translations are written to the cache file within seconds; a cache file
+   that cannot be read is set aside as `.bad` and the game starts with an
+   empty one.
 5. `layout/` decides how a translation is drawn: `style.py` keeps size and
    colours consistent (per band in place; one locked style for the whole
    subtitle zone), `fit.py` wraps and sizes text, `colors.py` samples the
@@ -266,17 +292,17 @@ pipeline thread (`app/pipeline.py`):
 while it runs; the tray icon, the settings window and the command line are
 the three ways of driving it. The slow part of a start (waiting for the
 window, loading or downloading models) runs on a thread, so the tray and
-the settings window stay responsive. `app/credentials.py` finds API keys.
+the settings window stay responsive. Settings edited while a session runs
+reach the pipeline and the overlay directly; a change of window, language
+or translator restarts the session.
 
 The settings window is Qt Quick, drawn by its software renderer (a form
-needs no GPU, and a Direct3D window opening beside a game made some
-displays flicker): the pages are QML files under `app/qml/`, styled by
-hand (`Theme.qml` holds the colours and sizes), and
-`app/settings_backend.py` is what they read and write: a property map
-with one entry per setting, plus the actions (start, select an area, save
-a key, activate a licence) that go to the tray as signals. Edits go out
-as a signal once the typing pauses; the controller applies them to the
-running session.
+needs no GPU, and a Direct3D window opening beside a game can make a
+display flicker). The pages are QML files under `app/qml/`, styled by hand
+(`Theme.qml` holds the colours and sizes); `app/settings_backend.py` is
+what they read and write: a property map with one entry per setting, plus
+the actions (start, select an area, save a key, activate a licence) that
+go to the tray as signals.
 
 ```
 src/gametl/
@@ -292,8 +318,8 @@ tests/
 docs/         demo clip, renders of the settings pages (docs/ui)
 ```
 
-[PLAN.md](PLAN.md) is the design document and the log of every decision and
-measurement made along the way.
+[PLAN.md](PLAN.md) records the design decisions and the measurements
+behind them.
 
 ## Development
 
@@ -303,24 +329,51 @@ uv run ruff check src tests scripts
 uv run ruff format src tests scripts
 ```
 
-`scripts/fake_game.py` opens a stand-in game window with a HUD and a large
-subtitle that changes every few seconds, so the whole pipeline can be tried
-without a game and without API calls:
+The overlay, selector and hotkey tests need an interactive desktop
+session; CI skips them.
+
+- `scripts/fake_game.py` opens a stand-in game window with a HUD and a
+  large subtitle that changes every few seconds, so the whole pipeline can
+  be tried without a game and without API calls:
+
+  ```
+  uv run python scripts/fake_game.py
+  uv run gametl --window "Fake Game" --translator verbose --roi 0,0.75,1,0.25
+  ```
+
+- `scripts/preview_ui.py --full --out out/ui` renders every settings page
+  to PNG without a display (the renders in `docs/ui` come from it);
+  `gametl --check-ui` loads every page offscreen and reports QML problems.
+  CI runs the latter from the frozen build too.
+- `scripts/spike_capture_ocr.py` captures a window and prints what OCR
+  sees, with timings, without the overlay.
+- `scripts/bench_translate.py` measures Claude request latency per
+  configuration (real API calls).
+- `scripts/make_license.py` issues licence keys; it needs the private
+  signing key, which is not in the repository.
+
+## Releases
 
 ```
-uv run python scripts/fake_game.py
-uv run gametl --window "Fake Game" --translator verbose --roi 0,0.75,1,0.25
+uv run --group build python scripts/build.py
 ```
 
-`scripts/preview_ui.py --full --out out/ui` renders every settings page to
-PNG without a display (the renders in `docs/ui` come from it), and
-`gametl --check-ui` loads every page offscreen and reports QML problems;
-CI runs the latter from the frozen build too.
-`scripts/spike_capture_ocr.py` captures a window and prints what OCR sees,
-with timings, without the overlay. `scripts/bench_translate.py` measures
-Claude request latency per configuration (real API calls).
-`scripts/make_license.py` issues licence keys; it needs the private signing
-key, which is not in the repository.
+builds the distributable folder `dist/gametl` with PyInstaller. GitHub
+Actions (`.github/workflows/release.yml`) does the same on a Windows
+runner: bump `version` in `pyproject.toml` and merge to `main`, and the
+workflow, seeing a version with no tag yet, builds the folder, creates the
+tag `v<version>` at the merge commit and attaches
+`gametl-v<version>-win64.zip` to its release. A merge whose version is
+already tagged builds nothing. Pushing a tag by hand (a dash, as in
+`v0.2.0-beta1`, makes a pre-release) or running the workflow from the
+Actions tab with a tag name does the same; with the tag left empty, the
+workflow builds without releasing and keeps the zip as a seven-day
+artifact. The tag must match the `pyproject.toml` version.
+
+The releases of a private repository are visible to its collaborators
+only; for customers, publish the zip elsewhere. The executables are not
+code-signed, so Windows warns about an unknown publisher until a signing
+step is added.
 
 ## Acknowledgements
 
@@ -333,11 +386,11 @@ key, which is not in the repository.
 [PySide6](https://doc.qt.io/qtforpython-6/), and the DeepL and Anthropic
 APIs.
 
-## Licence
+## Licensing
 
-gametl is proprietary software, copyright (c) 2026 Mustafa Yurdakul. It may
-be used for a 14-day trial, after which a licence key bought from the
-author is required; see [LICENSE](LICENSE) for the terms. The open-source
-components it bundles are listed with their licences in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licence enquiries:
-mustafa@yurdakul.dev.
+Subline (gametl) is proprietary software, copyright (c) 2026 Mustafa
+Yurdakul. It may be used for a 14-day trial, after which a licence key
+bought from the author is required; see [LICENSE](LICENSE) for the terms.
+The open-source components it bundles or downloads are listed with their
+licences in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licence
+enquiries: mustafa@yurdakul.dev.
