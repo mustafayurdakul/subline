@@ -56,10 +56,10 @@ class Settings:
     # languages and OCR
     lang: str = "en"  # OCR model language
     ocr_gpu: bool = False  # run OCR on the GPU through DirectML (any DirectX 12 card)
-    source_lang: str = ""  # translator source; default: same as lang
+    source_lang: str = "en"  # what the translator is told the text is in; empty = same as lang
     target_lang: str = "tr"
     # translation
-    translator: str = "claude"  # claude | deepl | offline | uppercase | echo | verbose
+    translator: str = "deepl"  # deepl | claude | offline | uppercase | echo | verbose
     draft: str = ""  # "" | "offline" | "deepl": fast draft shown until the translator answers
     model: str = "claude-haiku-5-5"
     effort: str = "low"
@@ -79,7 +79,9 @@ class Settings:
     full_scan_every: int = 0  # with a zone: also sweep the rest of the area every N frames (0 = never)
     stable_frames: int = 1
     max_missing: int = 3
-    diff_threshold: float = 1.0  # skip OCR while the read area looks unchanged (thumbnail diff, 0..255); 0 = never
+    # OCR waits while nothing in the read area changes this much: the strongest
+    # local change in a small grey thumbnail, 0..255; 0 = read every frame.
+    change_threshold: float = 20.0
     autosave_seconds: float = 10.0  # how soon new translations reach the cache file
     hide_when_unfocused: bool = True
     exclude_from_capture: bool = False  # hide the overlay from screen recordings, streams and screenshots
@@ -152,6 +154,11 @@ class ProfileStore:
     @property
     def models_dir(self) -> Path:
         return self.root / "models"
+
+    @property
+    def runtime_dir(self) -> Path:
+        """The offline translator's libraries, downloaded on demand."""
+        return self.root / "runtime"
 
     @property
     def config_path(self) -> Path:

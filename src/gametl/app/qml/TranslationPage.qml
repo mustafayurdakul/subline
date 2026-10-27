@@ -19,7 +19,7 @@ ColumnLayout {
         }
         SettingRow {
             label: "Source language"
-            helper: "What the translator is told the text is in."
+            helper: "What the translator is told the text is in; empty follows the OCR language."
             Field { key: "source_lang"; placeholderText: "same as OCR language"; implicitWidth: 180 }
         }
         SettingRow { label: "Target language"; Field { key: "target_lang"; implicitWidth: 180 } }
@@ -29,7 +29,7 @@ ColumnLayout {
         title: "Translator"
         SettingRow {
             label: "Service"
-            helper: "DeepL and Claude need their key below. Offline runs on this computer."
+            helper: "DeepL and Claude need their key below. Offline runs on this computer, after a download."
             TranslatorPicker {}
         }
         SettingRow {

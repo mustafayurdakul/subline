@@ -27,14 +27,18 @@ dependencies = [
     "pillow>=10",
     # overlay and settings window
     "pyside6>=6.8",
-    # translation backends: Claude, DeepL (requests), offline CTranslate2 models
+    # translation backends: Claude, DeepL (requests); the offline one is an extra, below
     "anthropic",
     "requests>=2.31",
-    "ctranslate2>=4.0",
-    "sentencepiece>=0.2",
     # licence keys (Ed25519 signatures)
     "cryptography>=42",
 ]
+
+[project.optional-dependencies]
+# The offline translator's runtime. The packaged app downloads these wheels on
+# demand (translate/offline.py); a development install gets them with
+# `uv sync --extra offline`.
+offline = ["ctranslate2>=4.0", "sentencepiece>=0.2"]
 
 [project.scripts]
 gametl = "gametl.app.main:main"

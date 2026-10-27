@@ -43,6 +43,7 @@ WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_LAYERED = 0x00080000
 WS_EX_NOACTIVATE = 0x08000000
+_WDA_NONE = 0x00000000
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
 _user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 _user32.GetWindowLongW.restype = ctypes.c_long
@@ -200,8 +201,24 @@ class OverlayWindow(QWidget):
         wanted = ex | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
         if wanted != ex:
             _user32.SetWindowLongW(hwnd, _GWL_EXSTYLE, wanted)
-        if self.exclude_from_capture:
-            _user32.SetWindowDisplayAffinity(hwnd, _WDA_EXCLUDEFROMCAPTURE)
+        self._set_capture_affinity()
+
+    def _set_capture_affinity(self) -> None:
+        affinity = _WDA_EXCLUDEFROMCAPTURE if self.exclude_from_capture else _WDA_NONE
+        _user32.SetWindowDisplayAffinity(wintypes.HWND(int(self.winId())), affinity)
+
+    def apply(self, font_family: str, hide_when_unfocused: bool, exclude_from_capture: bool) -> None:
+        """Settings edited while the overlay runs."""
+        self.hide_when_unfocused = hide_when_unfocused
+        if exclude_from_capture != self.exclude_from_capture:
+            self.exclude_from_capture = exclude_from_capture
+            self._set_capture_affinity()
+        if font_family != self.font_family:
+            self.font_family = font_family
+            self._fonts.clear()
+            self._spacing.clear()
+            self._layouts.clear()
+            self.update()
 
     def ex_style(self) -> int:
         return _user32.GetWindowLongW(wintypes.HWND(int(self.winId())), _GWL_EXSTYLE)

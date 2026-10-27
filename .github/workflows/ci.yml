@@ -44,5 +44,4 @@ jobs:
       - name: Settings window in the frozen app
         env:
           QT_QPA_PLATFORM: offscreen
-          QT_QUICK_BACKEND: software
         run: dist\gametl\gametl-cli.exe --check-ui

@@ -1,11 +1,13 @@
 """The pipeline thread's per-frame work with a fake OCR engine: which region
-is read, the full-scan cadence, the frame diff, and translations reaching
-the render blocks. No capture, no window, no real OCR."""
+is read, the full-scan cadence, the frame-change gate, settings changed on
+the fly, and translations reaching the render blocks. No capture, no
+window, no real OCR."""
 
 from __future__ import annotations
 
 import os
 import time
+from dataclasses import replace
 
 import numpy as np
 
@@ -62,7 +64,7 @@ def process_until(thread: PipelineThread, predicate, frames: int = 50):
 
 def test_roi_reads_only_the_strip_and_shifts_lines_back() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, change_threshold=0)
     blocks, lines = thread.track_frame(frame())
     assert engine.shapes == [(100, WIDTH, 3)]  # the strip, not the frame
     assert [ln.bbox for ln in lines] == [(300, 620, 700, 660)]  # back in frame coordinates
@@ -71,14 +73,14 @@ def test_roi_reads_only_the_strip_and_shifts_lines_back() -> None:
 
 def test_full_scan_cadence_including_every_frame() -> None:
     engine = FakeEngine()
-    thread = pipeline(engine, roi=STRIP, full_scan_every=3, diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, full_scan_every=3, change_threshold=0)
     for _ in range(6):
         thread.track_frame(frame())
     # frames 1 and 4 sweep the whole area as well as the strip
     assert [len(s) == 3 and s[0] for s in engine.shapes] == [100, HEIGHT, 100, 100, 100, HEIGHT, 100, 100]
 
     engine = FakeEngine()
-    thread = pipeline(engine, roi=STRIP, full_scan_every=1, diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, full_scan_every=1, change_threshold=0)
     for _ in range(3):
         thread.track_frame(frame())
     assert [s[0] for s in engine.shapes] == [100, HEIGHT] * 3  # every frame, not never
@@ -86,7 +88,7 @@ def test_full_scan_cadence_including_every_frame() -> None:
 
 def test_translation_reaches_the_render_blocks() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         render = process_until(thread, lambda r: bool(r))
         (block,) = render
@@ -118,6 +120,21 @@ def test_unchanged_frames_skip_ocr_until_something_moves() -> None:
         thread.service.shutdown()
 
 
+def test_a_short_word_appearing_in_a_wide_strip_wakes_ocr() -> None:
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, max_skipped=100)
+    try:
+        process_until(thread, lambda r: bool(r))
+        thread._process(frame())
+        reads = len(engine.shapes)
+        small = frame()
+        small.image[640:652, 480:520] = 255  # a 40 x 12 px word in a 1000 x 100 px strip
+        thread._process(small)
+        assert len(engine.shapes) == reads + 1  # the strip's mean barely moved; the local change is plain
+    finally:
+        thread.service.shutdown()
+
+
 def test_skipping_stops_after_max_skipped_and_never_while_blocks_are_unsettled() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
     thread = pipeline(engine, roi=STRIP, max_skipped=2)
@@ -144,7 +161,7 @@ def test_skipping_stops_after_max_skipped_and_never_while_blocks_are_unsettled()
 
 def test_diff_disabled_reads_every_frame() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, change_threshold=0)
     try:
         for _ in range(4):
             thread._process(frame())
@@ -168,7 +185,7 @@ def show_text(thread: PipelineThread, engine: FakeEngine, lines: list[TextLine],
 
 def test_subtitle_zone_keeps_one_font_size_across_lines_of_different_box_heights() -> None:
     engine = FakeEngine()
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         sizes = []
         # Boxes 40, 36 and 44 px tall (descenders, none, a tall glyph), then an odd 48 px one.
@@ -185,14 +202,14 @@ def test_subtitle_zone_keeps_one_font_size_across_lines_of_different_box_heights
 
 def test_subtitle_text_colour_is_sampled_unless_set() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         (block,) = process_until(thread, lambda r: bool(r))
         assert block.fg == tuple(int(v) for v in frame().image[0, 0][::-1])  # the frame's colour, as RGB
     finally:
         thread.service.shutdown()
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0, subtitle_color=(255, 230, 0))
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0, subtitle_color=(255, 230, 0))
     try:
         (block,) = process_until(thread, lambda r: bool(r))
         assert block.fg == (255, 230, 0)
@@ -204,7 +221,7 @@ def test_off_centre_text_in_the_zone_is_not_a_subtitle() -> None:
     prompt = line("Hold F to open", 20, 30, 220, 60)  # a prompt at the left edge of the strip
     subtitle = line("Stay close.", 300, 20, 700, 60)  # centred in the 1000 px wide strip
     engine = FakeEngine([prompt, subtitle])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         render = process_until(thread, lambda r: bool(r))
         for _ in range(5):
@@ -215,7 +232,7 @@ def test_off_centre_text_in_the_zone_is_not_a_subtitle() -> None:
         thread.service.shutdown()
     # Tolerance 0 turns the rule off.
     engine = FakeEngine([prompt, subtitle])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0, subtitle_center_tolerance=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0, subtitle_center_tolerance=0)
     try:
         render = process_until(thread, lambda r: len(r) == 2)
         assert sorted(b.lines[0] for b in render) == ["HOLD F TO OPEN", "STAY CLOSE."]
@@ -225,7 +242,7 @@ def test_off_centre_text_in_the_zone_is_not_a_subtitle() -> None:
 
 def test_text_of_another_size_is_not_a_subtitle_once_the_size_is_known() -> None:
     engine = FakeEngine()
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         for text in ("First line here.", "Second line.", "Third one!"):
             show_text(thread, engine, [line(text, 300, 30, 700, 70)])  # 40 px lines: the size locks
@@ -240,16 +257,36 @@ def test_text_of_another_size_is_not_a_subtitle_once_the_size_is_known() -> None
         thread.service.shutdown()
 
 
-def test_short_texts_need_a_second_stable_frame() -> None:
+def test_translations_are_requested_one_sighting_early_and_shown_once_confirmed() -> None:
     # Far enough apart vertically that the tracker keeps them as two blocks.
     engine = FakeEngine([line("Ok", 450, 2, 550, 22), line("Stay close.", 300, 60, 700, 95)])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", diff_threshold=0, subtitle_size_tolerance=0)
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0, subtitle_size_tolerance=0)
     try:
-        thread._process(frame())  # first sighting
-        thread._process(frame())  # stable_frames 1: the long line is submitted, the short one is not
+        assert thread._process(frame()) == []  # first sighting: the long line is requested, nothing is shown
         assert thread.service.stats["items"] == 1
-        thread._process(frame())  # stable_frames 2: now the short one goes too
+        thread._process(frame())  # stable_frames 1: the short one (two sightings to confirm) is requested
         assert thread.service.stats["items"] == 2
+        render = process_until(thread, lambda r: len(r) == 2)  # both confirmed, both answers already in
+        assert sorted(b.lines[0] for b in render) == ["OK", "STAY CLOSE."]
+    finally:
+        thread.service.shutdown()
+
+
+def test_settings_change_on_the_fly_keeps_the_blocks_unless_the_reading_changed() -> None:
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        assert not block.bold
+        (tracked,) = thread._tracker.blocks
+        thread.update_config(replace(thread.cfg, subtitle_bold=True))  # a change of look
+        (block,) = thread._process(frame())
+        assert block.bold and thread._tracker.blocks == [tracked]  # taken up, nothing forgotten
+        thread.update_config(replace(thread.cfg, roi=(0, 550, WIDTH, 700)))  # a change of what is read
+        thread._process(frame())
+        assert thread.cfg.roi == (0, 550, WIDTH, 700)
+        (fresh,) = thread._tracker.blocks  # read afresh: a new block, confirmed and translated from scratch
+        assert fresh is not tracked and fresh.stable_frames == 0 and fresh.translation is None
     finally:
         thread.service.shutdown()
 

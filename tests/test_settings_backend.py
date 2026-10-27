@@ -55,7 +55,7 @@ def test_map_round_trips_settings(tmp_path: Path) -> None:
         center_zone=True,
         font="Arial",
         fps=8.0,
-        diff_threshold=2.5,
+        change_threshold=30.0,
         hide_when_unfocused=False,
         exclude_from_capture=True,
         hotkeys={"toggle": "ctrl+alt+t"},
@@ -76,15 +76,17 @@ def test_fields_without_a_control_survive_and_qml_values_are_coerced(tmp_path: P
     s.insert("target_lang", "de")
     s.insert("fps", "24")  # a text field writes strings
     s.insert("subtitle_font_px", 28.0)  # a slider writes doubles
-    s.insert("diff_threshold", "abc")  # nonsense keeps the value in force
+    s.insert("change_threshold", "abc")  # nonsense keeps the value in force
     s.insert("ignore_patterns", "^\\d+$\n\n  (x)  \n")
     s.insert("subtitle_color", "   ")  # empty stays empty: the game's own colour
     s.insert("lang", "")  # an emptied field means the default
+    s.insert("translator", "")
     backend.start()
     ((result, hwnd),) = applied
     assert hwnd is None
     assert result.target_lang == "de" and result.fps == 24.0 and result.subtitle_font_px == 28
-    assert result.diff_threshold == 1.0 and result.subtitle_color == "" and result.lang == "en"
+    assert result.change_threshold == 20.0 and result.subtitle_color == "" and result.lang == "en"
+    assert result.translator == "deepl"
     assert result.ignore_patterns == ["^\\d+$", "(x)"]
     assert (result.stable_frames, result.max_missing, result.full_scan_every, result.debug) == (3, 7, 5, True)
     backend.saveProfile("kept")
@@ -224,6 +226,38 @@ def test_hotkey_edits_apply_at_once_but_not_while_loading(tmp_path: Path) -> Non
     backend.setHotkeyCapture(True)
     backend.setHotkeyCapture(False)
     assert captures == [True, False]
+
+
+def test_edits_go_out_once_the_typing_pauses_and_only_when_valid(qapp, tmp_path: Path) -> None:
+    from tests.helpers import wait_until
+
+    backend = backend_for(tmp_path)
+    changed: list[Settings] = []
+    backend.settings_changed.connect(changed.append)
+    # set() is a page's write as the map reports it (the map's own signal is for QML writes only).
+    backend.set("target_lang", "d")  # keystroke by keystroke
+    backend.set("target_lang", "de")
+    backend.set("roi", BOTTOM_STRIP)
+    assert changed == []
+    assert wait_until(lambda: bool(changed), tick=qapp.processEvents)
+    assert len(changed) == 1 and changed[0].target_lang == "de" and changed[0].roi == BOTTOM_STRIP
+    backend.set("ignore_patterns", "(unclosed")
+    assert wait_until(lambda: bool(backend.problem), tick=qapp.processEvents)
+    assert len(changed) == 1 and "(unclosed" in backend.problem  # a bad edit goes nowhere
+    backend.set("ignore_patterns", "(closed)")
+    assert wait_until(lambda: len(changed) == 2, tick=qapp.processEvents)
+    assert backend.problem == "" and changed[1].ignore_patterns == ["(closed)"]  # corrected: banner gone
+    backend.load(Settings(target_lang="fr"))  # loading is not an edit
+    assert not wait_until(lambda: len(changed) > 2, timeout=0.8, tick=qapp.processEvents)
+
+
+def test_font_families_come_from_the_font_database(qapp, tmp_path: Path) -> None:
+    from PySide6.QtGui import QFontDatabase
+
+    # The offscreen platform knows no fonts on Windows and fontconfig's on Linux: whatever it has, minus the
+    # "@" vertical variants.
+    expected = [name for name in QFontDatabase.families() if not name.startswith("@")]
+    assert backend_for(tmp_path).fontFamilies == expected
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:

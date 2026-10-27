@@ -29,7 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--save-profile", metavar="NAME", help="save the resulting settings as a profile and continue")
     mode.add_argument("--data-dir", help="where profiles and caches live (default %%APPDATA%%\\gametl)")
     mode.add_argument(
-        "--download-model", action="store_true", help="download the offline model for the language pair and exit"
+        "--download-model",
+        action="store_true",
+        help="download the offline translator (its runtime, once) and the model for the language pair, then exit",
     )
     mode.add_argument("--activate", metavar="KEY", help="store a licence key and exit")
     mode.add_argument("--license-status", action="store_true", help="print the licence or trial state and exit")
@@ -55,7 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     lang = p.add_argument_group("languages")
     lang.add_argument("--lang", help=f"OCR model language (en, ch, japan, korean, de, ...); default {Settings.lang}")
-    lang.add_argument("--source-lang", help="source language for the translator; default: same as --lang")
+    lang.add_argument(
+        "--source-lang", help=f"what the translator is told the text is in; default {Settings.source_lang}"
+    )
     lang.add_argument("--target-lang", help=f"target language code; default {Settings.target_lang}")
     lang.add_argument("--ocr-gpu", action="store_true", default=None, help="run OCR on the GPU (DirectML)")
 
@@ -144,11 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--stable-frames", type=int)
     run.add_argument("--max-missing", type=int)
     run.add_argument(
-        "--diff-threshold",
+        "--change-threshold",
         type=float,
         metavar="N",
-        help="skip OCR while the read area changes less than N "
-        f"(thumbnail difference, 0-255; default {Settings.diff_threshold:g}; 0 = never)",
+        help="read the area again once something in it changes by N "
+        f"(the strongest local change in a small thumbnail, 0-255; default {Settings.change_threshold:g}; "
+        "0 = every frame)",
     )
     run.add_argument(
         "--autosave-seconds",
@@ -183,7 +188,7 @@ _VALUE_OPTIONS = {
     name: name
     for name in (
         "roi", "lang", "source_lang", "target_lang", "translator", "model", "effort", "thinking", "game", "tone",
-        "style", "font", "fps", "full_scan_every", "stable_frames", "max_missing", "diff_threshold",
+        "style", "font", "fps", "full_scan_every", "stable_frames", "max_missing", "change_threshold",
         "autosave_seconds", "render", "subtitle_color", "subtitle_background", "subtitle_pill_alpha",
         "subtitle_position", "subtitle_center_tolerance", "subtitle_size_tolerance", "short_line_confidence",
         "dump_dir",
@@ -337,14 +342,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"profile saved to {path}")
 
     if args.download_model:
-        from gametl.translate.offline import ensure_model
+        from gametl.translate.offline import ensure_offline
 
         try:
-            model_dir = ensure_model(settings.effective_source_lang, settings.target_lang, store.models_dir, print)
+            model_dir = ensure_offline(
+                settings.effective_source_lang, settings.target_lang, store.models_dir, store.runtime_dir, print
+            )
         except Exception as exc:
             print(f"download failed: {exc}")
             return 2
-        print(f"offline model ready: {model_dir}")
+        print(f"offline translation ready: {model_dir}")
         return 0
 
     from PySide6.QtCore import QTimer

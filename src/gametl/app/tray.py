@@ -101,6 +101,7 @@ class TrayApp(QObject):
         if self.window is None:
             backend = SettingsBackend(self.settings, self.store, self.controller.secrets, self.profile_name)
             backend.applied.connect(self.apply)
+            backend.settings_changed.connect(self._on_settings_edited)
             backend.stop_requested.connect(self.controller.stop)
             backend.profile_saved.connect(self._on_profile_saved)
             backend.profile_loaded.connect(self._on_profile_loaded)
@@ -120,6 +121,12 @@ class TrayApp(QObject):
         self.settings = self.window.backend.to_settings(self.settings)
         self.controller.select_area(self.settings)
 
+    def _on_settings_edited(self, settings: Settings) -> None:
+        """An edit in the window: the settings in force from now on, and a
+        running overlay takes them up."""
+        self.settings = settings
+        self.controller.apply(settings)
+
     def _on_hotkeys_edited(self, settings: Settings) -> None:
         """A hotkey field changed: the new combinations take effect at once."""
         self.settings.hotkeys = dict(settings.hotkeys)
@@ -136,6 +143,7 @@ class TrayApp(QObject):
         self.settings = settings
         self.profile_name = name
         self.apply_hotkeys(settings)
+        self.controller.apply(settings)
         self._on_status(f"profile {name} loaded")
 
     def apply(self, settings: Settings, hwnd: int | None = None) -> None:

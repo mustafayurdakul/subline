@@ -106,7 +106,7 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
         full_scan_every=settings.full_scan_every,
         stable_frames=settings.stable_frames,
         max_missing=settings.max_missing,
-        diff_threshold=settings.diff_threshold,
+        change_threshold=settings.change_threshold,
         style=settings.style,
         line_filter=LineFilter.compile(ignore_zones, patterns, short_confidence=settings.short_line_confidence),
         render=settings.render,
@@ -128,8 +128,9 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
 
 
 def build_offline_translator(settings: Settings, store: ProfileStore) -> Translator:
-    from ..translate.offline import OfflineTranslator
+    from ..translate.offline import OfflineTranslator, activate_runtime
 
+    activate_runtime(store.runtime_dir)
     return OfflineTranslator.from_models_dir(store.models_dir, settings.effective_source_lang, settings.target_lang)
 
 
@@ -187,6 +188,18 @@ def _spread(values: Iterable[float]) -> str:
 
 class StartError(RuntimeError):
     """A start that cannot go ahead, with a message fit for the status line."""
+
+
+# Settings a running session cannot take up on the fly: a change in one of
+# them restarts the session. Everything else (the area, the filters, the
+# timing, the look) reaches the pipeline and the overlay as they run.
+SESSION_FIELDS = frozenset(
+    {
+        "window_match", "game", "include_frame", "lang", "ocr_gpu", "source_lang", "target_lang", "translator",
+        "draft", "model", "effort", "thinking", "structured", "glossary_path", "tone", "use_cache_file", "fps",
+        "autosave_seconds",
+    }
+)  # fmt: skip
 
 
 @dataclass(slots=True)
@@ -271,6 +284,7 @@ class OverlayController(QObject):
         self._generation = 0  # bumped by every start() and stop(); a preparation from before is ignored
         self._start_workers: set[_StartWorker] = set()
         self._starting = False
+        self._requested_hwnd: int | None = None  # the handle the start in progress was given
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
 
@@ -332,6 +346,7 @@ class OverlayController(QObject):
             self.stop()
         self._generation += 1
         self._starting = True
+        self._requested_hwnd = hwnd
         self.starting_changed.emit(True)
         worker = _StartWorker(self, self._generation, settings.copy(), hwnd, wait)
         worker.progress.connect(self._say)
@@ -484,6 +499,31 @@ class OverlayController(QObject):
         self.paused_changed.emit(False)
         self._say("stopped")
 
+    def apply(self, settings: Settings) -> None:
+        """Settings edited while a session runs or starts. The area, the
+        filters, the timing and the look take effect at once; a change of
+        window, language or translator restarts the session on them."""
+        if self.starting:
+            self.start(settings, self._requested_hwnd)
+            return
+        if not self.running or self.settings is None:
+            return
+        assert self.worker is not None and self.overlay is not None and self.hwnd is not None
+        if any(getattr(settings, name) != getattr(self.settings, name) for name in SESSION_FIELDS):
+            same_window = settings.window_match == self.settings.window_match
+            self._say("settings changed: restarting")
+            self.start(settings, self.hwnd if same_window else None)
+            return
+        frame, client = capture_area(self.hwnd, settings.include_frame)
+        try:
+            config = pipeline_config(settings, frame, client)
+        except re.error as exc:
+            self._say(f"invalid ignore pattern: {exc}")
+            return
+        self.worker.update_config(config)
+        self.overlay.apply(settings.font, settings.hide_when_unfocused, settings.exclude_from_capture)
+        self.settings = settings
+
     def close(self, wait_ms: int = 5000) -> None:
         """stop(), then let any start still being prepared run out, so the
         process does not tear down a thread that is loading a model."""
@@ -564,12 +604,12 @@ class OverlayController(QObject):
 
     def _set_area(self, spec: str, hwnd: int | None) -> None:
         """Make `spec` the area of the session's settings and tell the
-        owner; a running session restarts on it."""
+        owner; a running session reads the new area from the next frame."""
         if self.settings is not None:
             self.settings.set_area(spec)
         self.area_selected.emit(spec)
-        if self.running and self.settings is not None:
-            self.start(self.settings, hwnd)
+        if self.running and self.settings is not None and hwnd == self.hwnd:
+            self.apply(self.settings)
 
     # -- reporting ---------------------------------------------------------
 

@@ -2,13 +2,14 @@ import QtQuick
 import QtQuick.Controls.Basic
 import "Icons.js" as Icons
 
-// An editable drop-down bound to `map[key]`: type a value or pick one of
-// `options`.
+// A drop-down bound to `map[key]`: pick one of `options`, or type a value
+// when `editable`. `fontPreview` draws each option in the font it names.
 ComboBox {
     id: root
     property var options: []
     property var map: backend.settings
     property string key: ""
+    property bool fontPreview: false
 
     editable: true
     model: options
@@ -24,6 +25,7 @@ ComboBox {
     onActivated: function(index) { map[key] = String(options[index]) }
 
     contentItem: TextInput {
+        enabled: root.editable  // a disabled input lets the press through to the box, which opens the list
         text: String(root.map[root.key] ?? "")
         color: Theme.text
         selectionColor: Theme.selection
@@ -52,7 +54,13 @@ ComboBox {
         width: root.width
         height: 30
         highlighted: root.highlightedIndex === index
-        contentItem: Label { text: row.modelData; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter; leftPadding: 4 }
+        contentItem: Label {
+            text: row.modelData
+            font.family: root.fontPreview ? row.modelData : Theme.font
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+            leftPadding: 4
+        }
         background: Rectangle { color: row.highlighted ? Theme.cardRaised : "transparent" }
     }
     popup: Popup {

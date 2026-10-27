@@ -22,7 +22,7 @@ ColumnLayout {
             helper: "x, y, width, height as fractions of the window"
             Field { key: "roi"; placeholderText: "empty: the whole window"; implicitWidth: 220 }
         }
-        AreaButtons { wholeWindow: true }
+        AreaButtons { wholeWindow: true; Layout.alignment: Qt.AlignRight }
         SettingRow {
             label: "Keep a selected area centred"
             helper: "Shift while dragging inverts this for one drag."
