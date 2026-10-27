@@ -147,7 +147,8 @@ def controller(qapp: QApplication, fakes, tmp_path) -> OverlayController:
 
 
 def settings(**overrides) -> Settings:
-    base = {"window_match": "Fake Game", "translator": "uppercase", "use_cache_file": False, "lang": "en"}
+    # The whole window: the fake engine answers in crop coordinates, and these tests are about the lifecycle.
+    base = {"window_match": "Fake Game", "translator": "uppercase", "use_cache_file": False, "lang": "en", "roi": ""}
     return Settings(**{**base, **overrides})
 
 
@@ -196,15 +197,15 @@ def test_edits_apply_at_once_or_restart_the_session(qapp, controller) -> None:
     wait_for(qapp, lambda: controller.running)
     worker, (overlay,) = controller.worker, FakeOverlay.instances
 
-    controller.apply(settings(font="Arial", subtitle_bold=True, hide_when_unfocused=False))
-    wait_for(qapp, lambda: worker.cfg.subtitle_bold)
+    controller.apply(settings(font="Arial", subtitle_weight="bold", hide_when_unfocused=False))
+    wait_for(qapp, lambda: worker.cfg.subtitle_weight == "bold")
     assert overlay.font_family == "Arial" and controller.worker is worker
     assert controller.settings is not None and controller.settings.font == "Arial"
 
-    controller.apply(settings(font="Arial", subtitle_bold=True, target_lang="de"))  # a new session is needed
+    controller.apply(settings(font="Arial", subtitle_weight="bold", target_lang="de"))  # a new session is needed
     wait_for(qapp, lambda: controller.running and controller.worker is not worker)
     assert "settings changed: restarting" in controller.messages
-    assert controller.settings.target_lang == "de" and controller.worker.cfg.subtitle_bold
+    assert controller.settings.target_lang == "de" and controller.worker.cfg.subtitle_weight == "bold"
     assert len(FakeEngine.created) == 1 and len(FakeOverlay.instances) == 2
     assert controller.running_log == [True, False, True]
 

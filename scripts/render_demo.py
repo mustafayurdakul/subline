@@ -33,19 +33,20 @@ from PySide6.QtWidgets import QApplication
 from gametl.app.config import ProfileStore, Settings
 from gametl.app.controller import build_translator, parse_zone, pipeline_config
 from gametl.app.credentials import WindowsCredentialStore
+from gametl.app.fonts import load_bundled_fonts
 from gametl.app.main import utf8_console
 from gametl.app.pipeline import PipelineThread
 from gametl.capture.base import Frame
 from gametl.geometry import Box
 from gametl.ocr.rapid import RapidOcrEngine
-from gametl.overlay.window import OverlayWindow
+from gametl.overlay.paint import BlockPainter
 from gametl.translate.cache import TranslationCache
 from gametl.translate.service import TranslationService
 
 LABELS = {"original": "Game", "translated": "With gametl"}
 
 
-def paint_onto(image_bgr: np.ndarray, overlay: OverlayWindow, blocks) -> np.ndarray:
+def paint_onto(image_bgr: np.ndarray, overlay: BlockPainter, blocks) -> np.ndarray:
     """Draw the overlay's blocks onto a copy of a BGR frame."""
     rgb = np.ascontiguousarray(image_bgr[:, :, ::-1])
     h, w = rgb.shape[:2]
@@ -153,7 +154,8 @@ def main() -> int:
     engine = RapidOcrEngine(lang="en", model_root_dir=str(store.models_dir / "ocr"))
     config = pipeline_config(settings, (0, 0, width, height), None)
     pipeline = PipelineThread(0, engine, service, config)
-    overlay = OverlayWindow(0)  # never shown: only its painter is used
+    load_bundled_fonts()
+    overlay = BlockPainter(settings.font)
 
     crop = parse_zone(args.crop, width, height) or (0, 0, width, height)
     size = (args.width, int(args.width * (crop[3] - crop[1]) / (crop[2] - crop[0])))

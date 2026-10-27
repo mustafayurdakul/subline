@@ -21,7 +21,7 @@ from ..geometry import RGB, Box
 from ..layout.colors import analyze_colors, bgr_to_rgb
 from ..layout.style import StyleMemory, ZoneStyle, line_height_of
 from ..ocr.base import OcrEngine, TextLine
-from ..overlay.window import RenderBlock
+from ..overlay.paint import RenderBlock
 from ..textutil import letter_count
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
 from ..tracking.filters import LineFilter
@@ -44,7 +44,8 @@ class PipelineConfig:
     subtitle_color: RGB | None = None  # None = the game's own subtitle colour, sampled
     subtitle_background: str = "pill"  # "pill" | "shadow" | "none"
     subtitle_pill_alpha: int = 230
-    subtitle_bold: bool = False
+    subtitle_weight: str = "regular"
+    subtitle_grain: int = 0
     subtitle_position: str = "bottom"  # "bottom" | "source" | "center"
     subtitle_hide_source: bool = True
     # Which blocks in the zone are subtitles rather than HUD text: centred in the
@@ -412,7 +413,8 @@ class PipelineThread(QThread):
                 position=cfg.subtitle_position,
                 background=cfg.subtitle_background,
                 pill_alpha=cfg.subtitle_pill_alpha,
-                bold=cfg.subtitle_bold,
+                weight=cfg.subtitle_weight,
+                grain=cfg.subtitle_grain,
                 hide_source=cfg.subtitle_hide_source,
             )
         # In-place mode: patch the original out in its own colours, or use a pill

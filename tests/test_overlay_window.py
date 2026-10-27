@@ -12,6 +12,7 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 from PySide6.QtWidgets import QApplication, QWidget
 
 from gametl.capture.windows import enable_per_monitor_dpi_awareness, find_window, list_windows, window_rect
+from gametl.overlay.paint import RenderBlock, source_font_px, subtitle_rect
 from gametl.overlay.window import (
     WS_EX_LAYERED,
     WS_EX_NOACTIVATE,
@@ -19,9 +20,6 @@ from gametl.overlay.window import (
     WS_EX_TOPMOST,
     WS_EX_TRANSPARENT,
     OverlayWindow,
-    RenderBlock,
-    source_font_px,
-    subtitle_rect,
 )
 
 
@@ -96,10 +94,10 @@ def test_own_windows_are_not_listed_as_capture_targets(qapp: QApplication, targe
 
 
 def test_in_place_layout_fits_the_width(qapp: QApplication, target: QWidget) -> None:
-    overlay = OverlayWindow(int(target.winId()))
+    overlay = OverlayWindow(int(target.winId())).painter
     block = RenderBlock((0, 0, 300, 60), ["A fairly long translated subtitle line", "second"], source_lines=2)
     layout = overlay.layout_for(block)
-    assert all(overlay.measurer(False)(line, layout.font_px) <= 300 for line in layout.lines)
+    assert all(overlay.measurer("regular")(line, layout.font_px) <= 300 for line in layout.lines)
     assert layout.font_px >= 6
     assert overlay.layout_for(block) is layout  # cached
     short = overlay.layout_for(RenderBlock((0, 0, 1000, 50), ["Hi"]))
@@ -128,6 +126,6 @@ def test_set_blocks_and_paint_all_styles(qapp: QApplication, target: QWidget) ->
     qapp.processEvents()
     image = overlay.grab().toImage()
     assert image.width() > 0
-    layout = overlay.layout_for(overlay._blocks[1])
+    layout = overlay.painter.layout_for(overlay._blocks[1])
     assert len(layout.lines) > 1 and layout.grown is True
     overlay.close()

@@ -9,15 +9,7 @@ ColumnLayout {
     readonly property string swatch: /^#[0-9a-fA-F]{6}$/.test(colour) ? colour : "#D9B86A"
     spacing: 2 * Theme.space
 
-    SubtitlePreview {
-        Layout.fillWidth: true
-        fontPx: Number(root.s.subtitle_font_px) || 22
-        bold: Boolean(root.s.subtitle_bold)
-        background: String(root.s.subtitle_background)
-        pillOpacity: Number(root.s.subtitle_pill_alpha) / 255
-        position: String(root.s.subtitle_position)
-        textColor: root.ownColour ? "#F2F2F2" : root.swatch
-    }
+    SubtitlePreview { Layout.fillWidth: true }
 
     Card {
         title: "Text"
@@ -37,10 +29,19 @@ ColumnLayout {
                 Rectangle { width: 28; height: 28; color: root.swatch; border.color: Theme.borderStrong; opacity: root.ownColour ? 0.35 : 1 }
             }
         }
-        SettingRow { label: "Bold"; Toggle { key: "subtitle_bold" } }
         SettingRow {
             label: "Font"
+            helper: "The app's own fonts come first; they look the same on every computer."
             Combo { key: "font"; options: backend.fontFamilies; editable: false; fontPreview: true; implicitWidth: 220 }
+        }
+        SettingRow {
+            label: "Weight"
+            Segmented { key: "subtitle_weight"; options: ["Regular", "Medium", "SemiBold", "Bold"]; values: ["regular", "medium", "semibold", "bold"] }
+        }
+        SettingRow {
+            label: "Grain"
+            helper: "A fine film texture over the letters, like printed titles."
+            Gauge { key: "subtitle_grain"; from: 0; to: 30; suffix: " %"; specialText: "off" }
         }
     }
 

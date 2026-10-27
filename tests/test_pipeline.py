@@ -277,11 +277,11 @@ def test_settings_change_on_the_fly_keeps_the_blocks_unless_the_reading_changed(
     thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         (block,) = process_until(thread, lambda r: bool(r))
-        assert not block.bold
+        assert block.weight == "regular"
         (tracked,) = thread._tracker.blocks
-        thread.update_config(replace(thread.cfg, subtitle_bold=True))  # a change of look
+        thread.update_config(replace(thread.cfg, subtitle_weight="bold"))  # a change of look
         (block,) = thread._process(frame())
-        assert block.bold and thread._tracker.blocks == [tracked]  # taken up, nothing forgotten
+        assert block.weight == "bold" and thread._tracker.blocks == [tracked]  # taken up, nothing forgotten
         thread.update_config(replace(thread.cfg, roi=(0, 550, WIDTH, 700)))  # a change of what is read
         thread._process(frame())
         assert thread.cfg.roi == (0, 550, WIDTH, 700)

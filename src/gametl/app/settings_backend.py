@@ -26,8 +26,9 @@ from PySide6.QtQml import QQmlPropertyMap
 
 from .. import APP_NAME, __version__
 from .cleanup import describe_data
-from .config import DEFAULT_HOTKEYS, ProfileStore, Settings, slug
+from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
+from .fonts import BUNDLED_FAMILIES
 from .hotkeys import parse_combo
 from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
 
@@ -36,7 +37,6 @@ OCR_LANGS = [
     "en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it", "pt", "pl", "nl", "tr", "cyrillic", "arabic",
 ]
 # fmt: on
-BOTTOM_STRIP = "0,0.75,1,0.25"  # the area preset most games' subtitles fall in
 CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
 HOTKEY_LABELS = {
     "toggle": "Start / stop overlay",
@@ -52,7 +52,8 @@ EMPTY_DEFAULTS = {
     "target_lang": "tr",
     "translator": "deepl",
     "model": CLAUDE_MODELS[0],
-    "font": "Segoe UI",
+    "font": Settings.font,
+    "subtitle_weight": Settings.subtitle_weight,
 }
 EDIT_DELAY_MS = 500  # an edit reaches the running overlay this long after the last keystroke
 
@@ -200,6 +201,7 @@ class SettingsBackend(QObject):
     licenseTextChanged = Signal()
     downloadChanged = Signal()
     problemChanged = Signal()
+    previewChanged = Signal()  # the Appearance preview asks for a fresh image
 
     def __init__(
         self,
@@ -224,6 +226,7 @@ class SettingsBackend(QObject):
         self._download: OfflineDownloadThread | None = None
         self._download_status = ""
         self._problem = ""
+        self._preview_stamp = 0
         self._edit_problem = False  # the banner shows a problem an edit caused (cleared once corrected)
         self._edit_timer = QTimer(self)
         self._edit_timer.setSingleShot(True)
@@ -244,6 +247,7 @@ class SettingsBackend(QObject):
             self._map.insert(name, "\n".join(value) if name in LIST_FIELDS else value)
         for name in DEFAULT_HOTKEYS:
             self._map.insert(f"hotkey_{name}", settings.hotkeys.get(name, DEFAULT_HOTKEYS[name]))
+        self._bump_preview()
 
     def to_settings(self, base: Settings | None = None) -> Settings:
         """The map's values on top of `base` (default: the settings last
@@ -272,6 +276,11 @@ class SettingsBackend(QObject):
             self.hotkeys_changed.emit(self.to_settings())
         else:
             self._edit_timer.start()
+            self._bump_preview()
+
+    def _bump_preview(self) -> None:
+        self._preview_stamp += 1
+        self.previewChanged.emit()
 
     def _emit_edit(self) -> None:
         """The typing has paused: the settings go out if they are valid; a
@@ -316,13 +325,15 @@ class SettingsBackend(QObject):
     hotkeyLabels = Property("QVariantMap", lambda self: dict(HOTKEY_LABELS), constant=True)
 
     def _font_families(self) -> list[str]:
-        """The fonts on this computer, for the Appearance page ("@" names
-        are Windows' vertical variants)."""
+        """The fonts the app brings along, then the computer's ("@" names
+        are Windows' vertical variants), for the Appearance page."""
         if QGuiApplication.instance() is None:
-            return []
-        return [name for name in QFontDatabase.families() if not name.startswith("@")]
+            return list(BUNDLED_FAMILIES)
+        installed = [n for n in QFontDatabase.families() if not n.startswith("@") and n not in BUNDLED_FAMILIES]
+        return [*BUNDLED_FAMILIES, *installed]
 
     fontFamilies = Property("QStringList", _font_families, constant=True)
+    previewStamp = Property(int, lambda self: self._preview_stamp, notify=previewChanged)
 
     # -- overlay state -------------------------------------------------------------------
 

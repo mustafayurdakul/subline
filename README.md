@@ -42,9 +42,10 @@ from a recording with the same pipeline the live overlay uses (see
   the subtitle strip, and from then on only that strip is read. The choice
   is saved per game as fractions of the window, so it survives resizes.
 - **Subtitles that look like subtitles.** One fixed size and colour,
-  learned from the game's own text, drawn on a dark pill, with a soft
-  shadow, or bare with an outline, centred in the area. Long translations
-  wrap at the same size.
+  learned from the game's own text, in a font and weight of your choice
+  (three fonts ship with the app), with a fine film grain, drawn on a dark
+  pill, with a soft shadow, or bare with an outline, centred in the area.
+  Long translations wrap at the same size.
 - **Three translators.** DeepL (the default: fast, strong for European
   languages, free tier), Claude (glossary, tone notes, context between
   lines, any language), or an offline CTranslate2 model (no network; an
@@ -104,8 +105,9 @@ development install; the packaged app downloads it on demand instead.
 1. Run Subline. A tray icon appears and the settings window opens on its
    **Game** page.
 2. Pick the game window from the list (press **Refresh** after launching
-   the game), then press **Bottom strip**, or **Select on screen** and
-   drag a rectangle over the subtitle area.
+   the game). The bottom quarter of the window is read by default; press
+   **Select on screen** and drag a rectangle if the subtitles sit
+   elsewhere.
 3. On the **Translation** page, paste the DeepL key and press **Save**.
    Claude and the offline model are there too. Keys are kept in Windows
    Credential Manager, never in a profile file.
@@ -121,7 +123,8 @@ appear in that area from then on, and the area is saved with the profile.
 
 The pages: **Game** (window, area, what to ignore), **Translation**
 (languages, translator, draft, keys, Claude options), **Appearance**
-(size, colour, font, pill or shadow, placement, with a live preview),
+(size, colour, font, weight, grain, pill or shadow, placement, with a live
+preview drawn by the overlay's own painter),
 **Hotkeys** (click a field and press the keys), **Licence** and
 **Advanced** (capture rate, timing, the data folder). Every change takes
 effect as soon as the typing pauses, on the running overlay too: the area,
@@ -210,7 +213,15 @@ Every setting has a command-line equivalent; `gametl --help` lists them.
   sits on a steady baseline at the bottom of the area (**Position**
   `bottom`; `source` follows the game's own line), and the background is a
   `pill` (opacity below it), a `shadow` like the game's own text, or
-  `none`.
+  `none`. **Hide the original line** covers the game's own text when the
+  translation is drawn elsewhere; off by default.
+- **Font, Weight and Grain** (Appearance page): Source Sans 3, Fira Sans
+  and Barlow Semi Condensed ship with the app in four weights each and
+  come first in the list, so a profile looks the same on any computer;
+  every installed font follows. Weight is Regular to Bold (default
+  SemiBold). Grain lays a fine, fixed film texture over the letters
+  (default 10 %, 0 turns it off). The preview on the page is painted by
+  the overlay's own code.
 - **Only centred text** and **Only subtitle-sized text** (Appearance page)
   keep HUD prompts and objectives that share the area out of the
   subtitles: text whose centre is more than 10 % of the area's width off
@@ -285,8 +296,10 @@ pipeline thread (`app/pipeline.py`):
    colours consistent (per band in place; one locked style for the whole
    subtitle zone), `fit.py` wraps and sizes text, `colors.py` samples the
    background and text colours.
-6. `overlay/window.py` draws the result in a click-through window glued to
-   the game, in subtitle mode or in place.
+6. `overlay/paint.py` paints the result (fonts, layouts, grain; one
+   painter shared with the settings preview and the demo renderer) and
+   `overlay/window.py` shows it in a click-through window glued to the
+   game, in subtitle mode or in place.
 
 `app/controller.py` builds this chain from a `Settings` object and owns it
 while it runs; the tray icon, the settings window and the command line are
@@ -311,7 +324,8 @@ src/gametl/
   tracking/   lines -> blocks, cross-frame matching, stability gate, ignore filters
   translate/  Translator interface, Claude / DeepL / offline backends, cache, service
   layout/     fitting text into the source box, colour sampling, consistent styling
-  overlay/    transparent click-through window, area selector
+  overlay/    block painter, transparent click-through window, area selector
+  fonts/      the subtitle fonts shipped with the app
   app/        controller, pipeline thread, tray icon, settings window (qml/), hotkeys, profiles, API keys
 scripts/      fake game, demo renderer, diagnostics, build, model conversion, settings-window renders
 tests/
