@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from gametl.translate.base import TranslationError, TranslationRequest
-from gametl.translate.deepl import FREE_URL, PRO_URL, DeepLTranslator, deepl_code
+from gametl.translate.deepl import CONTEXT_CHARS, FREE_URL, PRO_URL, DeepLTranslator, context_text, deepl_code
 
 
 class StubSession:
@@ -77,3 +77,20 @@ def test_errors_raise_translation_error(monkeypatch: pytest.MonkeyPatch) -> None
     assert (
         DeepLTranslator(auth_key="k", session=StubSession()).translate(TranslationRequest([], target_lang="tr")) == []
     )
+
+
+def test_recent_source_lines_go_along_as_context() -> None:
+    session = StubSession()
+    translator = DeepLTranslator(auth_key="k", session=session)
+    context = [("Hemingway is waiting at the lodge.", "Hemingway lokantada bekliyor."), ("He said so.", "Öyle dedi.")]
+    translator.translate(TranslationRequest(["Go find Hemingway."], target_lang="tr", context=context))
+    assert session.calls[0]["json"]["context"] == "Hemingway is waiting at the lodge.\nHe said so."
+    translator.translate(TranslationRequest(["Go."], target_lang="tr"))
+    assert "context" not in session.calls[1]["json"]  # nothing seen yet: no context field at all
+
+
+def test_context_keeps_the_newest_lines_within_the_budget() -> None:
+    long = "x" * (CONTEXT_CHARS - 10)
+    pairs = [("old line", "t"), (long, "t"), ("", "t"), ("newest", "t")]
+    assert context_text(pairs) == f"{long}\nnewest"  # the old line no longer fits; the blank one is skipped
+    assert context_text(None) == "" and context_text([]) == ""

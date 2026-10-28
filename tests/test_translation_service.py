@@ -161,6 +161,11 @@ def test_context_carries_recent_pairs() -> None:
         assert wait_until(lambda: service.drain() > 0)
         assert translator.requests[1].context == [("one", "ONE")]
         assert translator.requests[2].context == [("one", "ONE"), ("two", "TWO")]
+        # A line answered from the cache joins the context as well, once.
+        assert service.lookup("two") == "TWO" and service.lookup("two") == "TWO"
+        service.submit(["four"])
+        assert wait_until(lambda: service.drain() > 0)
+        assert translator.requests[3].context == [("three", "THREE"), ("two", "TWO")]
     finally:
         service.shutdown()
 

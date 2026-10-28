@@ -47,10 +47,11 @@ from a recording with the same pipeline the live overlay uses (see
   centred in the area.
   Long translations wrap at the same size.
 - **Three translators.** DeepL (the default: fast, strong for European
-  languages, free tier), Claude (glossary, tone notes, context between
-  lines, any language), or an offline CTranslate2 model (no network; an
-  optional download). A faster translator can show a draft while a slower
-  one answers.
+  languages, free tier), Claude (glossary, tone notes, any language), or
+  an offline CTranslate2 model (no network; an optional download). DeepL
+  and Claude both see the recent lines as context, so names and pronouns
+  stay consistent across a scene. A faster translator can show a draft
+  while a slower one answers.
 - **Nothing is translated twice.** A per-game cache answers repeated lines
   instantly, and a game's script can be translated up front in one batch.
 - **Settings apply as you change them.** Edits in the settings window

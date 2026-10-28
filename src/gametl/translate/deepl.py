@@ -6,6 +6,10 @@ in front of Claude.
 Key: handed in by the app (settings window, Credential Manager) or the
 DEEPL_AUTH_KEY environment variable. Keys ending in ":fx" are free tier and
 go to the free endpoint.
+
+Each request carries the recent source lines as DeepL's `context`: text it
+reads but does not translate, so a name that was a person two lines ago
+stays a person ("Hemingway", not the bird) and pronouns follow the scene.
 """
 
 from __future__ import annotations
@@ -30,6 +34,23 @@ _CODES = {
 # fmt: on
 # DeepL no longer accepts the bare codes as targets: a variant must be named.
 _TARGET_VARIANTS = {"EN": "EN-US", "PT": "PT-PT"}
+CONTEXT_CHARS = 2000  # the most recent source lines that fit, newest last
+
+
+def context_text(context: list[tuple[str, str]] | None) -> str:
+    """The recent source lines (oldest first) as one text for DeepL's
+    `context`, trimmed from the old end to CONTEXT_CHARS."""
+    lines: list[str] = []
+    size = 0
+    for source, _translation in reversed(context or []):
+        source = source.strip()
+        if not source:
+            continue
+        if size + len(source) + 1 > CONTEXT_CHARS:
+            break
+        lines.append(source)
+        size += len(source) + 1
+    return "\n".join(reversed(lines))
 
 
 def deepl_code(lang: str | None, target: bool = False) -> str | None:
@@ -72,6 +93,9 @@ class DeepLTranslator:
         source = deepl_code(request.source_lang)
         if source:
             body["source_lang"] = source
+        context = context_text(request.context)
+        if context:
+            body["context"] = context
         try:
             response = self._session.post(
                 self.url,

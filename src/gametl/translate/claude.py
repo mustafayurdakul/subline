@@ -154,8 +154,8 @@ class ClaudeTranslator:
         payload: dict[str, Any] = {
             "target_language": language_name(request.target_lang) or request.target_lang,
         }
-        if request.context:
-            payload["context"] = [[source, target] for source, target in request.context]
+        if request.context:  # the last few pairs: enough for consistency, cheap in tokens
+            payload["context"] = [[source, target] for source, target in request.context[-10:]]
         if self.structured:
             payload["items"] = [{"id": i, "text": t} for i, t in enumerate(request.texts)]
         else:

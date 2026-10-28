@@ -84,7 +84,7 @@ class TranslationService:
         target_lang: str = "tr",
         source_lang: str | None = None,
         workers: int = 2,
-        context_lines: int = 10,
+        context_lines: int = 30,  # recent (source, translation) pairs handed to the translator as context
         retry_cooldown: float = 3.0,
         on_status: Callable[[str], None] | None = None,
         draft_translator: Translator | None = None,
@@ -130,6 +130,9 @@ class TranslationService:
         hit = self.cache.get(text, self.target_lang)
         if hit is not None:
             self.stats["cache_hits"] += 1
+            with self._lock:  # a line shown from the cache is part of the scene too
+                if not self._context or self._context[-1][0] != text:
+                    self._context.append((text, hit))
         return hit
 
     def lookup_best(self, text: str) -> tuple[str, bool] | None:
