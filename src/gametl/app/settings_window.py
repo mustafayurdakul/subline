@@ -19,7 +19,6 @@ from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from .. import APP_NAME
 from .config import ProfileStore, Settings
 from .credentials import MemorySecretStore
-from .fonts import load_bundled_fonts
 from .icon import make_icon
 from .preview import PROVIDER, PreviewImageProvider
 from .settings_backend import SettingsBackend, qml_dir
@@ -54,7 +53,6 @@ class SettingsWindow(QQuickView):
         self.resize(WINDOW_SIZE)
         self.engine().warnings.connect(self._on_warnings)
         self.rootContext().setContextProperty("backend", backend)
-        load_bundled_fonts()
         self.preview = PreviewImageProvider(backend)
         self.engine().addImageProvider(PROVIDER, self.preview)
         self.setSource(QUrl.fromLocalFile(str(qml_dir() / "Main.qml")))

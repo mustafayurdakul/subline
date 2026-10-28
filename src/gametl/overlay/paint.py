@@ -4,28 +4,25 @@ renderer all paint through one BlockPainter, so they look the same.
 
 Styles:
 - "subtitle": one fixed font size and colour, centred in the selected zone,
-  on a pill, with a soft shadow, or bare with an outline; a band covers the
+  on a pill (plain text), with a soft shadow, or bare with an outline; a band covers the
   source line when the text is drawn elsewhere;
 - "patch": the sampled background colour painted over the original and the
   translation drawn in the sampled text colour, in place;
-- "pill": a dark rounded box with white outlined text, in place (for busy
+- "pill": a dark rounded box with white text, in place (for busy
   backgrounds);
 - "outline": outlined text only, in place.
 
 Line heights come from the font's own metrics (ascent plus descent), so
-descenders are never clipped. Grain, when asked for, is a fixed film-like
-texture over the glyphs of a line, rendered once per line and cached.
+descenders are never clipped.
 """
 
 from __future__ import annotations
 
-import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-import numpy as np
-from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPen
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
 from ..geometry import RGB, Box
 from ..layout.fit import TextLayout, fit_text
@@ -51,7 +48,7 @@ _SHADOW_LAYERS = [
     ((0, 2), QColor(0, 0, 0, 70)),
     ((2, 0), QColor(0, 0, 0, 70)),
 ]
-_CACHE_SIZE = 512  # layouts, and grained line images
+_CACHE_SIZE = 512  # layouts
 _REFERENCE_SIZES = (12, 16, 24, 32, 48, 100)  # font sizes the line-height ratio is measured at
 
 
@@ -76,7 +73,6 @@ class RenderBlock:
     background: str = "pill"  # "pill" | "shadow" | "none"
     pill_alpha: int = 230
     weight: str = "regular"  # a key of WEIGHTS
-    grain: int = 0  # film grain over the glyphs, per cent of brightness; 0 = none
     hide_source: bool = True  # cover the source line when the text is drawn elsewhere
 
 
@@ -128,24 +124,9 @@ def _split_growth(extra: int, room_above: int, room_below: int) -> tuple[int, in
     return min(extra - down, room_above), down
 
 
-def grain_image(image: QImage, strength: int, seed: int) -> None:
-    """Film grain over the drawn pixels of `image` (ARGB32, in place): each
-    one's brightness varies by a normal noise of `strength` per cent. The
-    seed fixes the pattern, so a line never shimmers between repaints."""
-    width, height = image.width(), image.height()
-    if strength <= 0 or width == 0 or height == 0:
-        return
-    pixels = np.frombuffer(image.bits(), dtype=np.uint8).reshape(height, image.bytesPerLine())
-    bgra = pixels[:, : width * 4].reshape(height, width, 4)
-    mask = bgra[:, :, 3] > 0
-    noise = np.random.default_rng(seed).normal(0.0, strength / 100.0, (height, width))
-    factor = np.clip(1.0 + noise, 0.55, 1.25)[mask][:, None]
-    bgra[:, :, :3][mask] = np.clip(bgra[:, :, :3][mask] * factor, 0, 255).astype(np.uint8)
-
-
 class BlockPainter:
     """Lays out and paints render blocks with one font family, caching
-    fonts, metrics, layouts and grained lines."""
+    fonts, metrics and layouts."""
 
     def __init__(self, font_family: str = "Segoe UI", padding: int = 3) -> None:
         self.font_family = font_family
@@ -153,7 +134,6 @@ class BlockPainter:
         self._fonts: dict[tuple[int, str], tuple[QFont, QFontMetrics]] = {}  # by (pixel size, weight)
         self._spacing: dict[str, float] = {}  # line height / font pixel size, per weight
         self._layouts: dict[tuple, TextLayout] = {}
-        self._lines: dict[tuple, QImage] = {}  # grained lines
 
     def set_font(self, family: str) -> None:
         if family != self.font_family:
@@ -161,7 +141,6 @@ class BlockPainter:
             self._fonts.clear()
             self._spacing.clear()
             self._layouts.clear()
-            self._lines.clear()
 
     # -- fonts and layout ----------------------------------------------------------
 
@@ -308,7 +287,7 @@ class BlockPainter:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(PILL_COLOR)
             p.drawRoundedRect(rect, 6, 6)
-            fg, decoration = WHITE, "outline"
+            fg, decoration = WHITE, "none"  # the box is the contrast, as on the subtitle pill
         else:  # outline
             fg = QColor(*block.fg) if block.fg != block.bg else WHITE
             decoration = "outline"
@@ -337,7 +316,12 @@ class BlockPainter:
             if block.background == "pill":
                 p.setBrush(pill_color)
                 p.drawRoundedRect(placed.pill, 8, 8)
-        decoration = "shadow" if block.background == "shadow" else "outline"
+        if block.background == "shadow":
+            decoration = "shadow"
+        elif block.background == "none":
+            decoration = "outline"  # bare text needs an edge to read over anything
+        else:
+            decoration = "none"  # the pill is the contrast; an outline would only thicken the letters
         self._draw_lines(
             p, placed.layout.lines, placed.text, placed.layout.line_height, QColor(*block.fg), decoration,
             placed.layout.font_px, block,
@@ -370,28 +354,6 @@ class BlockPainter:
                 for (dx, dy), color in _SHADOW_LAYERS:
                     p.setPen(color)
                     p.drawText(rect.translated(dx, dy), flags, line)
-            if block.grain > 0:
-                p.drawImage(QPoint(rect.left(), rect.top()), self._grained_line(line, font, rect.size(), fg, block))
-            else:
-                p.setPen(fg)
-                p.drawText(rect, flags, line)
+            p.setPen(fg)
+            p.drawText(rect, flags, line)
             top += line_h
-
-    def _grained_line(self, line: str, font: QFont, size, fg: QColor, block: RenderBlock) -> QImage:
-        """One line of text with its grain, drawn once and kept."""
-        font_key = (font.pixelSize(), block.weight)
-        key = (line, font_key, size.width(), size.height(), fg.rgb(), block.grain)
-
-        def build() -> QImage:
-            image = QImage(size, QImage.Format.Format_ARGB32)
-            image.fill(0)
-            painter = QPainter(image)
-            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-            painter.setFont(font)
-            painter.setPen(fg)
-            painter.drawText(QRect(0, 0, size.width(), size.height()), Qt.AlignmentFlag.AlignCenter, line)
-            painter.end()
-            grain_image(image, block.grain, zlib.crc32(f"{line}{font_key}".encode()))
-            return image
-
-        return self._cached(self._lines, key, build)

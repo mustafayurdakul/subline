@@ -36,7 +36,6 @@ def preview_block(settings: Settings, width: int, height: int) -> RenderBlock:
         background=settings.subtitle_background,
         pill_alpha=max(0, min(255, int(settings.subtitle_pill_alpha))),
         weight=settings.subtitle_weight,
-        grain=max(0, min(100, int(settings.subtitle_grain))),
         hide_source=False,
     )
 

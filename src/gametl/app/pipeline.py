@@ -45,7 +45,6 @@ class PipelineConfig:
     subtitle_background: str = "pill"  # "pill" | "shadow" | "none"
     subtitle_pill_alpha: int = 230
     subtitle_weight: str = "regular"
-    subtitle_grain: int = 0
     subtitle_position: str = "bottom"  # "bottom" | "source" | "center"
     subtitle_hide_source: bool = True
     # Which blocks in the zone are subtitles rather than HUD text: centred in the
@@ -414,7 +413,6 @@ class PipelineThread(QThread):
                 background=cfg.subtitle_background,
                 pill_alpha=cfg.subtitle_pill_alpha,
                 weight=cfg.subtitle_weight,
-                grain=cfg.subtitle_grain,
                 hide_source=cfg.subtitle_hide_source,
             )
         # In-place mode: patch the original out in its own colours, or use a pill

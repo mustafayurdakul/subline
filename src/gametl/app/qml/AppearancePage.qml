@@ -31,17 +31,12 @@ ColumnLayout {
         }
         SettingRow {
             label: "Font"
-            helper: "The app's own fonts come first; they look the same on every computer."
+            helper: "Any font installed on this computer."
             Combo { key: "font"; options: backend.fontFamilies; editable: false; fontPreview: true; implicitWidth: 220 }
         }
         SettingRow {
             label: "Weight"
             Segmented { key: "subtitle_weight"; options: ["Regular", "Medium", "SemiBold", "Bold"]; values: ["regular", "medium", "semibold", "bold"] }
-        }
-        SettingRow {
-            label: "Grain"
-            helper: "A fine film texture over the letters, like printed titles."
-            Gauge { key: "subtitle_grain"; from: 0; to: 30; suffix: " %"; specialText: "off" }
         }
     }
 

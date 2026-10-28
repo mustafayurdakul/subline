@@ -18,7 +18,6 @@ carry; the build collects the rest from the installed packages.
 | [NumPy](https://numpy.org/) | arrays | BSD-3-Clause (with parts under 0BSD, MIT, Zlib, CC0) |
 | [Pillow](https://python-pillow.org/) | images, screenshots | MIT-CMU (HPND) |
 | [Qt for Python](https://doc.qt.io/qtforpython-6/) (PySide6, shiboken6) and Qt 6 | overlay window, settings window, tray | LGPL-3.0 (see below) |
-| [Source Sans 3](https://github.com/adobe-fonts/source-sans) (Adobe), [Fira Sans](https://github.com/mozilla/Fira) (Mozilla, Telefonica), [Barlow Semi Condensed](https://github.com/jpt/barlow) (Jeremy Tribby) | subtitle fonts shipped with the app (`_internal/gametl/fonts`) | SIL Open Font License 1.1 (texts in `licenses/source-sans-3`, `licenses/fira-sans`, `licenses/barlow-semi-condensed`) |
 | [windows-capture](https://github.com/NiiightmareXD/windows-capture) | Windows Graphics Capture | MIT |
 | [CTranslate2](https://github.com/OpenNMT/CTranslate2) | offline translation; not bundled, downloaded on demand (see below) | MIT |
 | [SentencePiece](https://github.com/google/sentencepiece) | tokenisation for offline models; downloaded with CTranslate2 | Apache-2.0 |

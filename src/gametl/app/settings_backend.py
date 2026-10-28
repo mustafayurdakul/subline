@@ -28,7 +28,6 @@ from .. import APP_NAME, __version__
 from .cleanup import describe_data
 from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
-from .fonts import BUNDLED_FAMILIES
 from .hotkeys import parse_combo
 from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
 
@@ -325,12 +324,11 @@ class SettingsBackend(QObject):
     hotkeyLabels = Property("QVariantMap", lambda self: dict(HOTKEY_LABELS), constant=True)
 
     def _font_families(self) -> list[str]:
-        """The fonts the app brings along, then the computer's ("@" names
-        are Windows' vertical variants), for the Appearance page."""
+        """The computer's font families ("@" names are Windows' vertical
+        variants), for the Appearance page."""
         if QGuiApplication.instance() is None:
-            return list(BUNDLED_FAMILIES)
-        installed = [n for n in QFontDatabase.families() if not n.startswith("@") and n not in BUNDLED_FAMILIES]
-        return [*BUNDLED_FAMILIES, *installed]
+            return []
+        return [n for n in QFontDatabase.families() if not n.startswith("@")]
 
     fontFamilies = Property("QStringList", _font_families, constant=True)
     previewStamp = Property(int, lambda self: self._preview_stamp, notify=previewChanged)
