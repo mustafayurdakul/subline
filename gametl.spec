@@ -9,7 +9,10 @@
 # its wheels into %APPDATA%\gametl\runtime on the first download.
 # The settings window is Qt Quick: its QML pages ship under gametl/app/qml and
 # the Qt QML modules they import (QtQuick, Controls.Basic, Layouts) come from
-# PySide6's qml folder, pruned to those modules.
+# PySide6's qml folder, pruned to those modules. Qt itself is pruned to the
+# libraries and plugins those modules and the widgets need (QT_LIBS, QT_PLUGINS
+# below): PySide6 Essentials alone is 200 MB unpacked, mostly styles, tools
+# and modules this app never loads.
 # The licence, the third-party notices and every bundled component's licence
 # text go next to the executables (LICENSE, THIRD_PARTY_NOTICES.md, licenses/).
 # Build with:  uv run --group build python scripts/build.py
@@ -22,7 +25,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, co
 
 RUNTIME_DEPENDENCIES = [
     "windows-capture", "rapidocr", "onnxruntime-directml", "opencv-python-headless", "numpy", "pillow",
-    "pyside6", "anthropic", "requests", "cryptography",
+    "pyside6-essentials", "anthropic", "requests", "cryptography",
 ]  # fmt: skip
 
 
@@ -92,16 +95,11 @@ hiddenimports = (
 excludes = [
     "tkinter", "unittest", "pydoc", "matplotlib", "IPython", "notebook", "torch", "transformers",
     "ctranslate2", "sentencepiece",  # downloaded on demand, see above
-    "PySide6.QtPdf",
-    "PySide6.QtSvg", "PySide6.QtMultimedia", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
-    "PySide6.QtWebChannel", "PySide6.QtPositioning", "PySide6.QtLocation", "PySide6.QtQuickWidgets",
-    "PySide6.QtQuick3D", "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtXml", "PySide6.QtBluetooth",
-    "PySide6.QtNfc", "PySide6.QtSerialPort", "PySide6.QtSensors", "PySide6.QtCharts",
-    "PySide6.QtDataVisualization", "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtRemoteObjects",
-    "PySide6.QtScxml", "PySide6.QtStateMachine", "PySide6.QtTextToSpeech", "PySide6.QtHttpServer",
-    "PySide6.QtWebSockets", "PySide6.QtDesigner", "PySide6.QtHelp", "PySide6.QtUiTools",
-    "PySide6.QtPrintSupport", "PySide6.QtConcurrent", "PySide6.QtDBus", "PySide6.QtGraphs",
-    "PySide6.QtSpatialAudio", "PySide6.QtSerialBus",
+    # PySide6 Essentials modules the app never imports (the add-ons are not installed at all)
+    "PySide6.QtSvg", "PySide6.QtSvgWidgets", "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtXml",
+    "PySide6.QtQuickWidgets", "PySide6.QtQuickTest", "PySide6.QtQuickControls2", "PySide6.QtOpenGLWidgets",
+    "PySide6.QtPrintSupport", "PySide6.QtConcurrent", "PySide6.QtDBus", "PySide6.QtDesigner", "PySide6.QtHelp",
+    "PySide6.QtUiTools", "PySide6.QtLabsStyleKit",
 ]  # fmt: skip
 
 a = Analysis(
@@ -116,8 +114,11 @@ a = Analysis(
     noarchive=False,
 )
 
-# The QML modules the settings window imports, and nothing else from PySide6's
-# qml folder (the rest, 3D, WebEngine, Multimedia and so on, is tens of MB).
+# What of PySide6 ships, by destination path. The hooks collect far more than
+# the app loads: every Qt library a QML plugin links against (the add-ons when
+# installed), every Controls style, the software OpenGL fallback (20 MB, unused
+# with the raster widgets and the software scene graph), tools and plugins.
+# The hooks place PySide6's files under PySide6/ (Windows wheels) or PySide6/Qt/.
 QML_KEEP = (
     "PySide6/qml/QtQml/",
     "PySide6/qml/QtQuick/qmldir",
@@ -132,16 +133,44 @@ QML_KEEP = (
     "PySide6/qml/QtQuick/Layouts/",
     "PySide6/qml/QtQuick/Window/",
 )
+# Qt6<Name> libraries: what the widgets, QtQuick, Controls.Basic, Layouts and
+# the QtQml modules link against (ldd over the kept plugins), plus Svg for the
+# icon and image plugins.
+QT_LIBS = {
+    "Core", "Gui", "Widgets", "Network", "DBus", "OpenGL", "Svg",
+    "Qml", "QmlModels", "QmlMeta", "QmlWorkerScript", "QmlCore", "QmlLocalStorage", "QmlNetwork",
+    "QmlXmlListModel", "QmlDesignSupport",
+    "Quick", "QuickTemplates2", "QuickControls2", "QuickControls2Impl", "QuickControls2Basic",
+    "QuickControls2BasicStyleImpl", "QuickLayouts",
+}  # fmt: skip
+QT_PLUGINS = {"platforms", "styles", "imageformats", "iconengines", "platforminputcontexts", "generic", "tls",
+              "networkinformation", "platformthemes", "xcbglintegrations"}  # fmt: skip
+QT_PLATFORMS = {"qwindows", "qoffscreen", "qminimal", "qxcb"}  # the app, the CI check, and a Linux dev build
+DROP_NAMES = ("opengl32sw", "opencv_videoio_ffmpeg")  # software OpenGL; cv2's video reader (30 MB, never used)
+
+_QT_LIB = re.compile(r"^PySide6/(?:lib/)?(?:lib)?Qt6([A-Za-z0-9]+)\.(?:dll|so)")
 
 
-def keep_qml(entry) -> bool:
-    # The hooks place the folder at PySide6/qml (Windows wheels) or PySide6/Qt/qml.
-    dest = entry[0].replace("\\", "/").replace("PySide6/Qt/qml/", "PySide6/qml/")
-    return not dest.startswith("PySide6/qml/") or dest.startswith(QML_KEEP)
+def keep(entry) -> bool:
+    dest = entry[0].replace("\\", "/").replace("PySide6/Qt/", "PySide6/")
+    name = dest.rsplit("/", 1)[-1]
+    if name.startswith(DROP_NAMES):
+        return False
+    if dest.startswith("PySide6/qml/"):
+        return dest.startswith(QML_KEEP)
+    if dest.startswith("PySide6/translations/"):
+        return False  # Qt's own UI strings in 30 languages; the app's UI is English
+    if dest.startswith("PySide6/plugins/"):
+        parts = dest.split("/")
+        if len(parts) < 4 or parts[2] not in QT_PLUGINS:
+            return False
+        return parts[2] != "platforms" or name.split(".")[0].removeprefix("lib") in QT_PLATFORMS
+    match = _QT_LIB.match(dest)
+    return match is None or match.group(1) in QT_LIBS
 
 
-a.datas = [entry for entry in a.datas if keep_qml(entry)]
-a.binaries = [entry for entry in a.binaries if keep_qml(entry)]
+a.datas = [entry for entry in a.datas if keep(entry)]
+a.binaries = [entry for entry in a.binaries if keep(entry)]
 
 pyz = PYZ(a.pure, a.zipped_data)
 
