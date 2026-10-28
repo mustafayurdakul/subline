@@ -108,6 +108,7 @@ class PipelineThread(QThread):
         self._reset = False
         self._next_cfg: PipelineConfig | None = None  # handed over by update_config, taken up on this thread
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
+        self._held: dict[tuple[int, str], tuple[int, int]] = {}  # (block id, text) -> (font px, anchor y) while shown
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
 
@@ -128,6 +129,7 @@ class PipelineThread(QThread):
         if cfg is None:
             return
         old, self.cfg = self.cfg, cfg
+        self._held.clear()  # sizes and anchors may follow the new settings
         if _tracking_fields(cfg) != _tracking_fields(old):
             self._forget_blocks(reset_style=cfg.roi != old.roi)
 
@@ -165,6 +167,7 @@ class PipelineThread(QThread):
 
     def _forget_blocks(self, reset_style: bool) -> None:
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
+        self._held.clear()
         self._last_thumb = None
         if reset_style:
             self.style_memory = StyleMemory()
@@ -263,6 +266,8 @@ class PipelineThread(QThread):
         """Fill in the translations that are ready (queueing the rest) and
         return what the overlay should draw for them."""
         self._translate_ready(blocks, frame)
+        live = {(b.id, b.text) for b in blocks}
+        self._held = {key: held for key, held in self._held.items() if key in live}
         area = self._area(frame)
         return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
 
@@ -397,8 +402,15 @@ class PipelineThread(QThread):
         bg, fg = memory.colors(block.bbox) or block.colors or ((0, 0, 0), (255, 255, 255))
         if self.subtitle_mode:
             cfg = self.cfg
-            # One size and one colour for the whole zone, so lines never jump.
-            font_px = cfg.subtitle_font_px or self.zone_style.font_px(memory.font_px(block.bbox, n_lines))
+            # One size and one colour for the whole zone, so lines never jump. A line's size and
+            # anchor are fixed when it is first drawn and held while it is shown: a re-read of the
+            # same text (a wider box once a fade-in ends, OCR jitter) must not move or resize it.
+            key = (block.id, block.text)
+            held = self._held.get(key)
+            if held is None:
+                font_px = cfg.subtitle_font_px or self.zone_style.font_px(memory.font_px(block.bbox, n_lines))
+                held = self._held[key] = (font_px, (block.bbox[1] + block.bbox[3]) // 2)
+            font_px, anchor_y = held
             text_rgb = cfg.subtitle_color or bgr_to_rgb(self.zone_style.fg or fg)
             return RenderBlock(
                 bbox=block.bbox,
@@ -413,6 +425,7 @@ class PipelineThread(QThread):
                 background=cfg.subtitle_background,
                 pill_alpha=cfg.subtitle_pill_alpha,
                 weight=cfg.subtitle_weight,
+                anchor_y=anchor_y,
                 hide_source=cfg.subtitle_hide_source,
             )
         # In-place mode: patch the original out in its own colours, or use a pill

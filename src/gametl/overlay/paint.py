@@ -73,6 +73,7 @@ class RenderBlock:
     background: str = "pill"  # "pill" | "shadow" | "none"
     pill_alpha: int = 230
     weight: str = "regular"  # a key of WEIGHTS
+    anchor_y: int | None = None  # subtitle at "source": the line's centre to hold; None = the box's own
     hide_source: bool = True  # cover the source line when the text is drawn elsewhere
 
 
@@ -244,7 +245,8 @@ class BlockPainter:
         # metrics_at registers the font even when the wrapper never measured (a one-word line).
         metrics = self.metrics_at(layout.font_px, block.weight)
         text_w = min(width, max(metrics.horizontalAdvance(line) for line in layout.lines))
-        text = subtitle_rect(block.zone, (y0 + y1) // 2, text_w, layout.height, block.position, margin)
+        anchor = block.anchor_y if block.anchor_y is not None else (y0 + y1) // 2
+        text = subtitle_rect(block.zone, anchor, text_w, layout.height, block.position, margin)
         # The pill clears the descenders below and the ascenders above by the font's own measure.
         pill = text.adjusted(
             -font_px // 2, -max(2, metrics.descent() // 2), font_px // 2, max(2, metrics.descent() // 2)
@@ -299,14 +301,13 @@ class BlockPainter:
 
     def _paint_subtitle(self, p: QPainter, block: RenderBlock) -> None:
         """One fixed style, centred in the zone. Background "pill": a
-        rounded box, merged with the band over the source line when they
-        overlap; "shadow": the text with a soft drop shadow, no box; "none":
-        outlined text. The band hides the source line when the text is
-        drawn elsewhere (if `hide_source`)."""
+        rounded box sized by the text; "shadow": the text with a soft drop
+        shadow, no box; "none": outlined text. With `hide_source` a band
+        covers the source line, merged into the pill when they overlap."""
         placed = self.place_subtitle(block)
         p.setPen(Qt.PenStyle.NoPen)
         pill_color = QColor(0, 0, 0, max(0, min(255, block.pill_alpha)))
-        if block.background == "pill" and placed.pill.intersects(placed.source):
+        if block.background == "pill" and block.hide_source and placed.pill.intersects(placed.source):
             p.setBrush(pill_color)
             p.drawRoundedRect(placed.pill.united(placed.source), 8, 8)
         else:
