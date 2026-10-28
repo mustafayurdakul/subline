@@ -183,16 +183,18 @@ def test_source_band_hides_the_original_whatever_the_pill_opacity(overlay: Block
 
 @pytest.mark.parametrize("position", ["source", "bottom"])
 def test_band_merged_into_a_light_pill_still_hides_the_original(overlay: BlockPainter, position: str) -> None:
-    # A wide source line in a thin zone: the pill and the band overlap and are drawn as one shape.
-    block = at_source((20, 262, 380, 282), hide_source=True, pill_alpha=60, position=position)
+    # A wide, thin source line: the pill and the band overlap and are drawn as one shape, and the pill
+    # (sized by the 24 px font) reaches below the band whatever fonts the platform has.
+    block = at_source((20, 266, 380, 278), hide_source=True, pill_alpha=60, position=position)
     placed = overlay.place_subtitle(block)
     assert placed.pill.intersects(placed.source)
     alpha = paint(overlay, block)
     assert alpha[placed.source.center().y(), placed.source.left() + 8] == 230  # over the source, outside the text
     # The rest of the pill keeps the opacity chosen: only the part over the source line is darkened.
+    # Sampled on the pill's last full row, past its rounded corner and left of the text.
     below = placed.pill.bottom() - 1
     assert below > placed.source.bottom()
-    assert alpha[below, placed.pill.left() + 4] == 60
+    assert alpha[below, placed.pill.left() + 10] == 60
 
 
 def test_weights_are_distinct_fonts_and_bold_measures_wider(overlay: BlockPainter) -> None:

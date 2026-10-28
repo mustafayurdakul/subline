@@ -314,16 +314,15 @@ def test_the_preview_follows_every_edit(qapp, tmp_path: Path) -> None:
 
 
 def test_the_preview_shows_size_and_hiding_as_in_a_1080p_game(qapp) -> None:
-    from gametl.app.preview import render_preview
-
-    def opaque_rows(settings: Settings, width: int = 960, height: int = 270) -> list[int]:
-        image = render_preview(settings, width, height)
-        return [y for y in range(height) if any(image.pixelColor(x, y).alpha() > 0 for x in range(0, width, 3))]
+    from gametl.app.preview import preview_blocks, render_preview
+    from gametl.overlay.paint import BlockPainter
 
     # Sizes are to scale (half of 1920 wide: half the pixels), not clamped to the area: 100 and 150 px differ.
-    small = opaque_rows(Settings(subtitle_font_px=100, subtitle_background="none", subtitle_position="center"))
-    large = opaque_rows(Settings(subtitle_font_px=150, subtitle_background="none", subtitle_position="center"))
-    assert len(large) > len(small)
+    # Read from the blocks, not from painted rows: the offscreen platform on a CI runner may have no fonts.
+    painter = BlockPainter()
+    for game_px, shown_px in ((100, 50), (150, 75)):
+        blocks = preview_blocks(Settings(subtitle_font_px=game_px), 960, 270, painter)
+        assert [b.font_px for b in blocks] == [shown_px, shown_px]  # the game's line and the translation alike
     # The game's own line is drawn, so hiding it shows: the band covers it in the dark.
     shown = render_preview(Settings(subtitle_background="none", subtitle_hide_source=False), 960, 270)
     hidden = render_preview(Settings(subtitle_background="none", subtitle_hide_source=True), 960, 270)
