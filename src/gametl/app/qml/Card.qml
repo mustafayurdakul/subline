@@ -22,7 +22,7 @@ Rectangle {
         x: root.padding
         y: root.padding
         width: root.width - 2 * root.padding
-        spacing: Theme.space
+        spacing: 1.5 * Theme.space
 
         ColumnLayout {
             Layout.fillWidth: true
@@ -42,7 +42,7 @@ Rectangle {
         ColumnLayout {
             id: body
             Layout.fillWidth: true
-            spacing: Theme.space
+            spacing: 2 * Theme.space  // between rows: room enough that each reads as its own line
         }
     }
 }

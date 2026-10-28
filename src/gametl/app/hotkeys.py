@@ -71,34 +71,27 @@ class GlobalHotkeys(QAbstractNativeEventFilter):
         super().__init__()
         self._callbacks: dict[int, Callable[[], None]] = {}
         self._names: dict[str, int] = {}
-        self._combos: dict[str, tuple[int, int]] = {}  # name -> (modifiers, virtual key) registered
         self._next_id = 1
 
     def register(self, name: str, combo: str, callback: Callable[[], None]) -> bool:
-        """Register (or re-register) `name` as `combo`. False when the combo
-        is invalid or already taken by another program; the binding `name`
-        had before stays in place then, so a typo never loses a working
-        hotkey."""
+        """Bind `name` to `combo`, releasing whatever `name` held before
+        (re-registering the same combination works). False when the combo
+        is invalid or another program holds it; `name` is unbound then."""
+        self.unregister(name)
         try:
             mods, vk = parse_combo(combo)
         except ValueError:
             return False
-        if self._combos.get(name) == (mods, vk):
-            self._callbacks[self._names[name]] = callback  # same keys: only the callback may change
-            return True
         hotkey_id = self._next_id
         if not _user32().RegisterHotKey(None, hotkey_id, mods | MOD_NOREPEAT, vk):
             return False
         self._next_id += 1
-        self.unregister(name)  # the old combination is released only once the new one holds
         self._callbacks[hotkey_id] = callback
         self._names[name] = hotkey_id
-        self._combos[name] = (mods, vk)
         return True
 
     def unregister(self, name: str) -> None:
         hotkey_id = self._names.pop(name, None)
-        self._combos.pop(name, None)
         if hotkey_id is not None:
             _user32().UnregisterHotKey(None, hotkey_id)
             self._callbacks.pop(hotkey_id, None)

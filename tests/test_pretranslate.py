@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from gametl.app.pretranslate import positive_int
 from gametl.translate.cache import TranslationCache
 from gametl.translate.claude import ClaudeTranslator
 from gametl.translate.pretranslate import (
@@ -49,6 +53,7 @@ def test_load_json_and_csv(tmp_path: Path) -> None:
 def test_chunked() -> None:
     assert chunked(["a", "b", "c"], 2) == [["a", "b"], ["c"]]
     assert chunked([], 5) == []
+    assert chunked(["a", "b"], 0) == [["a"], ["b"]]  # never empty chunks, each a paid request
 
 
 class StubMessages:
@@ -60,6 +65,13 @@ class StubMessages:
         payload = json.loads(kwargs["messages"][0]["content"])
         body = json.dumps({"items": [t.upper() for t in payload["items"]]})
         return text_response(body, usage=SimpleNamespace(input_tokens=10, output_tokens=5))
+
+
+def test_chunk_size_below_one_is_refused_on_the_command_line() -> None:
+    assert positive_int("1") == 1 and positive_int("50") == 50
+    for text, message in (("0", "must be 1 or more"), ("-3", "must be 1 or more"), ("ten", "not a whole number")):
+        with pytest.raises(argparse.ArgumentTypeError, match=message):
+            positive_int(text)
 
 
 def test_pretranslate_sync_fills_cache_and_skips_known(tmp_path: Path) -> None:
@@ -123,6 +135,25 @@ def test_batch_submit_save_and_collect(tmp_path: Path) -> None:
     assert (ended, added, failed) == (True, 3, 0)
     assert cache.get("Run!", "tr") == "TR Run!"
     assert submit_batch(["Run!"], translator, cache, "tr", client=client) is None  # all cached
+
+
+def test_a_chunk_whose_reply_lost_an_item_counts_as_failed(tmp_path: Path) -> None:
+    """A reply one item short cannot be matched by position: nothing of it
+    is cached, rather than every later line under the wrong source."""
+    batches = StubBatches()
+    client = SimpleNamespace(messages=SimpleNamespace(batches=batches))
+    translator = ClaudeTranslator(client=client, source_lang="en")
+    cache = TranslationCache(tmp_path / "c.json")
+    job = submit_batch(["A", "B", "C"], translator, cache, "tr", chunk_size=3, client=client)
+    assert job is not None
+    batches.status = "ended"
+    short = json.dumps({"items": ["B-cevap", "C-cevap"]})
+    message = SimpleNamespace(content=[SimpleNamespace(type="text", text=short)])
+    batches.results = lambda batch_id: [
+        SimpleNamespace(custom_id="chunk-00000", result=SimpleNamespace(type="succeeded", message=message))
+    ]
+    assert collect_batch(job, cache, client=client) == (True, 0, 1)
+    assert cache.get("A", "tr") is None
 
 
 def test_batch_goes_through_the_translators_own_client_by_default(tmp_path: Path) -> None:

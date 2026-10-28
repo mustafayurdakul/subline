@@ -1,8 +1,11 @@
-"""Command: pre-translate a game's script into its translation cache.
+"""Command: pre-translate a game's script with Claude into its translation cache.
 
 gametl-pretranslate script.txt --game "Fake Game"            # Batches API, Opus 5.5, waits up to 10 min
 gametl-pretranslate script.srt --game "Fake Game" --sync     # normal API, immediate
 gametl-pretranslate --resume JOBFILE                         # collect a batch submitted earlier
+
+The lines land in the game's Claude cache, which the overlay reads only
+while its translator is Claude: run the overlay with Claude to see them.
 """
 
 from __future__ import annotations
@@ -21,6 +24,18 @@ from gametl.translate.pretranslate import BatchJob, load_lines, pretranslate_syn
 
 def say(text: str) -> None:
     print(text, flush=True)
+
+
+def positive_int(text: str) -> int:
+    """argparse type for --chunk-size: a whole number of 1 or more (a chunk
+    is one paid request; an empty one is never sent)."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return value
 
 
 def anthropic_client():
@@ -45,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--effort", default="low")
     p.add_argument("--glossary", help='JSON file {"term": "translation"}')
     p.add_argument("--tone", help="notes for the translator on tone and formality")
-    p.add_argument("--chunk-size", type=int, default=20)
+    p.add_argument("--chunk-size", type=positive_int, default=20, help="lines per request (default 20)")
     p.add_argument("--sync", action="store_true", help="use the normal API now instead of a batch")
     p.add_argument("--wait", type=float, default=600.0, help="seconds to wait for the batch (0 = submit and exit)")
     p.add_argument("--resume", metavar="JOBFILE", help="collect results of a batch job saved earlier")
@@ -85,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         api_key=anthropic_api_key(),
     )
     say(f"{len(lines)} lines from {args.script}; cache {cache_path} ({len(cache)} entries)")
+    say("the overlay uses these lines while its translator is Claude")
 
     if args.sync:
         added = pretranslate_sync(lines, translator, cache, args.target_lang, args.chunk_size, say)

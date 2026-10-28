@@ -14,8 +14,10 @@ import json
 import os
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 DEFAULT_HOTKEYS: dict[str, str] = {
     "toggle": "ctrl+shift+t",  # start / stop the overlay
@@ -44,9 +46,8 @@ class Settings:
     include_frame: bool = False  # read the title bar / frame too
     # The only area read and translated: x,y,w,h (fractions or px of the client area); empty = the whole area.
     roi: str = BOTTOM_STRIP
-    center_zone: bool = (
-        False  # keep a selected area symmetric about the client area's centre (Shift inverts while dragging)
-    )
+    # Keep a selected area symmetric about the client area's centre (Shift inverts while dragging).
+    center_area: bool = False
     # subtitle mode: with an area set, render translations in it with one fixed style
     render: str = "subtitle"  # "subtitle" | "inplace" (per-block, at the OCR box)
     subtitle_font_px: int = 0  # 0 = the game's own subtitle size, learned from the first lines and then held
@@ -62,7 +63,7 @@ class Settings:
     # languages and OCR
     lang: str = "en"  # OCR model language
     ocr_gpu: bool = False  # run OCR on the GPU through DirectML (any DirectX 12 card)
-    source_lang: str = "en"  # what the translator is told the text is in; empty = same as lang
+    source_lang: str = ""  # what the translator is told the text is in; empty = same as lang
     target_lang: str = "tr"
     # translation
     translator: str = "deepl"  # deepl | claude | offline | uppercase | echo | verbose
@@ -82,7 +83,7 @@ class Settings:
     short_line_confidence: float = 0.9  # a line of one or two letters needs this OCR confidence; 0 = off
     # pipeline
     fps: float = 10.0
-    full_scan_every: int = 0  # with a zone: also sweep the rest of the area every N frames (0 = never)
+    full_scan_every: int = 0  # in-place mode with an area: also sweep the rest every N OCR reads (0 = never)
     stable_frames: int = 1
     max_missing: int = 3
     # OCR waits while nothing in the read area changes this much: the strongest
@@ -106,8 +107,19 @@ class Settings:
         kwargs = {k: v for k, v in (data or {}).items() if k in known}
         if "subtitle_weight" not in kwargs and (data or {}).get("subtitle_bold"):
             kwargs["subtitle_weight"] = "bold"  # profiles from before weights had a bold switch
+        if "center_area" not in kwargs and "center_zone" in (data or {}):
+            kwargs["center_area"] = bool(data["center_zone"])  # its name up to 0.1.8
         if kwargs.get("font") in REMOVED_FONTS:
             kwargs["font"] = cls.font  # 0.1.6 and 0.1.7 shipped these; now only installed fonts are offered
+        if kwargs.get("source_lang") == "en" and kwargs.get("lang", cls.lang) != "en":
+            # Up to 0.1.8 every profile stored "en" as its default source language, which hid the OCR
+            # language from the translator. Saved beside another OCR language it is that old default.
+            kwargs["source_lang"] = ""
+        return cls._normalised(kwargs)
+
+    @classmethod
+    def _normalised(cls, kwargs: dict[str, Any]) -> Settings:
+        """Settings from known fields, the hotkey map filled in with the defaults and the lists copied."""
         settings = cls(**kwargs)
         settings.hotkeys = {**DEFAULT_HOTKEYS, **(settings.hotkeys or {})}
         settings.ignore_zones = list(settings.ignore_zones or [])
@@ -115,15 +127,13 @@ class Settings:
         return settings
 
     def copy(self) -> Settings:
-        return Settings.from_dict(self.to_dict())
+        """An independent copy. Not through from_dict: the upgrades of old
+        profiles there must not undo a value chosen in this session."""
+        return Settings._normalised(self.to_dict())
 
     def set_area(self, spec: str) -> None:
-        """Make `spec` the area to translate ('' for the whole window). A
-        chosen area is the whole point of reading, so the periodic sweep of
-        the rest is switched off with it."""
+        """Make `spec` the area to translate ('' for the whole window)."""
         self.roi = spec
-        if spec:
-            self.full_scan_every = 0
 
     @property
     def effective_source_lang(self) -> str:
@@ -136,6 +146,20 @@ def slug(text: str) -> str:
     distinguishable), everything else collapsed to one dash."""
     text = unicodedata.normalize("NFKC", text or "").casefold()
     return re.sub(r"[^\w]+|_+", "-", text).strip("-") or "game"
+
+
+def write_json_atomic(path: Path, data: Any) -> None:
+    """Write `data` as JSON to a temporary file beside `path`, then put it in
+    place: a crash or a full disk mid-write leaves the old file intact, never
+    a truncated one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)  # only left over when the write failed
 
 
 def app_dir() -> Path:
@@ -191,27 +215,48 @@ class ProfileStore:
 
     def save(self, name: str, settings: Settings) -> Path:
         path = self.path(name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(settings.to_dict(), fh, ensure_ascii=False, indent=2)
+        write_json_atomic(path, settings.to_dict())
         return path
 
     def delete(self, name: str) -> None:
+        """Remove a profile; the last profile used is forgotten with it."""
         path = self.path(name)
         if path.exists():
             path.unlink()
+        if self.last_profile == slug(name):
+            self.last_profile = None
 
-    def match_window(self, title: str) -> str | None:
-        """Name of the first profile whose window_match is in `title`."""
-        needle_title = (title or "").casefold()
-        for name in self.list():
+    def match_window(self, *titles: str) -> str | None:
+        """Name of a profile whose window_match is in one of `titles`
+        (case-insensitive). The last profile used is tried first, so of two
+        games that are both open, the one played last wins."""
+        haystacks = [title.casefold() for title in titles if title]
+        names = self.list()
+        last = self.last_profile
+        if last in names:
+            names.insert(0, names.pop(names.index(last)))
+        for name in names:
             try:
                 match = self.load(name).window_match.casefold()
             except (OSError, ValueError):
                 continue
-            if match and match in needle_title:
+            if match and any(match in haystack for haystack in haystacks):
                 return name
         return None
+
+    def remembered_profile(self, titles: Iterable[str]) -> tuple[str, Settings, bool] | None:
+        """The profile to carry on with: the one whose window is among the
+        open window `titles` (True: its game is running now), else the last
+        profile used (False). None when there is neither, or it cannot be read."""
+        name = self.match_window(*titles)
+        running = name is not None
+        name = name or self.last_profile
+        if not name or not self.exists(name):
+            return None
+        try:
+            return name, self.load(name), running
+        except (OSError, ValueError):
+            return None
 
     # -- config ------------------------------------------------------------
 
@@ -223,9 +268,7 @@ class ProfileStore:
             return {}
 
     def save_config(self, config: dict) -> None:
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.config_path, "w", encoding="utf-8") as fh:
-            json.dump(config, fh, ensure_ascii=False, indent=2)
+        write_json_atomic(self.config_path, config)
 
     @property
     def last_profile(self) -> str | None:

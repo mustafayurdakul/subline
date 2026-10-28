@@ -20,7 +20,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gametl.app.config import Settings
 from gametl.app.controller import parse_zone
+from gametl.app.pipeline import change_score, thumbnail
 from gametl.capture.base import Frame
 from gametl.capture.windows import (
     client_rect_on_screen,
@@ -33,13 +35,16 @@ from gametl.ocr.base import OcrResult
 from gametl.ocr.rapid import RapidOcrEngine
 
 
-def frame_diff(previous: np.ndarray | None, image: np.ndarray) -> tuple[float, np.ndarray]:
-    """Mean absolute difference (0..255) between `image` and the previous
-    thumbnail, on a 1/8-scale grey thumbnail; returns (diff, new thumbnail)."""
-    thumb = cv2.resize(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), None, fx=0.125, fy=0.125)
+def frame_change(previous: np.ndarray | None, image: np.ndarray) -> tuple[float, np.ndarray]:
+    """How much `image` changed since the previous thumbnail, measured as the
+    app's OCR gate measures it, so this tool skips the frames the app skips:
+    the pipeline's own thumbnail() and change_score() (the strongest local
+    change, 0..255). Returns (change, new thumbnail); a first frame or a new
+    size counts as 255."""
+    thumb = thumbnail(image)
     if previous is None or previous.shape != thumb.shape:
         return 255.0, thumb
-    return float(np.mean(cv2.absdiff(previous, thumb))), thumb
+    return change_score(previous, thumb), thumb
 
 
 def annotate(image: np.ndarray, result: OcrResult) -> np.ndarray:
@@ -165,9 +170,9 @@ def run_window(args: argparse.Namespace) -> int:
             x0, y0, x1, y1 = roi
             crop = frame.image[y0:y1, x0:x1]
 
-            diff, thumb = frame_diff(last_thumb, crop)
+            change, thumb = frame_change(last_thumb, crop)
             last_thumb = thumb
-            if not args.always_ocr and diff < args.diff_threshold and last_result is not None:
+            if not args.always_ocr and change < args.change_threshold and last_result is not None:
                 skipped += 1
                 continue
 
@@ -180,7 +185,7 @@ def run_window(args: argparse.Namespace) -> int:
             last_frame, last_result = frame, result
 
             print(
-                f"t=+{time.perf_counter() - t_start:5.2f}s diff={diff:5.1f} "
+                f"t=+{time.perf_counter() - t_start:5.2f}s change={change:5.1f} "
                 f"{fmt_timings(result.timings_ms)} lines={len(result.lines)}"
             )
             if not args.quiet:
@@ -234,8 +239,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--size", default="small", help="tiny | small | medium (v6) or mobile | server (v4/v5)")
     p.add_argument("--det-limit", type=int, default=960, help="cap on the long side fed to the detector")
     p.add_argument("--dml", action="store_true", help="use DirectML GPU (needs onnxruntime-directml)")
-    p.add_argument("--diff-threshold", type=float, default=1.0, help="skip OCR when frame diff is below this")
-    p.add_argument("--always-ocr", action="store_true", help="OCR every frame, no diff skipping")
+    p.add_argument(
+        "--change-threshold",
+        type=float,
+        default=Settings.change_threshold,
+        help="skip OCR while the strongest local change (0-255) is below this, as the app does (default %(default)s)",
+    )
+    p.add_argument("--always-ocr", action="store_true", help="OCR every frame, no change skipping")
     p.add_argument("--repeat", type=int, default=3, help="OCR runs for --image timing")
     p.add_argument("--save", default="out", help="directory for raw + annotated frames ('' to disable)")
     p.add_argument("--quiet", action="store_true", help="only print per-frame summaries")

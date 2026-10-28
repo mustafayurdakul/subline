@@ -1,14 +1,15 @@
 """The settings window's Python side: what the QML pages read and write.
 
 `SettingsBackend.settings` is a QQmlPropertyMap with one entry per Settings
-field the window shows: a page binds a control to `backend.settings.roi`
-and writes back the same way. Lists hold one entry per line and the
-hotkeys are flattened to `hotkey_<name>`. `to_settings()` reads the map
-onto the settings last loaded, so fields without a control (stable_frames,
-debug, ...) keep their values. Every edit goes out as `settings_changed`
-once the typing pauses, so a running overlay follows the window. What the
-window cannot do alone (run the overlay, select an area, wipe the data)
-goes out as a signal to the tray, which owns the controller.
+field: a page binds a control to `backend.settings.roi` and writes back the
+same way. Lists hold one entry per line and the hotkeys are flattened to
+`hotkey_<name>`. Fields without a control (debug, dump_dir) are in the map
+too, so they go through untouched; `to_settings()` falls back on the
+settings last loaded only for a value that does not parse. Every edit goes
+out as `settings_changed` once the typing pauses, so a running overlay
+follows the window. What the window cannot do alone (run the overlay,
+select an area, wipe the data) goes out as a signal to the tray, which
+owns the controller.
 """
 
 from __future__ import annotations
@@ -25,10 +26,12 @@ from PySide6.QtGui import QDesktopServices, QFontDatabase, QGuiApplication
 from PySide6.QtQml import QQmlPropertyMap
 
 from .. import APP_NAME, __version__
+from ..translate.claude import PRICES_PER_MTOK
 from .cleanup import describe_data
 from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
+from .controller import TRANSLATORS, parse_color
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
-from .hotkeys import parse_combo
+from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_WIN, NAMED_KEYS, parse_combo
 from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
 
 # fmt: off
@@ -36,7 +39,7 @@ OCR_LANGS = [
     "en", "ch", "chinese_cht", "japan", "korean", "de", "fr", "es", "it", "pt", "pl", "nl", "tr", "cyrillic", "arabic",
 ]
 # fmt: on
-CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
+CLAUDE_MODELS = list(PRICES_PER_MTOK)  # the models with a known price, so a new one reaches the picker too
 HOTKEY_LABELS = {
     "toggle": "Start / stop overlay",
     "pause": "Pause / resume",
@@ -45,14 +48,19 @@ HOTKEY_LABELS = {
     "settings": "Open settings",
 }
 LIST_FIELDS = ("ignore_zones", "ignore_patterns")  # one entry per line in the window
+# The languages a translation can be asked for (DeepL's targets), shown by name.
+TARGET_LANGUAGES = [
+    ("tr", "Turkish"), ("en", "English"), ("de", "German"), ("fr", "French"), ("es", "Spanish"), ("it", "Italian"),
+    ("pt", "Portuguese"), ("pl", "Polish"), ("nl", "Dutch"), ("ru", "Russian"), ("uk", "Ukrainian"), ("ar", "Arabic"),
+    ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"), ("el", "Greek"), ("id", "Indonesian"), ("cs", "Czech"),
+    ("da", "Danish"), ("fi", "Finnish"), ("hu", "Hungarian"), ("nb", "Norwegian"), ("ro", "Romanian"),
+    ("sk", "Slovak"), ("sl", "Slovenian"), ("sv", "Swedish"), ("bg", "Bulgarian"), ("et", "Estonian"),
+    ("lt", "Lithuanian"), ("lv", "Latvian"), ("vi", "Vietnamese"),
+]  # fmt: skip
+
 # An emptied text control means the default, not an empty value.
 EMPTY_DEFAULTS = {
-    "lang": "en",
-    "target_lang": "tr",
-    "translator": "deepl",
-    "model": CLAUDE_MODELS[0],
-    "font": Settings.font,
-    "subtitle_weight": Settings.subtitle_weight,
+    name: getattr(Settings, name) for name in ("lang", "target_lang", "translator", "model", "font", "subtitle_weight")
 }
 EDIT_DELAY_MS = 500  # an edit reaches the running overlay this long after the last keystroke
 
@@ -75,13 +83,31 @@ def invalid_pattern(patterns: list[str]) -> str | None:
     return None
 
 
+# Keys no program types, so they may be a hotkey on their own: F1-F24,
+# Pause, Scroll Lock and Print Screen (virtual-key codes).
+LONE_KEYS = frozenset(
+    {*range(0x70, 0x70 + 24), NAMED_KEYS["pause"], NAMED_KEYS["scrolllock"], NAMED_KEYS["printscreen"]}
+)
+
+
+def needs_modifier(mods: int, vk: int) -> bool:
+    """Whether a hotkey lacks the Ctrl, Alt or Win it needs. A global
+    hotkey takes its key from every program, the game included: a letter,
+    Tab or Enter alone (or with Shift only) would stop working everywhere."""
+    return not mods & (MOD_CONTROL | MOD_ALT | MOD_WIN) and vk not in LONE_KEYS
+
+
 def invalid_hotkey(hotkeys: dict[str, str]) -> str | None:
-    """One line naming the first hotkey that does not parse, or None."""
+    """One line naming the first hotkey that does not parse or that would
+    take a typing key from every program, or None."""
     for name, combo in hotkeys.items():
+        label = HOTKEY_LABELS.get(name, name)
         try:
-            parse_combo(combo)
+            mods, vk = parse_combo(combo)
         except ValueError as exc:
-            return f"Hotkey for {HOTKEY_LABELS.get(name, name)!r}: {exc}"
+            return f"Hotkey for {label!r}: {exc}"
+        if needs_modifier(mods, vk):
+            return f"Hotkey for {label!r}: {combo!r} needs Ctrl, Alt or Win, or that key stops working in every program"
     return None
 
 
@@ -132,7 +158,8 @@ _NAMED_QT_KEYS = {
 
 def combo_from_key(key: int, modifiers: int) -> str:
     """The hotkey text for a Qt key press ('ctrl+shift+t'), or '' for a
-    press of modifiers alone or of a key the parser cannot register."""
+    press of modifiers alone, of a key the parser cannot register, or of a
+    typing key without Ctrl, Alt or Win (see `needs_modifier`)."""
     key = int(key)
     mods = Qt.KeyboardModifier(modifiers)
     parts = []
@@ -152,7 +179,8 @@ def combo_from_key(key: int, modifiers: int) -> str:
         name = _NAMED_QT_KEYS.get(key)  # type: ignore[call-overload]
         if name is None:
             return ""
-    return "+".join([*parts, name])
+    combo = "+".join([*parts, name])
+    return "" if needs_modifier(*parse_combo(combo)) else combo
 
 
 class OfflineDownloadThread(QThread):
@@ -186,6 +214,7 @@ class SettingsBackend(QObject):
     select_area_requested = Signal()
     profile_saved = Signal(str)
     profile_loaded = Signal(str, object)  # name, Settings
+    profile_deleted = Signal(str)  # name: its file is gone, so nothing may save under it unasked
     hotkeys_changed = Signal(object)  # Settings: register these hotkeys now
     hotkey_capture_changed = Signal(bool)  # True while a field records a key press: release the global hotkeys
     remove_all_data_requested = Signal()  # the user confirmed: wipe everything and quit
@@ -249,8 +278,9 @@ class SettingsBackend(QObject):
         self._bump_preview()
 
     def to_settings(self, base: Settings | None = None) -> Settings:
-        """The map's values on top of `base` (default: the settings last
-        loaded), so fields the window does not show keep their values."""
+        """The map's values as Settings. Every field is in the map; `base`
+        (default: the settings last loaded) gives the value for an entry
+        that does not parse."""
         s = (base if base is not None else self._base).copy()
         for name in _FIELDS:
             raw = self._map.value(name)
@@ -314,7 +344,10 @@ class SettingsBackend(QObject):
     appName = Property(str, lambda self: APP_NAME, constant=True)
     version = Property(str, lambda self: __version__, constant=True)
     ocrLangs = Property("QStringList", lambda self: list(OCR_LANGS), constant=True)
+    targetLanguageCodes = Property("QStringList", lambda self: [code for code, _ in TARGET_LANGUAGES], constant=True)
+    targetLanguageNames = Property("QStringList", lambda self: [name for _, name in TARGET_LANGUAGES], constant=True)
     claudeModels = Property("QStringList", lambda self: list(CLAUDE_MODELS), constant=True)
+    translators = Property("QStringList", lambda self: list(TRANSLATORS), constant=True)  # the names a start accepts
     trialDays = Property(int, lambda self: TRIAL_DAYS, constant=True)
     purchaseUrl = Property(str, lambda self: PURCHASE_URL, constant=True)
     dataFolder = Property(str, lambda self: str(self.store.root), constant=True)
@@ -332,6 +365,12 @@ class SettingsBackend(QObject):
 
     fontFamilies = Property("QStringList", _font_families, constant=True)
     previewStamp = Property(int, lambda self: self._preview_stamp, notify=previewChanged)
+
+    @Slot(str, result=str)
+    def colourHex(self, text: str) -> str:
+        """A subtitle colour as the overlay will draw it, as '#RRGGBB':
+        'r,g,b' is read too, and text that does not parse comes out white."""
+        return "#{:02X}{:02X}{:02X}".format(*parse_color(text))
 
     # -- overlay state -------------------------------------------------------------------
 
@@ -442,6 +481,22 @@ class SettingsBackend(QObject):
         self.set_profile_name(name)
         self.profile_loaded.emit(name, settings)
 
+    @Slot(str)
+    def deleteProfile(self, name: str) -> None:
+        """Remove a saved profile (the store forgets it as the last one used,
+        too). The settings shown stay as they are; they are just no longer
+        saved under that name."""
+        try:
+            self.store.delete(name)
+        except OSError as exc:
+            self.report_problem(f"Could not delete profile {name}: {exc}")
+            return
+        name = slug(name)
+        if self._profile_name == name:
+            self.set_profile_name("")
+        self.profilesChanged.emit()
+        self.profile_deleted.emit(name)
+
     # -- API keys -------------------------------------------------------------------------------
 
     def _deepl_key_status(self) -> str:
@@ -519,7 +574,7 @@ class SettingsBackend(QObject):
         return self._download_status
 
     def _get_downloading(self) -> bool:
-        return self._download is not None and self._download.isRunning()
+        return self._download is not None
 
     downloadStatus = Property(str, _get_download_status, notify=downloadChanged)
     downloading = Property(bool, _get_downloading, notify=downloadChanged)
@@ -534,8 +589,7 @@ class SettingsBackend(QObject):
         thread = OfflineDownloadThread(source, target, self.store, self)
         thread.progress.connect(self._set_download_status)
         thread.finished_ok.connect(self._download_done)
-        thread.finished.connect(self.downloadChanged)  # `downloading` turns false once the thread has ended
-        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._download_finished)
         self._download = thread
         thread.start()
         self._set_download_status(f"downloading offline translation for {source} -> {target}...")
@@ -543,6 +597,15 @@ class SettingsBackend(QObject):
     def _set_download_status(self, text: str) -> None:
         self._download_status = text
         self.downloadChanged.emit()
+
+    def _download_finished(self) -> None:
+        """The thread has ended: `downloading` turns false, and the thread
+        goes. The reference is dropped before the C++ object is deleted, so
+        nothing reads a deleted thread afterwards."""
+        thread, self._download = self._download, None
+        self.downloadChanged.emit()
+        if thread is not None:
+            thread.deleteLater()
 
     def _download_done(self, ok: bool, message: str) -> None:
         if ok and not self._map.value("draft"):

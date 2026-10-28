@@ -4,7 +4,7 @@
 2. numeric reuse: the same text with different numbers (HUD counters,
    timers, prices) reuses the cached translation with the numbers swapped,
    so a ticking timer costs no requests;
-3. fuzzy match against recently used entries (OCR noise).
+3. fuzzy match against the most recently stored entries (OCR noise).
 """
 
 from __future__ import annotations
@@ -20,6 +20,9 @@ from pathlib import Path
 from ..textutil import normalize_text, text_similarity
 
 _DIGITS = re.compile(r"\d+")
+# A suffix written onto a number ("5'te"): in Turkish it follows how the
+# number is pronounced, so it is wrong once another number takes its place.
+_NUMBER_SUFFIX = re.compile(r"\d+['\u2019]\w")
 
 
 def numeric_template(key: str) -> tuple[str, list[str]]:
@@ -31,8 +34,9 @@ def numeric_template(key: str) -> tuple[str, list[str]]:
 def substitute_numbers(translation: str, old: list[str], new: list[str]) -> str | None:
     """Swap the numbers of a cached translation for new ones, matching by value
     so reordering in the target language is fine. None when ambiguous: a
-    duplicate value, or a value that does not occur in the translation."""
-    if len(old) != len(new) or len(set(old)) != len(old):
+    duplicate value, a value that does not occur in the translation, or a
+    suffix attached to a number ("5'te" would become "6'te", not "6'da")."""
+    if len(old) != len(new) or len(set(old)) != len(old) or _NUMBER_SUFFIX.search(translation):
         return None
     found = _DIGITS.findall(translation)
     if sorted(found) != sorted(old):

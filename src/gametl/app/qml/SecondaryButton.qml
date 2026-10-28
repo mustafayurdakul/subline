@@ -1,21 +1,24 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls.Basic as C
 
-// A quiet button: outline on the card colour.
-Button {
+// A quiet button: outline on the card colour; darker while held down.
+C.Button {
     id: root
     property string icon_: ""
     property bool danger: false
 
-    implicitHeight: 34
+    implicitHeight: Theme.controlHeight
     leftPadding: 14
     rightPadding: 14
     font.family: Theme.font
     font.pixelSize: Theme.size
+    opacity: enabled ? 1 : Theme.disabledOpacity
 
     background: Rectangle {
-        color: root.down ? Theme.cardRaised : root.hovered ? Theme.cardRaised : Theme.card
-        border.color: root.danger ? Theme.danger : Theme.borderStrong
+        radius: Theme.radius
+        color: root.down ? Theme.cardPressed : root.hovered ? Theme.cardRaised : Theme.card
+        border.color: root.danger ? Theme.danger : root.hovered ? Theme.borderHover : Theme.borderStrong
+        FocusRing { visible: root.visualFocus }
     }
     contentItem: Row {
         spacing: 8

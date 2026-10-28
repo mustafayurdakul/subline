@@ -4,7 +4,7 @@ judge whether a flat "patch" of the background colour would look right.
 For the patch overlay style the original text is painted over with the
 background colour and the translation drawn in the text colour. On a busy
 background (artwork, gradients, video) no single colour hides the original,
-so the caller falls back to a translucent pill with outlined text.
+so the caller falls back to a dark pill with white text.
 """
 
 from __future__ import annotations

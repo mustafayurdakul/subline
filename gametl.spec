@@ -18,15 +18,23 @@
 # Build with:  uv run --group build python scripts/build.py
 
 import re
+import tomllib
 from importlib import metadata
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
+
+def requirement_name(requirement: str) -> str:
+    """The distribution name of a requirement string ("rapidocr>=3.0" -> "rapidocr")."""
+    return re.split(r"[\s;<>=!~\[(]", requirement, maxsplit=1)[0]
+
+
+# The app's own dependencies, as pyproject.toml lists them (the offline extra
+# is left out: it is not bundled), so a new one gets its licence text too.
 RUNTIME_DEPENDENCIES = [
-    "windows-capture", "rapidocr", "onnxruntime-directml", "opencv-python-headless", "numpy", "pillow",
-    "pyside6-essentials", "anthropic", "requests", "cryptography",
-]  # fmt: skip
+    requirement_name(r) for r in tomllib.loads(Path("pyproject.toml").read_text("utf-8"))["project"]["dependencies"]
+]
 
 
 def runtime_distributions() -> list[metadata.Distribution]:
@@ -46,7 +54,7 @@ def runtime_distributions() -> list[metadata.Distribution]:
         for requirement in dist.requires or []:
             if "extra ==" in requirement:
                 continue  # optional extras are not installed
-            todo.append(re.split(r"[\s;<>=!~\[(]", requirement, maxsplit=1)[0])
+            todo.append(requirement_name(requirement))
     return sorted(seen.values(), key=lambda d: d.metadata["Name"].lower())
 
 

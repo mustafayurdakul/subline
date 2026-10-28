@@ -15,7 +15,7 @@ Item {
 
     Image {
         anchors.fill: parent
-        sourceSize: Qt.size(root.size * 2, root.size * 2)
+        sourceSize: Qt.size(root.size * 2 * uiScale, root.size * 2 * uiScale)  // drawn at twice the screen's pixels: smooth edges
         smooth: true
         source: "data:image/svg+xml;utf8,"
             + "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='"

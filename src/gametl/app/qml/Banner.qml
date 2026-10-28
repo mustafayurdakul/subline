@@ -8,7 +8,8 @@ Rectangle {
     signal dismissed()
 
     visible: text !== ""
-    implicitHeight: visible ? Math.max(40, message.implicitHeight + 16) : 0
+    implicitHeight: Math.max(40, message.implicitHeight + 16)
+    radius: Theme.radius
     color: Theme.card
     border.color: Theme.danger
 
@@ -25,7 +26,18 @@ Rectangle {
         id: closeButton
         anchors.right: parent.right
         width: 40; height: parent.height
-        Icon { anchors.centerIn: parent; path: Icons.close; color: Theme.muted; size: 16 }
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.dismissed() }
+        activeFocusOnTab: true
+        Keys.onReturnPressed: root.dismissed()
+        Keys.onSpacePressed: root.dismissed()
+        Rectangle {
+            anchors.centerIn: parent
+            width: 28; height: 28
+            radius: Theme.radius
+            color: tap.pressed ? Theme.cardPressed : hover.hovered ? Theme.cardRaised : "transparent"
+            FocusRing { visible: closeButton.activeFocus; gap: 0 }
+            Icon { anchors.centerIn: parent; path: Icons.close; color: Theme.muted; size: 16 }
+        }
+        HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { id: tap; onTapped: root.dismissed() }
     }
 }

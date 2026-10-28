@@ -23,10 +23,12 @@ def line_height_of(bbox: Box, n_lines: int) -> float:
     return (bbox[3] - bbox[1]) / max(1, n_lines)
 
 
-def font_px_for(line_height: float, factor: float = 0.8) -> int:
-    """Font pixel size that matches a source line height: glyphs are about
-    `factor` of the line, and never under 6 px."""
-    return max(6, int(line_height * factor))
+GLYPH_FACTOR = 0.8  # glyphs are about this share of the line height
+
+
+def font_px_for(line_height: float) -> int:
+    """Font pixel size that matches a source line height, never under 6 px."""
+    return max(6, int(line_height * GLYPH_FACTOR))
 
 
 def _median_color(colors: Iterable[BGR]) -> BGR:
@@ -63,7 +65,7 @@ class StyleMemory:
         band = self._bands.setdefault(self.band(bbox), deque(maxlen=self.keep))
         band.append(StyleSample(line_height_of(bbox, n_lines), bg, fg, busy))
 
-    def font_px(self, bbox: Box, n_lines: int, factor: float = 0.8) -> int:
+    def font_px(self, bbox: Box, n_lines: int) -> int:
         """Font pixel size for a block: the band's median line height when
         enough has been seen there, else the block's own."""
         samples = self._samples(bbox)
@@ -72,7 +74,7 @@ class StyleMemory:
             line_height = median(s.line_height for s in samples)
         else:
             line_height = line_height_of(bbox, n_lines)
-        return font_px_for(line_height, factor)
+        return font_px_for(line_height)
 
     def colors(self, bbox: Box) -> tuple[BGR, BGR] | None:
         samples = self._samples(bbox)
@@ -129,7 +131,7 @@ class ZoneStyle:
     def _median_fg(self) -> BGR:
         return _median_color(self._fgs)
 
-    def font_px(self, fallback: int, factor: float = 0.8) -> int:
+    def font_px(self, fallback: int) -> int:
         """Font size from the locked line height; before the lock, from the
         running median of what was seen, else `fallback`."""
         if self.line_height is not None:
@@ -138,7 +140,7 @@ class ZoneStyle:
             height = median(self._heights)
         else:
             return fallback
-        return font_px_for(height, factor)
+        return font_px_for(height)
 
     @property
     def fg(self) -> BGR | None:

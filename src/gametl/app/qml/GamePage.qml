@@ -9,8 +9,8 @@ ColumnLayout {
         SettingRow { label: "Game window"; helper: "Part of the window title is enough."; WindowPicker {} }
         SettingRow {
             label: "Game name"
-            helper: "Used in the prompt and for the translation cache."
-            Field { key: "game"; placeholderText: "default: the window title" }
+            helper: "Names the translation cache (and, with Claude, the game in the prompt)."
+            Field { key: "game"; live: false; placeholderText: "default: the window title" }
         }
     }
 
@@ -22,11 +22,11 @@ ColumnLayout {
             helper: "x, y, width, height as fractions of the window"
             Field { key: "roi"; placeholderText: "empty: the whole window"; implicitWidth: 220 }
         }
-        AreaButtons { wholeWindow: true; Layout.alignment: Qt.AlignRight }
+        AreaButtons { Layout.alignment: Qt.AlignRight }
         SettingRow {
             label: "Keep a selected area centred"
             helper: "Shift while dragging inverts this for one drag."
-            Toggle { key: "center_zone" }
+            Toggle { key: "center_area" }
         }
     }
 
@@ -46,7 +46,7 @@ ColumnLayout {
         SettingRow {
             label: "Short lines need OCR confidence"
             helper: "One- or two-letter lines are kept only when OCR is this sure of them."
-            Gauge { key: "short_line_confidence"; scale: 100; from: 0; to: 100; stepSize: 5; suffix: " %"; specialText: "off" }
+            Gauge { key: "short_line_confidence"; factor: 100; from: 0; to: 100; stepSize: 5; suffix: "%"; specialText: "off" }
         }
     }
 

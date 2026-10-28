@@ -9,12 +9,12 @@ jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - name: Install
-        run: uv sync
+        run: uv sync --locked
       - name: Lint and format
         run: |
           uv run ruff check src tests scripts
@@ -33,12 +33,12 @@ jobs:
     # build it as a release would and load every settings page from the exe.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - name: Install
-        run: uv sync --group build
+        run: uv sync --locked --group build
       - name: Build
         run: uv run --group build python scripts/build.py
       - name: Settings window in the frozen app

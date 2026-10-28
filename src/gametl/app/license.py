@@ -14,12 +14,13 @@ import json
 from dataclasses import dataclass
 from datetime import date
 
+from .. import APP_NAME
 from .config import ProfileStore
 from .credentials import SecretStore
 
 PUBLIC_KEY_HEX = "964cce0741ce08885e388fb75828bf72d37da05cc6c03868a97d1f637edcfafa"
 TRIAL_DAYS = 14
-KEY_PREFIX = "GAMETL-"
+KEY_PREFIX = "GAMETL-"  # the key format's own name; users see APP_NAME
 LICENSE_SECRET = "LICENSE_KEY"  # the key, in the secret store
 TRIAL_SECRET = "TRIAL_START"  # first-start date, in the secret store (and config.json)
 PURCHASE_URL = ""  # shown in the settings window when set
@@ -27,7 +28,7 @@ _SIGNED_PREFIX = b"gametl-license-v1:"
 
 
 class LicenseError(ValueError):
-    """The text is not a valid gametl licence key."""
+    """The text is not a valid licence key for this app."""
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,7 @@ def parse_key(key: str, public_key_hex: str | None = None) -> License:
 
     key = (key or "").strip()
     if not key.startswith(KEY_PREFIX) or "." not in key:
-        raise LicenseError("not a gametl licence key")
+        raise LicenseError(f"not a {APP_NAME} licence key")
     body_text, _, signature_text = key[len(KEY_PREFIX) :].partition(".")
     try:
         body, signature = _b64decode(body_text), _b64decode(signature_text)
@@ -105,7 +106,9 @@ def parse_key(key: str, public_key_hex: str | None = None) -> License:
             seats=int(payload.get("seats", 1)),
         )
     except InvalidSignature:
-        raise LicenseError("the signature does not match: the key was altered or was not issued for gametl") from None
+        raise LicenseError(
+            f"the signature does not match: the key was altered or was not issued for {APP_NAME}"
+        ) from None
     except (ValueError, KeyError, TypeError) as exc:
         raise LicenseError(f"malformed licence key: {exc}") from exc
 

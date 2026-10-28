@@ -1,6 +1,7 @@
 """Command-line entry point.
 
-  gametl                                   # tray icon; opens settings if nothing is configured
+  gametl                                   # tray icon, with the profile of the game that is open
+                                           # (or the last one used); settings open unless it runs
   gametl --window "Fake Game"              # run on that window from the command line
   gametl --profile fake-game               # run with a saved profile
   gametl --tray --window "Fake Game"       # tray icon and start at once
@@ -16,8 +17,13 @@ import argparse
 import contextlib
 import os
 import sys
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from gametl.app.config import ProfileStore, Settings, slug
+
+if TYPE_CHECKING:  # imported where it runs: Qt loads only when a window or an overlay is wanted
+    from gametl.app.controller import OverlayController
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--remove-all-data",
         action="store_true",
-        help="delete the data folder and the Credential Manager entries (keys, licence, trial) and exit",
+        help="delete the data folder and the Credential Manager entries (keys, licence) and exit; "
+        "the trial's start date is kept",
     )
     mode.add_argument(
         "--check-ui", action="store_true", help="load every settings page without a display, report problems and exit"
@@ -60,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     lang = p.add_argument_group("languages")
     lang.add_argument("--lang", help=f"OCR model language (en, ch, japan, korean, de, ...); default {Settings.lang}")
     lang.add_argument(
-        "--source-lang", help=f"what the translator is told the text is in; default {Settings.source_lang}"
+        "--source-lang", help="what the translator is told the text is in; default: the OCR language (--lang)"
     )
     lang.add_argument("--target-lang", help=f"target language code; default {Settings.target_lang}")
     lang.add_argument("--ocr-gpu", action="store_true", default=None, help="run OCR on the GPU (DirectML)")
@@ -132,10 +139,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="cover the original line when the subtitle is drawn elsewhere",
     )
     look.add_argument(
-        "--no-center-zone",
+        "--no-center-area",
         action="store_true",
         default=None,
         help="do not mirror a selected area about the centre by default (Shift while dragging inverts either way)",
+    )
+    # The option's name before center_zone became center_area, kept for existing shortcuts and scripts.
+    look.add_argument(
+        "--no-center-zone", dest="no_center_area", action="store_true", default=None, help=argparse.SUPPRESS
     )
     look.add_argument("--style", choices=["auto", "patch", "pill", "outline"], help="in-place style")
     look.add_argument("--font")
@@ -145,7 +156,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = p.add_argument_group("pipeline")
     run.add_argument("--fps", type=float, help=f"capture cap; default {Settings.fps:g}")
     run.add_argument(
-        "--full-scan-every", type=int, help="with --roi: also sweep the rest every N frames (default 0 = never)"
+        "--full-scan-every",
+        type=int,
+        help="with --roi and --render inplace: also sweep the rest every N OCR reads (default 0 = never)",
     )
     run.add_argument("--stable-frames", type=int)
     run.add_argument("--max-missing", type=int)
@@ -198,7 +211,7 @@ _VALUE_OPTIONS = {
 } | {"window": "window_match", "glossary": "glossary_path", "subtitle_font": "subtitle_font_px"}  # fmt: skip
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
 _FLAG_OPTIONS = {
-    "no_center_zone": ("center_zone", False),
+    "no_center_area": ("center_area", False),
     "hide_source": ("subtitle_hide_source", True),
     "include_frame": ("include_frame", True),
     "structured": ("structured", True),
@@ -265,6 +278,38 @@ def utf8_console() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     with contextlib.suppress(AttributeError, OSError, ValueError):
         faulthandler.enable(all_threads=True)
+
+
+def open_window_titles() -> list[str]:
+    """Titles of the windows open now; none when they cannot be listed."""
+    from gametl.capture.windows import list_windows
+
+    try:
+        return [w.title for w in list_windows()]
+    except Exception:  # no desktop session: carry on with the last profile
+        return []
+
+
+def show_settings_if_start_fails(controller: OverlayController, open_settings: Callable[[], None]) -> None:
+    """Open the settings when the start under way fails, so its reason
+    (licence, a missing key, the OCR model) is seen: a tray app started
+    without its window has only the tray's tooltip to show it in. Only that
+    one start: once it runs or is given up, later failures stay in the tray."""
+
+    def settle(failed: bool) -> None:
+        controller.start_failed.disconnect(on_failed)
+        controller.running_changed.disconnect(on_running_changed)
+        if failed:
+            open_settings()
+
+    def on_failed(_message: str) -> None:
+        settle(True)
+
+    def on_running_changed(_running: bool) -> None:
+        settle(False)
+
+    controller.start_failed.connect(on_failed)
+    controller.running_changed.connect(on_running_changed)
 
 
 def license_command(key: str | None, store: ProfileStore) -> int:
@@ -366,12 +411,31 @@ def main(argv: list[str] | None = None) -> int:
     controller.status.connect(lambda s: print(s, flush=True))
 
     tray_mode = args.tray or (not settings.window_match and hwnd is None)
+    start_now = bool(settings.window_match or hwnd)
+    instance = None
 
     if tray_mode:
-        from gametl.app.tray import TrayApp
+        from gametl import APP_NAME
+        from gametl.app.tray import SingleInstance, TrayApp
 
+        instance = SingleInstance(store.root)
+        if not instance.claim(lambda: tray.open_settings()):
+            print(f"{APP_NAME} is already running: its settings window was brought up")
+            return 0
+        if not (args.profile or args.window or hwnd):
+            # Plain `gametl`: carry on with the game that is open, or the one played last.
+            # Only a game found running starts at once; otherwise the settings show its profile.
+            remembered = store.remembered_profile(open_window_titles())
+            if remembered is not None:
+                profile_name, base, start_now = remembered
+                settings = settings_from_args(args, base)
+                if store.last_profile != profile_name:
+                    store.last_profile = profile_name
         tray = TrayApp(app, controller, store, settings, profile_name)
-        if settings.window_match or hwnd:
+        if start_now:
+            if not (args.profile or args.window or hwnd):
+                # Started on its own, with no window open: a failure must not go unseen (the trial over, no key...).
+                show_settings_if_start_fails(controller, tray.open_settings)
             controller.start(settings, hwnd, wait=args.wait)
         else:
             tray.open_settings()
@@ -394,10 +458,11 @@ def main(argv: list[str] | None = None) -> int:
         QTimer.singleShot(int(args.run_for * 1000), finish)
 
     rc = app.exec()
-    stats = controller.stats_text()
-    controller.close()
-    if stats:
-        print(stats)
+    controller.close()  # a no-op when the session has ended already (the tray's Quit, a closed window)
+    if instance is not None:
+        instance.release()
+    if controller.last_stats:
+        print(controller.last_stats)
     return rc
 
 

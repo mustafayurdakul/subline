@@ -6,7 +6,6 @@ ColumnLayout {
     readonly property var s: backend.settings
     readonly property string colour: String(root.s.subtitle_color)
     readonly property bool ownColour: colour === ""
-    readonly property string swatch: /^#[0-9a-fA-F]{6}$/.test(colour) ? colour : "#D9B86A"
     spacing: 2 * Theme.space
 
     SubtitlePreview { Layout.fillWidth: true }
@@ -15,7 +14,7 @@ ColumnLayout {
         title: "Text"
         SettingRow {
             label: "Font size"
-            helper: "Learned from the game's first lines and then held, or a fixed size."
+            helper: "Learned from the game's first lines and then held, or a fixed size. The preview shows it as on a 1080p game."
             Stepper { key: "subtitle_font_px"; from: 0; to: 200; step: 2; suffix: " px"; specialText: "game's own" }
         }
         SettingRow {
@@ -26,13 +25,20 @@ ColumnLayout {
                 Toggle { checked: root.ownColour; onToggled: root.s.subtitle_color = checked ? "" : "#FFFFFF" }
                 Label { text: "game's own"; color: Theme.textSoft; font.pixelSize: Theme.sizeCaption }
                 Field { visible: !root.ownColour; key: "subtitle_color"; placeholderText: "#RRGGBB"; implicitWidth: 110 }
-                Rectangle { width: 28; height: 28; color: root.swatch; border.color: Theme.borderStrong; opacity: root.ownColour ? 0.35 : 1 }
+                // The colour as the overlay will draw it (white when the text does not parse).
+                Rectangle {
+                    visible: !root.ownColour
+                    width: Theme.controlHeight; height: Theme.controlHeight
+                    radius: Theme.radius
+                    color: backend.colourHex(root.colour)
+                    border.color: Theme.borderStrong
+                }
             }
         }
         SettingRow {
             label: "Font"
             helper: "Any font installed on this computer."
-            Combo { key: "font"; options: backend.fontFamilies; editable: false; fontPreview: true; implicitWidth: 220 }
+            Combo { key: "font"; options: backend.fontFamilies; fontPreview: true; implicitWidth: 220 }
         }
         SettingRow {
             label: "Weight"
@@ -47,7 +53,7 @@ ColumnLayout {
             helper: "A dark pill, a soft shadow like the game's own text, or bare outlined text."
             Segmented { key: "subtitle_background"; options: ["Pill", "Shadow", "None"]; values: ["pill", "shadow", "none"] }
         }
-        SettingRow { label: "Pill opacity"; Gauge { key: "subtitle_pill_alpha"; from: 0; to: 255 } }
+        SettingRow { label: "Pill opacity"; Gauge { key: "subtitle_pill_alpha"; factor: 100 / 255; suffix: "%" } }
     }
 
     Card {
@@ -70,12 +76,12 @@ ColumnLayout {
         SettingRow {
             label: "Only centred text"
             helper: "Tolerance as a share of the area's width."
-            Gauge { key: "subtitle_center_tolerance"; from: 0; to: 50; suffix: " %"; specialText: "off" }
+            Gauge { key: "subtitle_center_tolerance"; from: 0; to: 50; suffix: "%"; specialText: "off" }
         }
         SettingRow {
             label: "Only subtitle-sized text"
             helper: "How far a line's height may differ from the learned size."
-            Gauge { key: "subtitle_size_tolerance"; from: 0; to: 100; suffix: " %"; specialText: "off" }
+            Gauge { key: "subtitle_size_tolerance"; from: 0; to: 100; suffix: "%"; specialText: "off" }
         }
     }
 

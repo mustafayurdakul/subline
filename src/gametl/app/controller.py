@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from ..capture.windows import client_rect_on_screen, find_window, window_rect, window_title
+from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
 from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
@@ -100,6 +100,7 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
     ignore_zones = [offset_zone(zone, ax0, ay0) for zone in zones if zone is not None]
     patterns = [p for p in settings.ignore_patterns if p.strip()]
     return PipelineConfig(
+        frame_size=(frame[2] - frame[0], frame[3] - frame[1]),
         area=client,
         roi=offset_zone(roi, ax0, ay0) if roi is not None else None,
         fps=settings.fps,
@@ -127,6 +128,32 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
 # -- translators ---------------------------------------------------------------------
 
 
+class StartError(RuntimeError):
+    """A start that cannot go ahead, with a message fit for the status line."""
+
+
+# Translators for trying the pipeline without a key or a network.
+_DUMMY_TRANSLATORS = {"uppercase": UppercaseTranslator, "verbose": VerboseTranslator, "echo": EchoTranslator}
+TRANSLATORS = ("deepl", "claude", "offline", *_DUMMY_TRANSLATORS)
+
+
+def translator_name(settings: Settings) -> str:
+    """The translator `settings` names, as build_translator reads it."""
+    return settings.translator.strip().lower()
+
+
+def check_translator(settings: Settings, secrets: SecretStore) -> None:
+    """Refuse at once, before any waiting or loading, a translator that does
+    not exist or has no key to work with. Raises StartError."""
+    name = translator_name(settings)
+    if name not in TRANSLATORS:
+        raise StartError(f"unknown translator {settings.translator!r}")
+    if "deepl" in (name, settings.draft) and resolve_key(DEEPL_KEY, secrets) is None:
+        raise StartError("Add your DeepL key on the Translation page")
+    if name == "claude" and not has_anthropic_credentials(secrets):
+        raise StartError("Add your Anthropic key on the Translation page")
+
+
 def build_offline_translator(settings: Settings, store: ProfileStore) -> Translator:
     from ..translate.offline import OfflineTranslator, activate_runtime
 
@@ -142,7 +169,7 @@ def build_deepl_translator(secrets: SecretStore) -> Translator:
 
 
 def build_draft_translator(settings: Settings, store: ProfileStore, secrets: SecretStore) -> Translator | None:
-    if not settings.draft or settings.draft == settings.translator:
+    if not settings.draft or settings.draft == translator_name(settings):
         return None
     if settings.draft == "offline":
         return build_offline_translator(settings, store)
@@ -151,17 +178,22 @@ def build_draft_translator(settings: Settings, store: ProfileStore, secrets: Sec
     return None
 
 
-# Translators for trying the pipeline without a key or a network.
-_DUMMY_TRANSLATORS = {"uppercase": UppercaseTranslator, "verbose": VerboseTranslator, "echo": EchoTranslator}
-
-
 def build_translator(settings: Settings, game: str, store: ProfileStore, secrets: SecretStore) -> Translator:
-    if dummy := _DUMMY_TRANSLATORS.get(settings.translator):
+    """The translator `settings` names. Raises StartError for a name it does
+    not know: a misspelt name must never fall through to a paid service."""
+    name = translator_name(settings)
+    if dummy := _DUMMY_TRANSLATORS.get(name):
         return dummy()
-    if settings.translator == "offline":
+    if name == "offline":
         return build_offline_translator(settings, store)
-    if settings.translator == "deepl":
+    if name == "deepl":
         return build_deepl_translator(secrets)
+    if name == "claude":
+        return build_claude_translator(settings, game, secrets)
+    raise StartError(f"unknown translator {settings.translator!r}")
+
+
+def build_claude_translator(settings: Settings, game: str, secrets: SecretStore) -> Translator:
     from ..translate.claude import ClaudeTranslator
 
     glossary = None
@@ -186,10 +218,6 @@ def _spread(values: Iterable[float]) -> str:
     return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
 
 
-class StartError(RuntimeError):
-    """A start that cannot go ahead, with a message fit for the status line."""
-
-
 # Settings a running session cannot take up on the fly: a change in one of
 # them restarts the session. Everything else (the area, the filters, the
 # timing, the look) reaches the pipeline and the overlay as they run.
@@ -200,13 +228,23 @@ SESSION_FIELDS = frozenset(
         "autosave_seconds",
     }
 )  # fmt: skip
+# Of those, the ones only Claude reads: a session without Claude is not restarted for them.
+CLAUDE_FIELDS = frozenset({"model", "effort", "thinking", "structured", "tone", "glossary_path"})
+
+
+def restart_fields(settings: Settings) -> frozenset[str]:
+    """The SESSION_FIELDS whose change restarts a session run with `settings`."""
+    if "claude" in (translator_name(settings), settings.draft):
+        return SESSION_FIELDS
+    return SESSION_FIELDS - CLAUDE_FIELDS
 
 
 @dataclass(slots=True)
 class Prepared:
     """Everything start() needs that takes time to obtain, gathered off the
-    UI thread: the window, the translators, the OCR engine and the pipeline
-    configuration. `generation` tells a stale result from the current one."""
+    UI thread: the window, the translators, the translation cache, the OCR
+    engine and the pipeline configuration. `generation` tells a stale result
+    from the current one."""
 
     generation: int
     hwnd: int
@@ -215,6 +253,7 @@ class Prepared:
     game: str
     translator: Translator
     draft: Translator | None
+    cache: TranslationCache
     engine: RapidOcrEngine
     config: PipelineConfig
 
@@ -222,7 +261,11 @@ class Prepared:
 class _StartWorker(QThread):
     """Runs `OverlayController.prepare` away from the UI thread, so the tray
     and the settings window stay responsive while the window is waited for
-    and the models load (or download, on first use)."""
+    and the models load (or download, on first use).
+
+    It has no Qt parent: the controller holds it only until it finishes, so
+    the object goes then, not with the controller (one would be left behind
+    by every start, edit-triggered restarts included)."""
 
     progress = Signal(str)
     prepared = Signal(object)  # Prepared
@@ -231,7 +274,7 @@ class _StartWorker(QThread):
     def __init__(
         self, controller: OverlayController, generation: int, settings: Settings, hwnd: int | None, wait: float
     ) -> None:
-        super().__init__(controller)
+        super().__init__()
         self.controller = controller
         self.generation = generation
         self.settings = settings
@@ -258,7 +301,8 @@ class OverlayController(QObject):
     start() returns at once: the slow part (waiting for the window, building
     the translators, loading the OCR engine) runs on a thread, and the
     session begins when it is done. `running_changed(True)` or
-    `start_failed(message)` reports the outcome."""
+    `start_failed(message)` reports the outcome; a start the licence
+    refuses is reported as `start_failed` too."""
 
     status = Signal(str)
     running_changed = Signal(bool)
@@ -284,9 +328,11 @@ class OverlayController(QObject):
         self._generation = 0  # bumped by every start() and stop(); a preparation from before is ignored
         self._start_workers: set[_StartWorker] = set()
         self._starting = False
-        self._requested_hwnd: int | None = None  # the handle the start in progress was given
+        self._requested_hwnd: int | None = None  # the handle the start in progress was given...
+        self._requested_match = ""  # ...for the window title it was asked to match
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
+        self.last_stats = ""  # stats_text() of the last session, kept when it stops
 
     # -- state -------------------------------------------------------------
 
@@ -309,7 +355,16 @@ class OverlayController(QObject):
     # -- lifecycle ---------------------------------------------------------
 
     def resolve_window(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> tuple[int, str] | None:
-        if hwnd:
+        """The window to run on: `hwnd` while it still exists (a handle
+        picked from a list goes stale when the game restarts), else the first
+        window whose title holds `settings.window_match`, waiting up to `wait`
+        seconds for one to appear.
+
+        A live handle is trusted whatever its title says now: many games and
+        emulators put a frame counter or the level's name in it, so the title
+        picked from the list is soon out of date. A pick of another window
+        reaches here without the handle (see apply() and the settings backend)."""
+        if hwnd and is_window(hwnd):
             return hwnd, window_title(hwnd)
         if not settings.window_match:
             return None
@@ -336,23 +391,24 @@ class OverlayController(QObject):
 
     def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> bool:
         """Begin a session on the window `settings` (or `hwnd`) names. False
-        when the licence forbids it; otherwise True, and the outcome arrives
-        as `running_changed(True)` or `start_failed(message)`."""
+        when the licence forbids it (reported at once as `start_failed`);
+        otherwise True, and the outcome arrives as `running_changed(True)`
+        or `start_failed(message)`."""
         licence = license_status(self.secrets, self.store)
         if not licence.may_run:
-            self._say(f"{licence.text}: enter one in Settings > Licence")
+            self._fail(f"{licence.text}: enter one in Settings > Licence")
             return False
         if self.running:
             self.stop()
         self._generation += 1
         self._starting = True
-        self._requested_hwnd = hwnd
+        self._requested_hwnd, self._requested_match = hwnd, settings.window_match
         self.starting_changed.emit(True)
         worker = _StartWorker(self, self._generation, settings.copy(), hwnd, wait)
         worker.progress.connect(self._say)
         worker.prepared.connect(self._on_prepared)
         worker.failed.connect(self._on_start_failed)
-        worker.finished.connect(lambda: self._start_workers.discard(worker))
+        worker.finished.connect(self._on_start_worker_finished)
         self._start_workers.add(worker)
         target = f"window {hwnd:#x}" if hwnd else f"{settings.window_match!r}"
         self._say(f"starting on {target}...")
@@ -368,25 +424,32 @@ class OverlayController(QObject):
         generation: int = 0,
     ) -> Prepared:
         """The slow, thread-safe part of start(): find the window (waiting up
-        to `wait` seconds), build the translators, load the OCR engine and
-        work out the pipeline configuration. Raises StartError with a message
-        for the status line when the session cannot begin."""
+        to `wait` seconds), build the translators, read the translation
+        cache, load the OCR engine and work out the pipeline configuration.
+        Raises StartError with a message for the status line when the
+        session cannot begin; a missing key is reported before any wait."""
+        check_translator(settings, self.secrets)
         resolved = self.resolve_window(settings, hwnd, wait)
         if resolved is None:
+            if hwnd and not settings.window_match:
+                raise StartError(f"window {hwnd:#x} is gone")
             raise StartError(f"no visible window matching {settings.window_match!r}")
         hwnd, title = resolved
         game = settings.game or title or "game"
 
-        if settings.translator == "claude" and not has_anthropic_credentials(self.secrets):
-            raise StartError("no Anthropic key: enter one in Settings > Translation")
         try:
             translator = build_translator(settings, game, self.store, self.secrets)
             draft = build_draft_translator(settings, self.store, self.secrets)
+        except StartError:
+            raise
         except (OSError, ValueError, RuntimeError, ImportError) as exc:
             raise StartError(f"translator setup failed: {exc}") from exc
         for candidate in (translator, draft):
             if getattr(candidate, "kind", None):
                 say(f"offline model: {candidate.kind} ({candidate.model_dir})")  # type: ignore[union-attr]
+        # Read here, off the UI thread: a pre-translated script makes a cache of tens of thousands of lines.
+        path = self.store.cache_path(game, settings.target_lang, translator.name) if settings.use_cache_file else None
+        cache = TranslationCache(path)
 
         frame, client = capture_area(hwnd, settings.include_frame)
         try:
@@ -397,7 +460,12 @@ class OverlayController(QObject):
             engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3], say)
         except Exception as exc:
             raise StartError(f"OCR engine failed to load: {type(exc).__name__}: {exc}") from exc
-        return Prepared(generation, hwnd, title, settings, game, translator, draft, engine, config)
+        return Prepared(generation, hwnd, title, settings, game, translator, draft, cache, engine, config)
+
+    def _on_start_worker_finished(self) -> None:
+        """A start thread has ended (its result, queued before, has arrived):
+        the last reference to it goes, and with it the thread object."""
+        self._start_workers.discard(self.sender())  # type: ignore[arg-type]
 
     def _settled(self) -> None:
         """The start in progress has reached its outcome, whichever it is."""
@@ -411,9 +479,9 @@ class OverlayController(QObject):
         self._settled()
         try:
             self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
-            self.translator = prepared.translator
-            self.service = self._build_service(prepared.settings, prepared.game, prepared.translator, prepared.draft)
-            if self.cache is not None and self.cache.load_error:
+            self.translator, self.cache = prepared.translator, prepared.cache
+            self.service = self._build_service(prepared.settings, prepared.translator, prepared.draft, prepared.cache)
+            if self.cache.load_error:
                 self._say(f"translation cache unreadable ({self.cache.load_error}): set aside as .bad, starting empty")
             self.overlay = OverlayWindow(
                 prepared.hwnd,
@@ -424,6 +492,7 @@ class OverlayController(QObject):
             worker = PipelineThread(prepared.hwnd, prepared.engine, self.service, prepared.config)
             worker.blocks_ready.connect(self.overlay.set_blocks)
             worker.status.connect(self._say)
+            worker.resized.connect(self._on_frame_resized)
             worker.finished.connect(lambda: self._on_worker_finished(worker))
             self.overlay.target_lost.connect(self._on_target_lost)
             self.worker = worker
@@ -468,13 +537,11 @@ class OverlayController(QObject):
             self.stop()
 
     def _build_service(
-        self, settings: Settings, game: str, translator: Translator, draft: Translator | None
+        self, settings: Settings, translator: Translator, draft: Translator | None, cache: TranslationCache
     ) -> TranslationService:
-        path = self.store.cache_path(game, settings.target_lang, translator.name) if settings.use_cache_file else None
-        self.cache = TranslationCache(path)
         return TranslationService(
             translator,
-            self.cache,
+            cache,
             target_lang=settings.target_lang,
             source_lang=settings.effective_source_lang,
             on_status=self._say,
@@ -486,14 +553,26 @@ class OverlayController(QObject):
         self._say("game window closed")
         self.stop()
 
+    def _on_frame_resized(self) -> None:
+        """The captured frames changed size: the window was resized, or the
+        game changed resolution or went full screen. The area read and the
+        zones are frame pixels, so they are worked out again for the new size."""
+        if self.running and self.settings is not None:
+            self.apply(self.settings)
+
     def stop(self) -> None:
-        """End the session; a start() still being prepared is abandoned."""
+        """End the session; a start() still being prepared is abandoned.
+        Nothing happens when there is neither."""
+        if not (self.running or self.starting):
+            return
         self._generation += 1
         self._settled()
         worker = self.worker
         if worker is not None:
             worker.stop()
             worker.wait(3000)
+        if worker is not None or self.service is not None:
+            self.last_stats = self.stats_text()  # the session's numbers, before they are let go
         self._release()
         self.running_changed.emit(False)
         self.paused_changed.emit(False)
@@ -504,12 +583,14 @@ class OverlayController(QObject):
         filters, the timing and the look take effect at once; a change of
         window, language or translator restarts the session on them."""
         if self.starting:
-            self.start(settings, self._requested_hwnd)
+            # The handle the start was given still holds unless the edit names another window.
+            same_window = settings.window_match == self._requested_match
+            self.start(settings, self._requested_hwnd if same_window else None)
             return
         if not self.running or self.settings is None:
             return
         assert self.worker is not None and self.overlay is not None and self.hwnd is not None
-        if any(getattr(settings, name) != getattr(self.settings, name) for name in SESSION_FIELDS):
+        if any(getattr(settings, name) != getattr(self.settings, name) for name in restart_fields(settings)):
             same_window = settings.window_match == self.settings.window_match
             self._say("settings changed: restarting")
             self.start(settings, self.hwnd if same_window else None)
@@ -569,7 +650,7 @@ class OverlayController(QObject):
         frame, client = capture_area(hwnd, active.include_frame)
         self._selection = (hwnd, frame, client)
         ax0, _, ax1, _ = client or frame
-        selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_zone, center_x=(ax0 + ax1) // 2)
+        selector = AreaSelector(window_rect(hwnd), mirror_x=active.center_area, center_x=(ax0 + ax1) // 2)
         selector.selected.connect(self._apply_selected_area)
         selector.cancelled.connect(self._selection_cancelled)
         # Closed any other way (the layer deletes itself on close): forget it,
