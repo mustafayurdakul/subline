@@ -103,7 +103,7 @@ def test_weights_are_distinct_fonts_and_bold_measures_wider(overlay: BlockPainte
     bold = overlay.measurer("bold")("Nereye gidiyorsun?", 24)
     if QFontDatabase.families():
         assert bold > regular
-    else:  # the offscreen platform on Windows knows no fonts: every weight measures alike
+        placed = overlay.place_subtitle(subtitle(["Nereye gidiyorsun?"], weight="bold"))
+        assert placed.text.width() >= int(bold) - 1
+    else:  # the offscreen platform on Windows knows no fonts: every weight measures alike, a full em per glyph
         assert bold == regular
-    placed = overlay.place_subtitle(subtitle(["Nereye gidiyorsun?"], weight="bold"))
-    assert placed.text.width() >= int(bold) - 1
