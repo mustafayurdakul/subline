@@ -12,7 +12,7 @@ import pytest
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtGui import QFont, QImage, QPainter
+from PySide6.QtGui import QFont, QFontDatabase, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from gametl.overlay.paint import BlockPainter, RenderBlock
@@ -101,6 +101,9 @@ def test_weights_are_distinct_fonts_and_bold_measures_wider(overlay: BlockPainte
     assert overlay.font_at(24).weight() == QFont.Weight.Normal
     regular = overlay.measurer("regular")("Nereye gidiyorsun?", 24)
     bold = overlay.measurer("bold")("Nereye gidiyorsun?", 24)
-    assert bold > regular
+    if QFontDatabase.families():
+        assert bold > regular
+    else:  # the offscreen platform on Windows knows no fonts: every weight measures alike
+        assert bold == regular
     placed = overlay.place_subtitle(subtitle(["Nereye gidiyorsun?"], weight="bold"))
     assert placed.text.width() >= int(bold) - 1
