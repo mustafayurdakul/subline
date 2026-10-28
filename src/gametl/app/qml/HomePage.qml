@@ -7,6 +7,8 @@ import "Icons.js" as Icons
 ColumnLayout {
     id: root
     readonly property bool idle: backend.status === "idle"
+    // DeepL, the default, cannot start without a key: ask for it here, not three pages away.
+    readonly property bool needsDeeplKey: String(backend.settings.translator) === "deepl" && backend.deeplKeyStatus === "not set"
     spacing: 2 * Theme.space
 
     Item { Layout.preferredHeight: 2 * Theme.space }
@@ -19,7 +21,6 @@ ColumnLayout {
             key: "target_lang"
             options: backend.targetLanguageNames
             values: backend.targetLanguageCodes
-            editable: false
             implicitWidth: 180
             implicitHeight: 44
             font.pixelSize: 20
@@ -29,7 +30,7 @@ ColumnLayout {
     Caption {
         Layout.alignment: Qt.AlignHCenter
         text: "Start any game. Its subtitles appear in your language, over the game, as they come."
-        font.pixelSize: Theme.sizeCaption + 1
+        font.pixelSize: Theme.size
     }
 
     PrimaryButton {
@@ -43,6 +44,7 @@ ColumnLayout {
         fill: root.idle ? Theme.accent : Theme.textSoft
         onClicked: root.idle ? backend.start() : backend.stop()
     }
+    // What the overlay is doing; while it is off, what to do next.
     RowLayout {
         Layout.alignment: Qt.AlignHCenter
         spacing: Theme.space
@@ -52,13 +54,21 @@ ColumnLayout {
         }
         Caption {
             font.pixelSize: Theme.sizeCaption
-            text: backend.statusText !== "" ? backend.statusText
-                : root.idle ? "Not running. Pick the game below and press Start." : "Starting…"
+            text: backend.status === "starting" ? "Starting…"
+                : !root.idle ? backend.statusText
+                : root.needsDeeplKey ? "Not running. Add your DeepL key below, then press Start."
+                : "Not running. Pick the game below and press Start."
         }
     }
 
     Card {
         Layout.topMargin: 2 * Theme.space
+        SettingRow {
+            visible: root.needsDeeplKey
+            label: "DeepL key"
+            helper: "Needed once. A free key from deepl.com covers 500,000 characters a month."
+            KeyEntry { name: "DEEPL_AUTH_KEY"; clearable: false }
+        }
         SettingRow { label: "Game"; helper: "The window to read. Part of its title is enough."; WindowPicker {} }
         SettingRow {
             label: "Subtitle size"

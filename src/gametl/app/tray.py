@@ -1,21 +1,81 @@
 """Tray icon: start/stop, pause, rescan, settings, profiles, quit; global
-hotkeys; status in the tooltip."""
+hotkeys; status in the tooltip. One tray app runs per user and data folder."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QUrl
+import hashlib
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+
+from PySide6.QtCore import QLockFile, QObject, QUrl
 from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from .. import APP_NAME
 from .cleanup import remove_all_data
-from .config import ProfileStore, Settings
+from .config import ProfileStore, Settings, slug
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
 from .icon import make_icon
 from .license import license_status
 from .settings_backend import SettingsBackend
 from .settings_window import SettingsWindow
+
+# Hotkeys that act on a running overlay. Registered only while one runs: a
+# registered combination is taken from every other program, and idle these
+# would do nothing in exchange.
+SESSION_HOTKEYS = frozenset({"pause", "rescan"})
+
+
+class SingleInstance(QObject):
+    """Keeps a second tray app from starting beside the first. The first
+    one holds a lock file and listens on a local socket; a later one finds
+    the lock held, asks the first to open its settings window and quits.
+
+    The lock file sits in the temporary folder, not the data folder, so
+    "Remove all data" can delete that folder while the app runs."""
+
+    def __init__(self, data_dir: Path, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        key = hashlib.sha256(str(Path(data_dir).resolve()).casefold().encode("utf-8")).hexdigest()[:16]
+        self.name = f"gametl-{key}"  # one per data folder (and per user: each has a temporary folder)
+        self._lock = QLockFile(str(Path(tempfile.gettempdir()) / f"{self.name}.lock"))
+        self._lock.setStaleLockTime(0)  # a lock is stale only when its process is gone, never by age
+        self._server: QLocalServer | None = None
+
+    def claim(self, on_request: Callable[[], None]) -> bool:
+        """True when this is the only instance; `on_request` then runs each
+        time a later instance starts. False when another instance runs: it
+        has been asked to show itself."""
+        if not self._lock.tryLock(100):
+            self._wake_first()
+            return False
+        QLocalServer.removeServer(self.name)  # left behind by a crash
+        self._server = QLocalServer(self)
+        self._server.newConnection.connect(lambda: self._answer(on_request))
+        self._server.listen(self.name)
+        return True
+
+    def _answer(self, on_request: Callable[[], None]) -> None:
+        assert self._server is not None
+        while (socket := self._server.nextPendingConnection()) is not None:
+            socket.disconnectFromServer()
+            socket.deleteLater()
+            on_request()
+
+    def _wake_first(self) -> None:
+        socket = QLocalSocket()
+        socket.connectToServer(self.name)
+        if socket.waitForConnected(1000):
+            socket.disconnectFromServer()
+
+    def release(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            self._server = None
+        self._lock.unlock()
 
 
 class TrayApp(QObject):
@@ -35,6 +95,8 @@ class TrayApp(QObject):
         self.profile_name = profile_name
         self.window: SettingsWindow | None = None
         self._last_status = ""
+        self._start_problem = ""  # why the last start failed, shown in the window's banner until the next start
+        self._capturing = False  # a hotkey field is recording a key press: no global hotkey is held
 
         self.hotkeys = GlobalHotkeys()
         app.installNativeEventFilter(self.hotkeys)
@@ -68,8 +130,10 @@ class TrayApp(QObject):
         self.tray.activated.connect(self._on_activated)
 
         controller.status.connect(self._on_status)
-        controller.running_changed.connect(self._refresh_labels)
+        controller.running_changed.connect(self._on_running_changed)
         controller.starting_changed.connect(self._refresh_labels)
+        controller.starting_changed.connect(self._on_starting)
+        controller.start_failed.connect(self._on_start_failed)
         controller.paused_changed.connect(self._on_paused)
         controller.area_selected.connect(self._on_area_selected)
 
@@ -105,11 +169,14 @@ class TrayApp(QObject):
             backend.stop_requested.connect(self.controller.stop)
             backend.profile_saved.connect(self._on_profile_saved)
             backend.profile_loaded.connect(self._on_profile_loaded)
+            backend.profile_deleted.connect(self._on_profile_deleted)
             backend.select_area_requested.connect(self._select_area_from_window)
             backend.hotkeys_changed.connect(self._on_hotkeys_edited)
             backend.hotkey_capture_changed.connect(self._on_hotkey_capture)
             backend.remove_all_data_requested.connect(self.remove_all_data)
             backend.set_status_text(self._last_status)
+            if self._start_problem:
+                backend.report_problem(self._start_problem)
             self.window = SettingsWindow(backend)
             self._refresh_labels()
         elif not self.window.isVisible():
@@ -134,6 +201,7 @@ class TrayApp(QObject):
 
     def _on_hotkey_capture(self, capturing: bool) -> None:
         """While a field records a key press, no global hotkey may swallow it."""
+        self._capturing = capturing
         if capturing:
             self.hotkeys.unregister_all()
         else:
@@ -152,8 +220,12 @@ class TrayApp(QObject):
         self.controller.start(settings, hwnd)
 
     def apply_hotkeys(self, settings: Settings) -> None:
-        """Register every hotkey afresh; a combination another program holds is reported, not fatal."""
+        """Register the hotkeys afresh (all released first, so two actions
+        can swap combinations); the session's own only while the overlay
+        runs. A combination another program holds is reported, not fatal."""
         self.hotkeys.unregister_all()
+        if self._capturing:
+            return  # registered again when the field is done
         bindings = {
             "toggle": self.toggle,
             "pause": self.toggle_pause,
@@ -161,6 +233,8 @@ class TrayApp(QObject):
             "select": self.select_area,
             "settings": self.open_settings,
         }
+        if not self.controller.running:
+            bindings = {name: action for name, action in bindings.items() if name not in SESSION_HOTKEYS}
         failed = [
             f"{name} ({combo})"
             for name, combo in settings.hotkeys.items()
@@ -208,7 +282,8 @@ class TrayApp(QObject):
     # -- signals -----------------------------------------------------------------
 
     def _on_activated(self, reason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+        # A click opens the settings, as Windows users expect; the menu is on the right button.
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.open_settings()
 
     def _on_status(self, text: str) -> None:
@@ -218,6 +293,27 @@ class TrayApp(QObject):
         self.status_action.setText(f"{APP_NAME}: {text}"[:80])
         self.tray.setToolTip(f"{APP_NAME}\n{text}"[:127])
 
+    def _on_start_failed(self, message: str) -> None:
+        """A start that did not begin (licence, no matching window, a missing
+        key...). Home shows guidance rather than the status line while idle,
+        so the reason goes to the banner above every page."""
+        self._start_problem = message
+        if self.window is not None:
+            self.window.backend.report_problem(message)
+
+    def _on_starting(self, starting: bool) -> None:
+        """A new start takes the last one's failure off the banner (not a
+        problem an edit reported meanwhile: that stays until corrected)."""
+        if not starting or not self._start_problem:
+            return
+        if self.window is not None and self.window.backend.problem == self._start_problem:
+            self.window.backend.clearProblem()
+        self._start_problem = ""
+
+    def _on_running_changed(self, _running: bool) -> None:
+        self.apply_hotkeys(self.settings)  # the session's hotkeys come and go with the overlay
+        self._refresh_labels()
+
     def _on_paused(self, paused: bool) -> None:
         self.pause_action.setChecked(paused)
         self._refresh_labels()
@@ -225,6 +321,12 @@ class TrayApp(QObject):
     def _on_profile_saved(self, name: str) -> None:
         self.profile_name = name
         self._on_status(f"profile {name} saved")
+
+    def _on_profile_deleted(self, name: str) -> None:
+        """The profile in use was deleted in the window: the settings in
+        force stay, but an area selected later must not write it back."""
+        if self.profile_name and slug(self.profile_name) == name:
+            self.profile_name = None
 
     def _refresh_labels(self, *_changed: object) -> None:
         """Menu labels, enabled state and icon from the controller's state

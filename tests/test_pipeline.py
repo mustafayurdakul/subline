@@ -1,7 +1,7 @@
 """The pipeline thread's per-frame work with a fake OCR engine: which region
 is read, the full-scan cadence, the frame-change gate, settings changed on
-the fly, and translations reaching the render blocks. No capture, no
-window, no real OCR."""
+the fly, and translations reaching the render blocks (a cached one without
+a request). No capture, no window, no real OCR."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from gametl.app.pipeline import PipelineConfig, PipelineThread
 from gametl.capture.base import Frame
 from gametl.ocr.base import OcrResult, TextLine
+from gametl.translate.base import TranslationRequest
 from gametl.translate.cache import TranslationCache
 from gametl.translate.dummy import UppercaseTranslator
 from gametl.translate.service import TranslationService
@@ -71,19 +72,27 @@ def test_roi_reads_only_the_strip_and_shifts_lines_back() -> None:
     assert [b.bbox for b in blocks] == [(300, 620, 700, 660)]
 
 
-def test_full_scan_cadence_including_every_frame() -> None:
+def test_full_scan_cadence_including_every_read() -> None:
     engine = FakeEngine()
-    thread = pipeline(engine, roi=STRIP, full_scan_every=3, change_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="inplace", full_scan_every=3, change_threshold=0)
     for _ in range(6):
         thread.track_frame(frame())
-    # frames 1 and 4 sweep the whole area as well as the strip
+    # reads 1 and 4 sweep the whole area as well as the strip
     assert [len(s) == 3 and s[0] for s in engine.shapes] == [100, HEIGHT, 100, 100, 100, HEIGHT, 100, 100]
 
     engine = FakeEngine()
-    thread = pipeline(engine, roi=STRIP, full_scan_every=1, change_threshold=0)
+    thread = pipeline(engine, roi=STRIP, render="inplace", full_scan_every=1, change_threshold=0)
     for _ in range(3):
         thread.track_frame(frame())
-    assert [s[0] for s in engine.shapes] == [100, HEIGHT] * 3  # every frame, not never
+    assert [s[0] for s in engine.shapes] == [100, HEIGHT] * 3  # every read, not never
+
+
+def test_subtitle_mode_never_sweeps_outside_the_zone() -> None:
+    engine = FakeEngine()
+    thread = pipeline(engine, roi=STRIP, render="subtitle", full_scan_every=1, change_threshold=0)
+    for _ in range(3):
+        thread.track_frame(frame())
+    assert [s[0] for s in engine.shapes] == [100] * 3  # the strip only: nothing outside it is ever drawn
 
 
 def test_translation_reaches_the_render_blocks() -> None:
@@ -97,6 +106,35 @@ def test_translation_reaches_the_render_blocks() -> None:
         assert block.bbox == (300, 620, 700, 660)
     finally:
         thread.service.shutdown()
+
+
+class RecordingTranslator(UppercaseTranslator):
+    """Upper case, and every request's texts kept."""
+
+    def __init__(self) -> None:
+        self.requests: list[list[str]] = []
+
+    def translate(self, request: TranslationRequest) -> list[str]:
+        self.requests.append(list(request.texts))
+        return super().translate(request)
+
+
+def test_a_cached_line_is_shown_and_never_sent() -> None:
+    translator = RecordingTranslator()
+    cache = TranslationCache()
+    cache.put("Stay close.", "tr", "Yakın dur.")
+    service = TranslationService(translator, cache, target_lang="tr", source_lang="en")
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = PipelineThread(0, engine, service, PipelineConfig(roi=STRIP, render="subtitle", change_threshold=0))
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        for _ in range(5):  # a line seen again and again still never reaches the translator
+            thread._process(frame())
+        assert block.lines == ["Yakın dur."]
+        assert translator.requests == []
+        assert cache.get("Stay close.", "tr") == "Yakın dur."
+    finally:
+        service.shutdown()
 
 
 def test_unchanged_frames_skip_ocr_until_something_moves() -> None:
@@ -295,7 +333,7 @@ def test_settings_change_on_the_fly_keeps_the_blocks_unless_the_reading_changed(
     thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
     try:
         (block,) = process_until(thread, lambda r: bool(r))
-        assert block.weight == "regular"
+        assert block.weight == "semibold" and block.hide_source is False  # the app's own defaults
         (tracked,) = thread._tracker.blocks
         thread.update_config(replace(thread.cfg, subtitle_weight="bold"))  # a change of look
         (block,) = thread._process(frame())
@@ -305,6 +343,49 @@ def test_settings_change_on_the_fly_keeps_the_blocks_unless_the_reading_changed(
         assert thread.cfg.roi == (0, 550, WIDTH, 700)
         (fresh,) = thread._tracker.blocks  # read afresh: a new block, confirmed and translated from scratch
         assert fresh is not tracked and fresh.stable_frames == 0 and fresh.translation is None
+    finally:
+        thread.service.shutdown()
+
+
+def test_subtitle_tests_and_counts_change_without_forgetting_the_blocks() -> None:
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", subtitle_position="source", change_threshold=0)
+    try:
+        (shown,) = process_until(thread, lambda r: bool(r))
+        (tracked,) = thread._tracker.blocks
+        held = dict(thread._held)
+        changed = replace(
+            thread.cfg, subtitle_size_tolerance=0.5, subtitle_center_tolerance=0.2, stable_frames=2, max_missing=9
+        )
+        thread.update_config(changed)  # judged afresh each frame: nothing to forget
+        (again,) = thread._process(frame())
+        assert thread._tracker.blocks == [tracked] and thread._tracker.max_missing == 9
+        assert thread._held == held and (again.font_px, again.anchor_y) == (shown.font_px, shown.anchor_y)
+        thread.update_config(replace(thread.cfg, subtitle_weight="bold"))  # a look alone keeps the held size too
+        thread._process(frame())
+        assert thread._held == held
+        thread.update_config(replace(thread.cfg, subtitle_font_px=40))  # the held size came from the old one
+        (bigger,) = thread._process(frame())
+        assert bigger.font_px == 40 and thread._tracker.blocks == [tracked]
+    finally:
+        thread.service.shutdown()
+
+
+def test_frames_of_another_size_ask_for_a_new_configuration_once() -> None:
+    thread = pipeline(FakeEngine(), roi=STRIP, frame_size=(WIDTH, HEIGHT), change_threshold=0)
+    asked: list[bool] = []
+    thread.resized.connect(lambda: asked.append(True))
+    try:
+        thread._process(frame())
+        assert asked == []  # the size the boxes were worked out for
+        bigger = Frame(image=np.full((1080, 1920, 3), 20, dtype=np.uint8), timestamp=time.perf_counter())
+        for _ in range(3):
+            thread._process(bigger)  # read meanwhile, with the old boxes
+        assert asked == [True]  # once, not on every frame
+        thread.update_config(replace(thread.cfg, frame_size=(1920, 1080), roi=(0, 900, 1920, 1080)))
+        thread._process(bigger)
+        thread._process(frame())  # and back: a new mismatch is reported again
+        assert asked == [True, True]
     finally:
         thread.service.shutdown()
 

@@ -1,5 +1,7 @@
 """Overlay window: native styles (click-through, no activation, topmost),
-following the target window, and text fitting. Needs a desktop session."""
+following the target window, and painting every style in a shown window.
+Needs a desktop session; the painting rules themselves are pinned offscreen
+in test_subtitle_paint.py, which CI runs."""
 
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 from PySide6.QtWidgets import QApplication, QWidget
 
 from gametl.capture.windows import enable_per_monitor_dpi_awareness, find_window, list_windows, window_rect
-from gametl.overlay.paint import RenderBlock, source_font_px, subtitle_rect
+from gametl.overlay.paint import RenderBlock
 from gametl.overlay.window import (
     WS_EX_LAYERED,
     WS_EX_NOACTIVATE,
@@ -21,18 +23,6 @@ from gametl.overlay.window import (
     WS_EX_TRANSPARENT,
     OverlayWindow,
 )
-
-
-def test_subtitle_rect_positions_and_clamps() -> None:
-    zone = (100, 600, 1100, 700)  # 1000 wide, 100 tall
-    r = subtitle_rect(zone, anchor_y=650, text_w=400, text_h=40, position="source")
-    assert (r.left(), r.top(), r.width(), r.height()) == (400, 630, 400, 40)  # centred, on the source line
-    r = subtitle_rect(zone, anchor_y=650, text_w=400, text_h=40, position="bottom")
-    assert r.top() == 700 - 12 - 40
-    r = subtitle_rect(zone, anchor_y=650, text_w=400, text_h=40, position="center")
-    assert r.top() == 630
-    r = subtitle_rect(zone, anchor_y=605, text_w=400, text_h=40, position="source")  # would poke out at the top
-    assert r.top() == 612
 
 
 @pytest.fixture(scope="module")
@@ -93,26 +83,15 @@ def test_own_windows_are_not_listed_as_capture_targets(qapp: QApplication, targe
     assert find_window("gametl test target") is None
 
 
-def test_in_place_layout_fits_the_width(qapp: QApplication, target: QWidget) -> None:
-    overlay = OverlayWindow(int(target.winId())).painter
-    block = RenderBlock((0, 0, 300, 60), ["A fairly long translated subtitle line", "second"], source_lines=2)
-    layout = overlay.layout_for(block)
-    assert all(overlay.measurer("regular")(line, layout.font_px) <= 300 for line in layout.lines)
-    assert layout.font_px >= 6
-    assert overlay.layout_for(block) is layout  # cached
-    short = overlay.layout_for(RenderBlock((0, 0, 1000, 50), ["Hi"]))
-    assert short.font_px == source_font_px(50, 1) == int(50 * 0.8)
-
-
 def test_set_blocks_and_paint_all_styles(qapp: QApplication, target: QWidget) -> None:
     overlay = OverlayWindow(int(target.winId()), hide_when_unfocused=False, exclude_from_capture=False)
     overlay.start()
     long_text = "a translation that is much longer than the source text was and must wrap"
     overlay.set_blocks(
         [
-            RenderBlock((10, 10, 200, 40), ["HELLO"], bg=(0, 0, 0), fg=(255, 255, 255)),
-            RenderBlock((10, 60, 200, 90), [long_text], style="pill", room_below=80),
-            RenderBlock((10, 200, 200, 230), ["outlined"], style="outline"),
+            RenderBlock((10, 10, 200, 40), ["HELLO"], bg=(0, 0, 0), fg=(255, 255, 255), font_px=24),
+            RenderBlock((10, 60, 200, 90), [long_text], style="pill", font_px=24, room_below=80),
+            RenderBlock((10, 200, 200, 230), ["outlined"], style="outline", font_px=24),
             RenderBlock((60, 260, 160, 280), [long_text], style="subtitle", zone=(0, 240, 400, 300), font_px=18),
             # One word: the wrapper never measures, so the font must still get registered (crashed before).
             RenderBlock((60, 260, 160, 280), ["Run!"], style="subtitle", zone=(0, 240, 400, 300), font_px=24),

@@ -61,6 +61,11 @@ def test_numbers_not_swapped_when_ambiguous() -> None:
     assert cache.get("Chapter 3", "tr") is None
     cache.put("Gold 100", "tr", "Altın 100")
     assert cache.get("Gold", "tr") is None  # different template entirely
+    # A Turkish suffix follows how the number is said: 5'te, but 6'da.
+    cache.put("Meet me at 5", "tr", "Benimle 5'te buluş")
+    assert cache.get("Meet me at 6", "tr") is None
+    cache.put("Back at 9", "tr", "9\u2019da dönerim")  # with a typographic apostrophe too
+    assert cache.get("Back at 5", "tr") is None
 
 
 def test_substitute_numbers_helper() -> None:

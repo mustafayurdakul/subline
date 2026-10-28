@@ -17,23 +17,28 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .base import TranslationError, TranslationRequest
+from .base import TranslationError, TranslationRequest, language_code, single_line
 
 FREE_URL = "https://api-free.deepl.com/v2/translate"
 PRO_URL = "https://api.deepl.com/v2/translate"
 
-# Our language codes (ISO or rapidocr names) -> DeepL codes.
+# The languages DeepL translates, by ISO 639-1 code; DeepL's code is the same, upper-cased.
 # fmt: off
-_CODES = {
-    "en": "EN", "tr": "TR", "de": "DE", "fr": "FR", "es": "ES", "it": "IT", "pt": "PT", "pl": "PL",
-    "nl": "NL", "ru": "RU", "uk": "UK", "cyrillic": "RU", "ar": "AR", "arabic": "AR", "ja": "JA",
-    "japan": "JA", "ko": "KO", "korean": "KO", "zh": "ZH", "ch": "ZH", "chinese_cht": "ZH", "el": "EL",
-    "id": "ID", "cs": "CS", "da": "DA", "fi": "FI", "hu": "HU", "nb": "NB", "no": "NB", "ro": "RO",
-    "sk": "SK", "sl": "SL", "sv": "SV", "bg": "BG", "et": "ET", "lt": "LT", "lv": "LV", "vi": "VI",
-}
+_DEEPL_LANGUAGES = frozenset({
+    "ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hu", "id", "it", "ja", "ko", "lt", "lv", "nb",
+    "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "tr", "uk", "vi", "zh",
+})
 # fmt: on
-# DeepL no longer accepts the bare codes as targets: a variant must be named.
-_TARGET_VARIANTS = {"EN": "EN-US", "PT": "PT-PT"}
+# Bare EN/PT/ZH are deprecated as targets: name a variant.
+_TARGET_VARIANTS = {"EN": "EN-US", "PT": "PT-PT", "ZH": "ZH-HANS"}
+# Statuses the player can act on, in plain words, and how many seconds to
+# leave DeepL alone after each: retrying a rejected key or a used-up quota
+# every few seconds only repeats the message.
+_STATUS_ERRORS = {
+    403: ("DeepL rejected the key: check it on the Translation page", 60.0),
+    456: ("DeepL monthly quota used up", 60.0),
+    429: ("DeepL is busy, retrying", 0.0),
+}
 CONTEXT_CHARS = 2000  # the most recent source lines that fit, newest last
 
 
@@ -54,15 +59,23 @@ def context_text(context: list[tuple[str, str]] | None) -> str:
 
 
 def deepl_code(lang: str | None, target: bool = False) -> str | None:
-    """Our code -> DeepL code. A code with a region ("en-GB") passes through
-    upper-cased; as a `target`, plain English and Portuguese get a default
-    variant since DeepL requires one there."""
+    """Our code -> DeepL code; None lets DeepL detect the source language.
+
+    A source is a bare language: a region ("en-GB") is dropped, since DeepL's
+    `source_lang` takes none, and an unknown code or a script that covers
+    several languages ("cyrillic") gives None. A `target` keeps a region the
+    user chose, plain English, Portuguese and Chinese get a default variant,
+    and an unknown target passes through upper-cased for DeepL to judge."""
+    lang = (lang or "").strip()
     if not lang:
         return None
-    code = lang.upper() if "-" in lang else _CODES.get(lang.lower(), lang[:2].upper())
-    if target:
-        code = _TARGET_VARIANTS.get(code, code)
-    return code
+    if target and "-" in lang:
+        return lang.upper()
+    code = language_code(lang)
+    if code not in _DEEPL_LANGUAGES:
+        return lang.upper() if target else None
+    code = code.upper()
+    return _TARGET_VARIANTS.get(code, code) if target else code
 
 
 class DeepLTranslator:
@@ -71,7 +84,7 @@ class DeepLTranslator:
     def __init__(self, auth_key: str | None = None, timeout: float = 15.0, session: Any = None) -> None:
         self.auth_key = auth_key or os.environ.get("DEEPL_AUTH_KEY") or ""
         if not self.auth_key:
-            raise TranslationError("DeepL needs an API key: enter it in Settings > Translation")
+            raise TranslationError("Add your DeepL key on the Translation page")
         self.url = FREE_URL if self.auth_key.endswith(":fx") else PRO_URL
         self.timeout = timeout
         if session is None:
@@ -85,8 +98,12 @@ class DeepLTranslator:
     def translate(self, request: TranslationRequest) -> list[str | None]:
         if not request.texts:
             return []
+        # One paragraph per text: DeepL splits at line breaks by default, and
+        # a subtitle wrapped over two lines is one sentence. The cache keeps the
+        # original text; the overlay wraps the answer to its own width.
+        texts = [single_line(t) for t in request.texts]
         body: dict[str, Any] = {
-            "text": list(request.texts),
+            "text": texts,
             "target_lang": deepl_code(request.target_lang, target=True),
             "preserve_formatting": True,
         }
@@ -106,11 +123,14 @@ class DeepLTranslator:
         except Exception as exc:  # network layer
             raise TranslationError(f"DeepL request failed: {exc}") from exc
         if response.status_code != 200:
+            known = _STATUS_ERRORS.get(response.status_code)
+            if known is not None:
+                raise TranslationError(known[0], retry_after=known[1])
             raise TranslationError(f"DeepL HTTP {response.status_code}: {response.text[:200]}")
         data = response.json()
         translations = data.get("translations") or []
         if len(translations) != len(request.texts):
             raise TranslationError(f"DeepL returned {len(translations)} translations for {len(request.texts)} texts")
         self.calls += 1
-        self.characters += sum(len(t) for t in request.texts)
+        self.characters += sum(len(t) for t in texts)
         return [(t.get("text") or None) for t in translations]

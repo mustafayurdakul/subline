@@ -29,14 +29,14 @@ def test_register_and_unregister_round_trip() -> None:
     assert hotkeys.registered == []
 
 
-def test_a_bad_rebind_keeps_the_working_hotkey() -> None:
+def test_registering_replaces_the_binding_and_a_bad_one_leaves_it_unbound() -> None:
     hotkeys = GlobalHotkeys()
     try:
         assert hotkeys.register("test", "ctrl+alt+shift+f11", lambda: None) is True
-        assert hotkeys.register("test", "ctrl+hyper", lambda: None) is False  # typo
-        assert hotkeys.registered == ["test"]  # the old binding survives
         assert hotkeys.register("test", "ctrl+alt+shift+f11", lambda: None) is True  # same keys again: fine
         assert hotkeys.register("test", "ctrl+alt+shift+f12", lambda: None) is True  # moved
         assert hotkeys.registered == ["test"]
+        assert hotkeys.register("test", "ctrl+hyper", lambda: None) is False  # typo
+        assert hotkeys.registered == []  # what the call says is what holds: nothing
     finally:
         hotkeys.unregister_all()

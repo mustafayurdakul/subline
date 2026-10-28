@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .base import TranslationRequest
+from .base import TranslationRequest, language_code, single_line
 
 ARGOS_INDEX_URL = "https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json"
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
@@ -85,6 +85,13 @@ def locate_model_files(root: Path) -> ModelFiles | None:
     return None
 
 
+def iso_pair(source: str, target: str) -> tuple[str, str]:
+    """The pair as ISO 639-1 codes, the names models and packages go by: the
+    source is often a rapidocr model name ("japan") or a typed name. A script
+    that covers several languages ("cyrillic") stays as it is and finds no model."""
+    return language_code(source) or source, language_code(target) or target
+
+
 def opus_dir(models_dir: Path | str, source: str, target: str) -> Path:
     return Path(models_dir) / f"opus-{source}_{target}"
 
@@ -95,6 +102,7 @@ def package_dir(models_dir: Path | str, source: str, target: str) -> Path:
 
 def find_model(models_dir: Path | str, source: str, target: str) -> ModelFiles | None:
     """The best installed model for the pair: converted OPUS first, then Argos."""
+    source, target = iso_pair(source, target)
     for candidate in (opus_dir(models_dir, source, target), package_dir(models_dir, source, target)):
         if candidate.exists():
             found = locate_model_files(candidate)
@@ -139,6 +147,7 @@ def ensure_model(source: str, target: str, models_dir: Path | str, say: Callable
     use. Raises RuntimeError when no package exists."""
     import requests
 
+    source, target = iso_pair(source, target)
     dest = package_dir(models_dir, source, target)
     found = locate_model_files(dest) if dest.exists() else None
     if found:
@@ -298,19 +307,18 @@ class OfflineTranslator:
     def translate(self, request: TranslationRequest) -> list[str | None]:
         if not request.texts:
             return []
-        # Flatten: text -> lines -> sentences, translate all sentences in one batch.
-        plan: list[list[list[int]]] = []  # per text, per line, sentence indices
+        # Flatten: text -> sentences, translate all sentences in one batch. A
+        # text is one paragraph (`single_line`): a sentence wrapped over two
+        # OCR lines must reach the model whole.
+        plan: list[list[int]] = []  # per text, sentence indices
         sentences: list[str] = []
         for text in request.texts:
-            lines_plan: list[list[int]] = []
-            for line in text.split("\n"):
-                ids: list[int] = []
-                for sentence in split_sentences(line):
-                    if sentence.strip():
-                        ids.append(len(sentences))
-                        sentences.append(sentence)
-                lines_plan.append(ids)
-            plan.append(lines_plan)
+            ids: list[int] = []
+            for sentence in split_sentences(single_line(text)):
+                if sentence.strip():
+                    ids.append(len(sentences))
+                    sentences.append(sentence)
+            plan.append(ids)
         if not sentences:
             return ["" for _ in request.texts]
 
@@ -319,10 +327,4 @@ class OfflineTranslator:
             tokens, beam_size=self.beam_size, max_decoding_length=256, no_repeat_ngram_size=3
         )
         translated = [self.sp_target.decode(r.hypotheses[0]) if r.hypotheses else "" for r in results]
-
-        out: list[str | None] = []
-        for lines_plan in plan:
-            lines = [" ".join(translated[i] for i in ids) for ids in lines_plan]
-            joined = "\n".join(lines).strip()
-            out.append(joined or None)
-        return out
+        return [" ".join(translated[i] for i in ids).strip() or None for ids in plan]

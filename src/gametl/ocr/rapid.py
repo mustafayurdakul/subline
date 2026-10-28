@@ -8,8 +8,8 @@ Model notes (rapidocr 3.10 catalogue):
   size (tiny / small / medium) covering Chinese, Traditional Chinese,
   English, Japanese (not tiny) and most Latin-script European languages.
 - PP-OCRv5 has per-script mobile recognisers (korean, cyrillic, arabic,
-  devanagari, th, el, latin, ...). Use version="PP-OCRv5" with size="mobile"
-  for Korean or Cyrillic sources.
+  devanagari, th, el, latin, ...). `model_params` picks one of these for a
+  language the v6 recogniser does not read, behind the same v6 detector.
 """
 
 from __future__ import annotations
@@ -19,6 +19,38 @@ import time
 import numpy as np
 
 from .base import OcrResult, TextLine
+
+
+def model_params(lang: str, version: str = "PP-OCRv6", size: str = "small") -> dict[str, object]:
+    """The detector and recogniser rapidocr loads for `lang`.
+
+    The PP-OCRv6 models read Chinese, Japanese and the Latin-script
+    languages; asked for Korean, Cyrillic or Arabic they refuse to load. For
+    such a language the recogniser is the PP-OCRv5 mobile one for its script,
+    and the detector stays the chosen one, asked for under Chinese: one
+    multilingual model per version and size, which finds lines of any script."""
+    # The model catalogue only: no inference engine is loaded here.
+    from rapidocr.utils.model_resolver import route_to_model_key
+    from rapidocr.utils.typings import ModelType, OCRVersion, TaskType
+
+    def listed(task: TaskType, ocr_version: OCRVersion, model_type: ModelType) -> bool:
+        try:
+            return route_to_model_key(task, ocr_version, lang, model_type) is not None
+        except ValueError:  # a language that model does not read
+            return False
+
+    det_version, det_type = OCRVersion(version), ModelType(size)
+    rec_version, rec_type = det_version, det_type
+    if not listed(TaskType.REC, rec_version, rec_type):
+        rec_version, rec_type = OCRVersion.PPOCRV5, ModelType.MOBILE
+    return {
+        "Det.ocr_version": det_version,
+        "Det.model_type": det_type,
+        "Det.lang_type": lang if listed(TaskType.DET, det_version, det_type) else "ch",
+        "Rec.ocr_version": rec_version,
+        "Rec.model_type": rec_type,
+        "Rec.lang_type": lang,
+    }
 
 
 class RapidOcrEngine:
@@ -40,15 +72,9 @@ class RapidOcrEngine:
     ) -> None:
         # Imported here: rapidocr pulls in onnxruntime and OpenCV at import time.
         from rapidocr import RapidOCR
-        from rapidocr.utils.typings import ModelType, OCRVersion
 
         params: dict[str, object] = {
-            "Det.ocr_version": OCRVersion(version),
-            "Rec.ocr_version": OCRVersion(version),
-            "Det.model_type": ModelType(size),
-            "Rec.model_type": ModelType(size),
-            "Det.lang_type": lang,
-            "Rec.lang_type": lang,
+            **model_params(lang, version, size),
             # Standard PaddleOCR sizing: cap the long side, never upscale. The
             # rapidocr default upscales short sides under 736 px, which makes a
             # wide subtitle strip several times more expensive.

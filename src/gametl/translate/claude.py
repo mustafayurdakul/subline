@@ -59,7 +59,7 @@ _PLAIN_FORMAT = (
 PRICES_PER_MTOK: dict[str, tuple[float, float, float, float]] = {
     "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
     "claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50),
-    "claude-opus-5-5": (4.00, 20.00, 0.40, 5.00),
+    "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
 }
 
 
@@ -163,9 +163,11 @@ class ClaudeTranslator:
         return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
-    def _parse_text_json(response: Any) -> TranslationBatch:
+    def _parse_text_json(response: Any, count: int) -> TranslationBatch:
         """Plain-JSON mode: the answer is the first text block (after any
-        thinking blocks), possibly wrapped in a code fence."""
+        thinking blocks), possibly wrapped in a code fence. `count` is the
+        number of texts asked for: bare strings are matched by position, so a
+        list of another length (an item dropped or merged) cannot be matched."""
         text = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
         # The object between the outermost braces: a code fence or chatter
         # around it is ignored by the slice itself.
@@ -179,6 +181,9 @@ class ClaudeTranslator:
         items = data.get("items")
         if not isinstance(items, list):
             raise TranslationError("no items list in response")
+        if len(items) != count and any(isinstance(item, str) for item in items):
+            # Every later translation would land on the wrong text and be cached there.
+            raise TranslationError(f"{len(items)} items in response for {count} texts")
         parsed: list[TranslatedItem] = []
         try:
             for index, item in enumerate(items):
@@ -260,5 +265,5 @@ class ClaudeTranslator:
             if batch is None:
                 raise TranslationError("no structured output in response")
         else:
-            batch = self._parse_text_json(response)
+            batch = self._parse_text_json(response, len(request.texts))
         return self.results_from(batch, len(request.texts))

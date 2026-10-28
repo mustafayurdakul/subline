@@ -1,6 +1,6 @@
 [project]
 name = "gametl"
-version = "0.1.8"
+dynamic = ["version"]  # read from src/gametl/__init__.py, the one place to bump it (see [tool.hatch.version])
 description = "Real-time in-game text translation overlay for Windows"
 readme = "README.md"
 license = "LicenseRef-Proprietary"
@@ -48,9 +48,23 @@ gametl-pretranslate = "gametl.app.pretranslate:main"
 dev = ["pytest>=8", "ruff>=0.9"]
 build = ["pyinstaller>=6.10"]
 
+[tool.uv]
+# windows-capture asks for opencv-python, the GUI build of OpenCV; this app
+# uses opencv-python-headless (rapidocr needs it too). Both install the same
+# cv2 package over each other, so drop windows-capture's request: the marker
+# never matches (the project needs Python 3.12), so uv leaves opencv-python
+# out of uv.lock, and the headless build provides the cv2 windows-capture imports.
+override-dependencies = ["opencv-python; python_version < '3'"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+# The settings window shows gametl.__version__ and the release workflow reads
+# it from this file too; uv.lock leaves a dynamic version out, so a bump is
+# this one line.
+path = "src/gametl/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gametl"]

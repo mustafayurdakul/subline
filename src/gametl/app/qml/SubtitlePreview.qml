@@ -2,7 +2,9 @@ import QtQuick
 
 // A game-like frame with the subtitle on it as the overlay would draw it:
 // the image comes from the window's preview provider, painted by the same
-// code as the overlay, and is asked for again on every edit.
+// code as the overlay, and is asked for again on every edit. The frame
+// stands for a 1080p game; the image is the bottom-strip area, so sizes in
+// it are to scale (preview.py). Always dark, like a game: no theme colours.
 Rectangle {
     id: root
 
@@ -34,15 +36,15 @@ Rectangle {
     }
     Rectangle { x: parent.width * 0.74; y: parent.height * 0.66; width: 22; height: 30; color: "#E8B45A"; opacity: 0.85 }
 
-    // The subtitle zone: the bottom third, as a bottom-strip area would be.
+    // The area read: the bottom quarter, as the default bottom strip. Asked
+    // for at the screen's scale, so the text stays sharp on a 150 % screen.
     Image {
         id: zone
-        x: 24
-        width: parent.width - 48
-        y: parent.height * 0.64
-        height: parent.height * 0.36
-        sourceSize.width: width
-        sourceSize.height: height
+        width: parent.width
+        y: parent.height * 0.75
+        height: parent.height * 0.25
+        sourceSize.width: Math.round(width * uiScale)
+        sourceSize.height: Math.round(height * uiScale)
         cache: false
         source: "image://overlay/" + backend.previewStamp
     }
@@ -53,7 +55,8 @@ Rectangle {
         anchors.margins: 10
         width: previewTag.implicitWidth + 16
         height: 22
+        radius: 4
         color: Qt.rgba(0, 0, 0, 0.45)
-        Label { id: previewTag; anchors.centerIn: parent; text: "Live preview"; color: Theme.textSoft; font.pixelSize: Theme.sizeTiny }
+        Label { id: previewTag; anchors.centerIn: parent; text: "Live preview"; color: Theme.textOnDark; opacity: 0.85; font.pixelSize: Theme.sizeTiny }
     }
 }

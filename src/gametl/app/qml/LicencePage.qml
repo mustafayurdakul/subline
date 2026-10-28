@@ -18,7 +18,7 @@ ColumnLayout {
                 spacing: Theme.space
                 Field { id: keyField; placeholderText: "GAMETL-..."; onAccepted: activate.clicked() }
                 SecondaryButton { id: activate; text: "Activate"; icon_: Icons.check; onClicked: { backend.activateLicense(keyField.text); keyField.text = "" } }
-                SecondaryButton { text: "Remove"; onClicked: backend.removeLicense() }
+                SecondaryButton { text: "Remove"; onClicked: confirmRemoveKey.open() }
             }
         }
         SecondaryButton { visible: backend.purchaseUrl !== ""; text: "Buy a licence"; icon_: Icons.external; onClicked: Qt.openUrlExternally(backend.purchaseUrl) }
@@ -35,15 +35,23 @@ ColumnLayout {
         }
         Caption {
             Layout.fillWidth: true
-            text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models, API keys, licence key and trial start. Then the app quits. Nothing of it stays apart from the program folder."
+            text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models, API keys and the licence key. Then the app quits. Only the trial's start date (gametl/TRIAL_START) is kept, so the trial does not start over."
         }
     }
 
     Confirm {
         id: confirm
         title: "Remove all data and quit?"
-        text: "Every profile, translation cache, downloaded model, the API keys, the licence key and the trial record go. This cannot be undone."
+        text: "Every profile, translation cache, downloaded model, the API keys and the licence key go; only the trial's start date stays. This cannot be undone."
         confirmText: "Remove and quit"
         onConfirmed: backend.removeAllData()
+    }
+
+    Confirm {
+        id: confirmRemoveKey
+        title: "Remove the licence key?"
+        text: "The key is removed from this computer. Without it the app runs on what is left of the trial; the key can be entered again later."
+        confirmText: "Remove key"
+        onConfirmed: backend.removeLicense()
     }
 }

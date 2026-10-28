@@ -1,8 +1,15 @@
 # Real-time In-Game Translation Overlay - Design Plan
 
-Status: draft v0.2 (2026-10-21). Nothing built yet; this is the plan to agree on first.
+Status: historical design log of the first builds (2026-10-21 to
+2026-10-23, up to version 0.1.0), no longer kept up to date. Later
+decisions (DeepL as the default translator, the Qt Quick settings window
+with its Home page, the offline runtime downloaded on demand, the name
+Subline) are not recorded here; [README.md](README.md) describes the app
+as it is now.
 
-Settled so far: Python 3.12 + PySide6 (see 4.1); Claude Haiku 5.5 as the
+Written as: draft v0.2 (2026-10-21). Nothing built yet; this is the plan to agree on first.
+
+Settled at the time (historical): Python 3.12 + PySide6 (see 4.1); Claude Haiku 5.5 as the
 default translator with Opus 5.5 as the quality option (see 4.4); patch as the
 default overlay style (see 4.5); a delay of about half a second before a
 never-seen line shows its translation is acceptable for v1 (see 2.1).

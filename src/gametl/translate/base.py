@@ -21,7 +21,13 @@ class TranslationRequest:
 
 
 class TranslationError(RuntimeError):
-    """A whole batch failed (network, API error, refusal, malformed output)."""
+    """A whole batch failed (network, API error, refusal, malformed output).
+    `retry_after` is how many seconds the backend should be left alone (a
+    rejected key, a used-up quota); 0 means the service's usual cooldown."""
+
+    def __init__(self, message: str, retry_after: float = 0.0) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class Translator(Protocol):
@@ -33,19 +39,52 @@ class Translator(Protocol):
         ...
 
 
-# rapidocr language codes and common ISO codes -> English names
+# Language codes (ISO 639-1) and rapidocr model names -> English names
 # fmt: off
 LANGUAGE_NAMES: dict[str, str] = {
     "en": "English", "tr": "Turkish", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian",
-    "pt": "Portuguese", "pl": "Polish", "nl": "Dutch", "ru": "Russian", "uk": "Ukrainian", "cyrillic": "Russian",
-    "ar": "Arabic", "arabic": "Arabic", "ja": "Japanese", "japan": "Japanese", "ko": "Korean", "korean": "Korean",
-    "zh": "Chinese", "ch": "Chinese", "chinese_cht": "Traditional Chinese", "th": "Thai", "el": "Greek",
-    "vi": "Vietnamese", "id": "Indonesian", "hi": "Hindi", "devanagari": "Hindi",
+    "pt": "Portuguese", "pl": "Polish", "nl": "Dutch", "ru": "Russian", "uk": "Ukrainian", "ar": "Arabic",
+    "arabic": "Arabic", "ja": "Japanese", "japan": "Japanese", "ko": "Korean", "korean": "Korean", "zh": "Chinese",
+    "ch": "Chinese", "chinese_cht": "Traditional Chinese", "th": "Thai", "el": "Greek", "vi": "Vietnamese",
+    "id": "Indonesian", "hi": "Hindi", "cs": "Czech", "da": "Danish", "fi": "Finnish", "hu": "Hungarian",
+    "nb": "Norwegian", "ro": "Romanian", "sk": "Slovak", "sl": "Slovenian", "sv": "Swedish", "bg": "Bulgarian",
+    "et": "Estonian", "lt": "Lithuanian", "lv": "Latvian",
 }
 # fmt: on
+# rapidocr models that read a script, not a language ("cyrillic": Russian,
+# Ukrainian, Bulgarian, ...): no source language follows from them, so the
+# translator is left to detect it.
+MULTI_LANGUAGE_SCRIPTS = frozenset({"cyrillic", "latin", "devanagari"})
+# rapidocr model names and other spellings -> ISO 639-1 codes
+_CODE_ALIASES = {"japan": "ja", "korean": "ko", "ch": "zh", "chinese_cht": "zh", "arabic": "ar", "no": "nb"}
+# English names -> codes, so a typed "German" reads as "de"
+_NAME_CODES = {name.lower(): code for code, name in LANGUAGE_NAMES.items() if len(code) == 2}
 
 
 def language_name(code_or_name: str | None) -> str | None:
-    if not code_or_name:
+    """The English name of a code or rapidocr model name; the value itself
+    when unknown; None for no value or a script that covers several languages."""
+    if not code_or_name or code_or_name.strip().lower() in MULTI_LANGUAGE_SCRIPTS:
         return None
-    return LANGUAGE_NAMES.get(code_or_name.lower(), code_or_name)
+    return LANGUAGE_NAMES.get(code_or_name.strip().lower(), code_or_name)
+
+
+def language_code(code_or_name: str | None) -> str | None:
+    """The ISO 639-1 code for a code ("de", "pt-BR"), a rapidocr model name
+    ("japan") or an English name ("German"); an unknown value comes back
+    lower-cased; None for no value or a script that covers several languages."""
+    key = (code_or_name or "").strip().lower()
+    if not key or key in MULTI_LANGUAGE_SCRIPTS:
+        return None
+    code = _NAME_CODES.get(key, key.split("-")[0])  # a region does not change the language
+    return _CODE_ALIASES.get(code, code)
+
+
+def single_line(text: str) -> str:
+    """`text` with its line breaks and runs of spaces as single spaces.
+
+    A block arrives with the line breaks of its OCR lines. A translator that
+    splits at them translates a sentence wrapped over two lines as two
+    fragments, which breaks the word order of a language like Turkish; the
+    overlay wraps the translation to its own width anyway."""
+    return " ".join(text.split())

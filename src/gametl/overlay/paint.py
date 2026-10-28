@@ -4,8 +4,10 @@ renderer all paint through one BlockPainter, so they look the same.
 
 Styles:
 - "subtitle": one fixed font size and colour, centred in the selected zone,
-  on a pill (plain text), with a soft shadow, or bare with an outline; a band covers the
-  source line when the text is drawn elsewhere;
+  on a pill (plain text), with a soft shadow, or bare with an outline; with
+  hide_source a band covers the source line, merged into the pill when they
+  overlap; blocks shown at once at "bottom" or "center" are stacked, and
+  no band covers another block's text;
 - "patch": the sampled background colour painted over the original and the
   translation drawn in the sampled text colour, in place;
 - "pill": a dark rounded box with white text, in place (for busy
@@ -20,13 +22,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from itertools import pairwise
 
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 
 from ..geometry import RGB, Box
 from ..layout.fit import TextLayout, fit_text
-from ..layout.style import font_px_for
 
 WEIGHTS = {
     "regular": QFont.Weight.Normal,
@@ -50,6 +52,9 @@ _SHADOW_LAYERS = [
 ]
 _CACHE_SIZE = 512  # layouts
 _REFERENCE_SIZES = (12, 16, 24, 32, 48, 100)  # font sizes the line-height ratio is measured at
+# Subtitle positions that ignore the source line, so blocks shown at once would share one spot: they are stacked.
+_STACKED = ("bottom", "center")
+_STACK_GAP = 4  # pixels between the pills of stacked subtitles
 
 
 @dataclass(slots=True)
@@ -61,20 +66,18 @@ class RenderBlock:
     bg: RGB = (0, 0, 0)
     fg: RGB = (255, 255, 255)
     style: str = "patch"  # "patch" | "pill" | "outline" | "subtitle"
-    source_lines: int = 1  # lines in the source text; sets the base font size unless font_px is given
-    font_px: int | None = None  # base font size decided by the caller (style memory)
-    prefer_grow: bool = True  # keep the font size and wrap into free space before shrinking
+    font_px: int = 0  # base font size, set by every producer of text (style memory); unused by debug outlines
     room_below: int = 0  # free pixels the box may grow into
     room_above: int = 0
     outline: bool = False  # debug: draw the box outline only
-    # subtitle style: text centred in `zone`; a band hides the source line when the text is drawn elsewhere
+    # subtitle style: text centred in `zone`; with hide_source a band covers the source line
     zone: Box | None = None
     position: str = "bottom"  # "source" | "bottom" | "center"
     background: str = "pill"  # "pill" | "shadow" | "none"
     pill_alpha: int = 230
     weight: str = "regular"  # a key of WEIGHTS
     anchor_y: int | None = None  # subtitle at "source": the line's centre to hold; None = the box's own
-    hide_source: bool = True  # cover the source line when the text is drawn elsewhere
+    hide_source: bool = True  # cover the source line with a band, merged into the pill when they overlap
 
 
 @dataclass(slots=True)
@@ -104,9 +107,36 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
     return QRect(x, y, text_w, text_h)
 
 
-def source_font_px(box_height: int, source_lines: int) -> int:
-    """Font size that matches the source text, from its line height."""
-    return font_px_for(box_height / max(1, source_lines))
+def _is_subtitle(block: RenderBlock) -> bool:
+    """A block drawn in the subtitle style, placed in its zone."""
+    return not block.outline and bool(block.lines) and block.style == "subtitle" and block.zone is not None
+
+
+def _shift(placed: SubtitlePlacement, dy: int) -> None:
+    """Move a subtitle's text and pill by `dy`; the band stays on the source line."""
+    placed.text = placed.text.translated(0, dy)
+    placed.pill = placed.pill.translated(0, dy)
+
+
+def _stack(stack: list[SubtitlePlacement], zone: Box, position: str) -> None:
+    """Move the placements in `stack`, top to bottom in source order, so no
+    two pills meet: from the lowest, which stays put, each one above ends
+    `_STACK_GAP` over the next one's pill. At "center" the whole stack is
+    then centred in the zone. A stack that fits the zone stays inside it; a
+    taller one rises above it, but never past the top of the window. At
+    "bottom" the lowest line keeps its place; at "center" the stack's foot
+    stays inside the zone (centring a tall stack would push its lower lines
+    below the zone, and past the window's bottom when the zone reaches it)."""
+    for upper, lower in reversed(list(pairwise(stack))):
+        _shift(upper, lower.pill.top() - _STACK_GAP - (upper.pill.top() + upper.pill.height()))
+    dy = 0
+    if position == "center":
+        top, end = stack[0].pill.top(), stack[-1].pill.top() + stack[-1].pill.height()
+        dy = (zone[1] + zone[3]) // 2 - (top + end) // 2
+        dy = min(dy, zone[3] - end)
+    dy = max(dy, -stack[0].pill.top())  # frame pixel 0 is the window's top edge
+    for placed in stack:
+        _shift(placed, dy)
 
 
 def _padded(box: Box, pad_x: int, pad_y: int) -> QRect:
@@ -162,8 +192,8 @@ class BlockPainter:
 
     def spacing_ratio(self, weight: str = "regular") -> float:
         """Line height per pixel of font size, from the font's own metrics
-        (ascent plus descent plus leading), so descenders fit the line. The
-        largest ratio over common sizes: metrics round up at small sizes."""
+        (ascent plus descent), so descenders fit the line. The largest ratio
+        over common sizes: metrics round up at small sizes."""
         ratio = self._spacing.get(weight)
         if ratio is None:
             ratio = max(1.0, *(self.metrics_at(px, weight).height() / px for px in _REFERENCE_SIZES))
@@ -182,11 +212,6 @@ class BlockPainter:
             value = cache[key] = build()
         return value
 
-    @staticmethod
-    def _base_px(block: RenderBlock) -> int:
-        """The font size to start from: the caller's, else the source text's."""
-        return block.font_px or source_font_px(block.bbox[3] - block.bbox[1], block.source_lines)
-
     def _pads(self, bbox: Box) -> tuple[int, int]:
         """(horizontal, vertical) padding around a box: the sides get more on tall text."""
         return max(self.padding, int(0.2 * (bbox[3] - bbox[1]))), self.padding
@@ -196,10 +221,10 @@ class BlockPainter:
         free room around it."""
         x0, y0, x1, y1 = block.bbox
         width, height = x1 - x0, y1 - y0
-        base_px = self._base_px(block)
+        base_px = block.font_px
         room = block.room_below + block.room_above  # only the sum matters to the layout
         ratio = self.spacing_ratio(block.weight)
-        key = ("inplace", tuple(block.lines), width, height, base_px, block.prefer_grow, room, block.weight)
+        key = ("inplace", tuple(block.lines), width, height, base_px, room, block.weight)
         return self._cached(
             self._layouts,
             key,
@@ -211,7 +236,7 @@ class BlockPainter:
                 base_px,
                 max_height=height + room,
                 line_spacing=ratio,
-                prefer_grow=block.prefer_grow,
+                prefer_grow=True,
             ),
         )
 
@@ -223,7 +248,7 @@ class BlockPainter:
         _x0, y0, _x1, y1 = block.bbox
         zx0, zy0, zx1, zy1 = block.zone
         source = _padded(block.bbox, *self._pads(block.bbox))
-        font_px = self._base_px(block)
+        font_px = block.font_px
         ratio = self.spacing_ratio(block.weight)
         margin = max(12, font_px // 2)
         width = max(50, (zx1 - zx0) - 2 * margin)
@@ -242,7 +267,7 @@ class BlockPainter:
                 prefer_grow=True,
             ),
         )
-        # metrics_at registers the font even when the wrapper never measured (a one-word line).
+        # Metrics of the size the layout settled on.
         metrics = self.metrics_at(layout.font_px, block.weight)
         text_w = min(width, max(metrics.horizontalAdvance(line) for line in layout.lines))
         anchor = block.anchor_y if block.anchor_y is not None else (y0 + y1) // 2
@@ -253,23 +278,49 @@ class BlockPainter:
         )
         return SubtitlePlacement(layout, text, pill, source)
 
+    def place_subtitles(self, blocks: list[RenderBlock]) -> dict[int, SubtitlePlacement]:
+        """Placements of the subtitle blocks among `blocks`, by index.
+
+        At "bottom" and "center" every block lands at the same height, so the
+        blocks sharing a zone and position are stacked in the order of their
+        source lines (see _stack): one translation never covers another."""
+        placements = {i: self.place_subtitle(block) for i, block in enumerate(blocks) if _is_subtitle(block)}
+        stacks: dict[tuple, list[int]] = {}  # by (zone, position)
+        for i in placements:
+            if blocks[i].position in _STACKED:
+                stacks.setdefault((blocks[i].zone, blocks[i].position), []).append(i)
+        for (zone, position), members in stacks.items():
+            if len(members) > 1:
+                members.sort(key=lambda i: (blocks[i].bbox[1], blocks[i].bbox[0]))
+                _stack([placements[i] for i in members], zone, position)
+        return placements
+
     # -- painting ----------------------------------------------------------------
 
     def paint_blocks(self, p: QPainter, blocks: list[RenderBlock]) -> None:
-        """Draw blocks with `p`, which may target a window or any image."""
-        for block in blocks:
-            self._paint_block(p, block)
+        """Draw blocks with `p`, which may target a window or any image, in
+        list order. The texts of the subtitles go on after every background,
+        so a band over one block's source line never covers another block's
+        translation, whatever the order of the list. (Something meant to lie
+        under a band, as the settings preview's game line, is drawn by a
+        call of its own before.)"""
+        placements = self.place_subtitles(blocks)
+        for i, block in enumerate(blocks):
+            placed = placements.get(i)
+            if placed is None:
+                self._paint_block(p, block)
+            else:
+                self._paint_subtitle_background(p, block, placed)
+        for i, placed in placements.items():
+            self._paint_subtitle_text(p, blocks[i], placed)
 
     def _paint_block(self, p: QPainter, block: RenderBlock) -> None:
+        """A debug outline, or a block drawn on its own box."""
         if block.outline:
             p.setPen(QPen(DEBUG_COLOR, 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(_padded(block.bbox, *self._pads(block.bbox)))
-        elif not block.lines:
-            return
-        elif block.style == "subtitle" and block.zone is not None:
-            self._paint_subtitle(p, block)
-        else:
+        elif block.lines:
             self._paint_in_place(p, block)
 
     def _paint_in_place(self, p: QPainter, block: RenderBlock) -> None:
@@ -297,19 +348,28 @@ class BlockPainter:
         total = len(layout.lines) * layout.line_height
         text_top = top + max(0.0, ((bottom - top) - total) / 2)
         area = QRect(x0, int(text_top), x1 - x0, int(total) + 1)
-        self._draw_lines(p, layout.lines, area, layout.line_height, fg, decoration, layout.font_px, block)
+        font = self.font_at(layout.font_px, block.weight)
+        self._draw_lines(p, layout.lines, area, layout.line_height, fg, decoration, font)
 
-    def _paint_subtitle(self, p: QPainter, block: RenderBlock) -> None:
-        """One fixed style, centred in the zone. Background "pill": a
-        rounded box sized by the text; "shadow": the text with a soft drop
-        shadow, no box; "none": outlined text. With `hide_source` a band
-        covers the source line, merged into the pill when they overlap."""
-        placed = self.place_subtitle(block)
+    def _paint_subtitle_background(self, p: QPainter, block: RenderBlock, placed: SubtitlePlacement) -> None:
+        """Background "pill": a rounded box sized by the text; "shadow" and
+        "none" draw no box. With `hide_source` a band covers the source line,
+        merged into the pill when they overlap."""
         p.setPen(Qt.PenStyle.NoPen)
-        pill_color = QColor(0, 0, 0, max(0, min(255, block.pill_alpha)))
+        # The one clamp every producer passes through; int() takes a float from a hand-edited profile.
+        pill_color = QColor(0, 0, 0, max(0, min(255, int(block.pill_alpha))))
         if block.background == "pill" and block.hide_source and placed.pill.intersects(placed.source):
+            # One rounded box round both, in two parts: the part over the source line dark enough
+            # to hide the original, however light the pill; the rest at the pill's own opacity.
+            shape = QPainterPath()
+            shape.addRoundedRect(QRectF(placed.pill.united(placed.source)), 8, 8)
+            band = QPainterPath()
+            band.addRect(QRectF(placed.source))
+            band = band.intersected(shape)
+            p.setBrush(QColor(0, 0, 0, max(pill_color.alpha(), PILL_COLOR.alpha())))
+            p.drawPath(band)
             p.setBrush(pill_color)
-            p.drawRoundedRect(placed.pill.united(placed.source), 8, 8)
+            p.drawPath(shape.subtracted(band))
         else:
             if block.hide_source:
                 p.setBrush(PILL_COLOR)  # the band must hide the original whatever the pill's opacity
@@ -317,16 +377,19 @@ class BlockPainter:
             if block.background == "pill":
                 p.setBrush(pill_color)
                 p.drawRoundedRect(placed.pill, 8, 8)
+
+    def _paint_subtitle_text(self, p: QPainter, block: RenderBlock, placed: SubtitlePlacement) -> None:
+        """The subtitle's lines: with a soft drop shadow ("shadow"), outlined
+        ("none") or plain on the pill."""
         if block.background == "shadow":
             decoration = "shadow"
         elif block.background == "none":
             decoration = "outline"  # bare text needs an edge to read over anything
         else:
             decoration = "none"  # the pill is the contrast; an outline would only thicken the letters
-        self._draw_lines(
-            p, placed.layout.lines, placed.text, placed.layout.line_height, QColor(*block.fg), decoration,
-            placed.layout.font_px, block,
-        )  # fmt: skip
+        layout = placed.layout
+        font = self.font_at(layout.font_px, block.weight)
+        self._draw_lines(p, layout.lines, placed.text, layout.line_height, QColor(*block.fg), decoration, font)
 
     def _draw_lines(
         self,
@@ -336,12 +399,11 @@ class BlockPainter:
         line_h: float,
         fg: QColor,
         decoration: str,
-        font_px: int,
-        block: RenderBlock,
+        font: QFont,
     ) -> None:
-        """Draw `lines` top to bottom, each centred in a row `line_h` tall,
-        with an outline, a drop shadow or nothing behind the text."""
-        font = self.font_at(font_px, block.weight)
+        """Draw `lines` in `font` top to bottom, each centred in a row
+        `line_h` tall, with an outline, a drop shadow or nothing behind the
+        text."""
         p.setFont(font)
         flags = Qt.AlignmentFlag.AlignCenter
         top = float(area.top())

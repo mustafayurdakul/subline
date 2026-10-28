@@ -30,10 +30,13 @@ from ..translate.service import TranslationService
 
 @dataclass(slots=True)
 class PipelineConfig:
+    frame_size: tuple[int, int] | None = None  # (width, height) the boxes below were worked out for; None = any
     area: Box | None = None  # frame pixels considered at all (the client area); None = whole frame
     roi: Box | None = None  # frame pixels read and translated; None = the whole area every frame
     fps: float = 10.0  # capture cap
-    full_scan_every: int = 0  # with a roi: also sweep the rest of the area every N frames (0 = never)
+    # In-place mode with a roi: also sweep the rest of the area every N OCR reads (0 = never). Subtitle
+    # mode never sweeps: it draws nothing outside the zone.
+    full_scan_every: int = 0
     stable_frames: int = 1  # confirming frames before translating
     max_missing: int = 3  # frames a block survives without being seen
     style: str = "auto"  # in-place style: auto | patch | pill | outline; auto = patch unless the background is busy
@@ -44,9 +47,9 @@ class PipelineConfig:
     subtitle_color: RGB | None = None  # None = the game's own subtitle colour, sampled
     subtitle_background: str = "pill"  # "pill" | "shadow" | "none"
     subtitle_pill_alpha: int = 230
-    subtitle_weight: str = "regular"
+    subtitle_weight: str = "semibold"
     subtitle_position: str = "bottom"  # "bottom" | "source" | "center"
-    subtitle_hide_source: bool = True
+    subtitle_hide_source: bool = False
     # Which blocks in the zone are subtitles rather than HUD text: centred in the
     # zone (within a fraction of its width) and about the learned line height.
     subtitle_center_tolerance: float = 0.10  # 0 = off
@@ -66,24 +69,35 @@ class PipelineConfig:
     dump_dir: str | None = None  # debug: save each frame with OCR lines and block boxes drawn
 
 
+def thumbnail(region: np.ndarray) -> np.ndarray:
+    """The frame-change gate's view of a BGR region: grey, at 1/8 scale
+    (INTER_AREA averages each 8x8 cell, so noise and compression grain
+    mostly cancel out). An empty region gives one black pixel."""
+    if region.size == 0:
+        return np.zeros((1, 1), dtype=np.uint8)
+    grey = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    return cv2.resize(grey, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
+
+
+def change_score(last: np.ndarray, thumb: np.ndarray) -> float:
+    """The strongest change anywhere between two thumbnails of one size: the
+    largest 3x3 mean of the pixel differences, 0..255. A short word
+    appearing in a wide strip counts in full (the mean over the strip would
+    bury it), one flickering pixel does not."""
+    return float(cv2.blur(cv2.absdiff(last, thumb), (3, 3)).max())
+
+
 def _tracking_fields(cfg: PipelineConfig) -> tuple:
-    """What decides which region is read and which blocks live; a change in
-    these starts the tracking afresh, a change of look alone does not."""
-    return (
-        cfg.area,
-        cfg.roi,
-        cfg.full_scan_every,
-        cfg.stable_frames,
-        cfg.max_missing,
-        cfg.line_filter,
-        cfg.subtitle_center_tolerance,
-        cfg.subtitle_size_tolerance,
-    )
+    """What decides which region is read and which lines reach the tracker;
+    a change in these starts the tracking afresh. The rest (the look, the
+    subtitle tests, the confirmation count) is judged afresh every frame."""
+    return (cfg.area, cfg.roi, cfg.full_scan_every, cfg.line_filter)
 
 
 class PipelineThread(QThread):
     blocks_ready = Signal(list)  # list[RenderBlock]
     status = Signal(str)
+    resized = Signal()  # the frames no longer have cfg.frame_size: the boxes need working out again
 
     def __init__(
         self,
@@ -111,6 +125,7 @@ class PipelineThread(QThread):
         self._held: dict[tuple[int, str], tuple[int, int]] = {}  # (block id, text) -> (font px, anchor y) while shown
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
+        self._resize_reported: tuple[int, int] | None = None  # the frame size `resized` was last emitted for
 
     def stop(self) -> None:
         self._stop = True
@@ -129,7 +144,9 @@ class PipelineThread(QThread):
         if cfg is None:
             return
         old, self.cfg = self.cfg, cfg
-        self._held.clear()  # sizes and anchors may follow the new settings
+        self._tracker.max_missing = cfg.max_missing
+        if cfg.subtitle_font_px != old.subtitle_font_px:
+            self._held.clear()  # a shown line's held size came from the old setting
         if _tracking_fields(cfg) != _tracking_fields(old):
             self._forget_blocks(reset_style=cfg.roi != old.roi)
 
@@ -178,6 +195,7 @@ class PipelineThread(QThread):
         """One frame: OCR and tracking (unless the frame is unchanged), then
         translations and what to draw."""
         self._adopt_config()
+        self._check_size(frame)
         cfg = self.cfg
         if self.unchanged(frame):
             self.skipped += 1
@@ -200,6 +218,17 @@ class PipelineThread(QThread):
             render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
         return render
 
+    def _check_size(self, frame: Frame) -> None:
+        """Emit `resized` once when the frames stop matching the size the
+        configuration was worked out for (the owner answers with a new one).
+        Meanwhile the old boxes are read, clipped to the frame."""
+        size = (frame.width, frame.height)
+        if self.cfg.frame_size is None or size == self.cfg.frame_size:
+            self._resize_reported = None
+        elif size != self._resize_reported:
+            self._resize_reported = size
+            self.resized.emit()
+
     # -- frame change ----------------------------------------------------------
 
     def _area(self, frame: Frame) -> Box:
@@ -207,20 +236,9 @@ class PipelineThread(QThread):
         return self.cfg.area or (0, 0, frame.width, frame.height)
 
     def _thumbnail(self, frame: Frame) -> np.ndarray:
+        """thumbnail() of the region read: the roi, or the whole area."""
         x0, y0, x1, y1 = self.cfg.roi or self._area(frame)
-        region = frame.image[y0:y1, x0:x1]
-        if region.size == 0:
-            return np.zeros((1, 1), dtype=np.uint8)
-        grey = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
-        return cv2.resize(grey, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
-
-    @staticmethod
-    def _change(last: np.ndarray, thumb: np.ndarray) -> float:
-        """The strongest change anywhere between two thumbnails: the largest
-        3x3 mean of the pixel differences. A short word appearing in a wide
-        strip counts in full (the mean over the strip would bury it), one
-        flickering pixel does not."""
-        return float(cv2.blur(cv2.absdiff(last, thumb), (3, 3)).max())
+        return thumbnail(frame.image[y0:y1, x0:x1])
 
     def unchanged(self, frame: Frame) -> bool:
         """True when nothing in the read region has changed since the frame
@@ -238,7 +256,7 @@ class PipelineThread(QThread):
             or last.shape != thumb.shape
             or self._skip_run >= cfg.max_skipped
             or not self._settled()
-            or self._change(last, thumb) >= cfg.change_threshold
+            or change_score(last, thumb) >= cfg.change_threshold
         ):
             self._last_thumb, self._skip_run = thumb, 0
             return False
@@ -315,7 +333,7 @@ class PipelineThread(QThread):
 
         lines = self._ocr_region(frame, roi)
         every = self.cfg.full_scan_every
-        if every and (self.frames - 1) % every == 0:  # the first frame, then every N-th
+        if every and not self.subtitle_mode and (self.frames - 1) % every == 0:  # the first read, then every N-th
             others = self._ocr_region(frame, full)
             lines += [line for line in others if not intersects(line.bbox, roi)]
             return lines, full
@@ -418,7 +436,6 @@ class PipelineThread(QThread):
                 bg=bgr_to_rgb(bg),
                 fg=text_rgb,
                 style="subtitle",
-                source_lines=n_lines,
                 font_px=font_px,
                 zone=cfg.roi,
                 position=cfg.subtitle_position,
@@ -441,7 +458,6 @@ class PipelineThread(QThread):
             bg=bgr_to_rgb(bg),
             fg=bgr_to_rgb(fg),
             style=style,
-            source_lines=n_lines,
             font_px=memory.font_px(block.bbox, n_lines),
             room_below=below,
             room_above=above,

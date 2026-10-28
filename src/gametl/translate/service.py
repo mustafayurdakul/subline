@@ -2,10 +2,11 @@
 
 The pipeline thread never waits on a translator. Each frame it asks
 `lookup_best()` for every stable block without a final translation and
-hands the misses to `submit()`, which sends them as one batch on a worker
-thread. `drain()` folds finished batches into the cache and the context
-window; failed items get a cooldown so a broken network does not spam
-requests.
+hands the misses to `submit()`, which sends the ones the cache cannot
+answer as one batch on a worker thread. `drain()` folds finished batches
+into the cache and the context window. A failed request holds back its tier
+for a cooldown, and an item that came back empty waits on its own, so a
+broken network or a rejected key does not spam requests.
 
 Two tiers: the final translator, whose results are cached and kept, and an
 optional draft translator (offline model or DeepL) whose results are shown
@@ -17,7 +18,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -34,6 +35,11 @@ class BatchResult:
     results: list[str | None]  # one per text; None = not translated
     error: Exception | None
     elapsed_ms: float
+
+
+def _unexpired(until: dict[str, float], now: float) -> dict[str, float]:
+    """The cooldowns in `until` (key -> monotonic time) that have not passed."""
+    return {key: t for key, t in until.items() if t > now} if until else until
 
 
 class _DaemonPool:
@@ -97,23 +103,34 @@ class TranslationService:
         self.cache = cache if cache is not None else TranslationCache()
         self.target_lang = target_lang
         self.source_lang = source_lang
+        self.context_lines = context_lines
         self.retry_cooldown = retry_cooldown
         self.on_status = on_status
-        # New translations reach the disk this soon after arriving, so a
-        # crash or a killed process loses at most a few seconds of work.
+        # New translations reach the disk at most this long after arriving, so
+        # a crash or a killed process loses at most this much work.
         self.autosave_seconds = autosave_seconds
         self.max_drafts = max_drafts
 
         workers += 1 if draft_translator else 0
         self._pool = _DaemonPool(workers, "translate")
         self._lock = threading.Lock()
+        # Final tier. A failed request holds back the whole tier for a while
+        # (`_backoff_until`): per-text cooldowns would not stop a ticking
+        # counter, whose every tick is a new text. An item that came back
+        # empty from a request that worked waits on its own (`_failed_until`).
         self._inflight: set[str] = set()
         self._inflight_templates: set[str] = set()  # numeric templates of in-flight texts
         self._failed_until: dict[str, float] = {}
+        self._backoff_until = 0.0
+        # Draft tier, the same way.
         self._drafts: dict[str, str] = {}  # key -> draft translation (memory only, oldest first)
         self._draft_inflight: set[str] = set()
+        self._draft_failed_until: dict[str, float] = {}
+        self._draft_backoff_until = 0.0
         self._last_save = time.monotonic()
-        self._context: deque[tuple[str, str]] = deque(maxlen=context_lines)
+        # The lines of the scene, each once: key -> (source, translation), oldest first.
+        self._context: OrderedDict[str, tuple[str, str]] = OrderedDict()
+        self._arrived: set[str] = set()  # keys whose final answer just came in: their next lookup is no cache hit
         self._futures: list[Future[BatchResult]] = []
         self.stats = {"requests": 0, "items": 0, "translated": 0, "errors": 0, "cache_hits": 0, "drafts": 0}
         self.latencies_ms: deque[float] = deque(maxlen=5000)
@@ -129,10 +146,12 @@ class TranslationService:
                 return None
         hit = self.cache.get(text, self.target_lang)
         if hit is not None:
-            self.stats["cache_hits"] += 1
-            with self._lock:  # a line shown from the cache is part of the scene too
-                if not self._context or self._context[-1][0] != text:
-                    self._context.append((text, hit))
+            with self._lock:
+                if key in self._arrived:  # its own answer, just in: that is no cache hit
+                    self._arrived.discard(key)
+                else:
+                    self.stats["cache_hits"] += 1
+                self._remember(key, text, hit)  # a line shown from the cache is part of the scene too
         return hit
 
     def lookup_best(self, text: str) -> tuple[str, bool] | None:
@@ -147,25 +166,31 @@ class TranslationService:
 
     def submit(self, texts: list[str]) -> bool:
         """Queue one final batch (and one draft batch when a draft translator
-        exists) for the texts not already in flight or cooling down. Returns
-        True when any request was started."""
+        exists) for the texts the cache cannot answer and that are not
+        already in flight or cooling down. Returns True when any request was
+        started."""
+        todo: dict[str, str] = {}  # key -> text: each text once
+        for text in texts:
+            todo.setdefault(self.cache.key(text), text)
+        todo.pop("", None)
+        # What the cache answers (exactly, by number swap or fuzzily) lookup()
+        # shows at once; a request would only spend characters, delay the line
+        # and overwrite the cached translation.
+        todo = {key: text for key, text in todo.items() if self.cache.get(text, self.target_lang) is None}
+
         now = time.monotonic()
         batch: list[str] = []
         draft_batch: list[str] = []
         with self._lock:
-            if self._failed_until:  # cooldowns that have passed are of no further use
-                self._failed_until = {key: until for key, until in self._failed_until.items() if until > now}
+            # Cooldowns that have passed are of no further use.
+            self._failed_until = _unexpired(self._failed_until, now)
+            self._draft_failed_until = _unexpired(self._draft_failed_until, now)
             # Per text: does it need a draft request, a final request, both, or neither?
-            seen: set[str] = set()
-            for text in texts:
-                key = self.cache.key(text)
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                if self.draft_translator is not None and key not in self._drafts and key not in self._draft_inflight:
+            for key, text in todo.items():
+                if self._draft_due(key, now):
                     self._draft_inflight.add(key)
                     draft_batch.append(text)
-                if key in self._inflight or self._failed_until.get(key, 0.0) > now:
+                if not self._final_due(key, now):
                     continue
                 # A ticking counter: the same text with other numbers is already
                 # on its way; its answer will serve this one by number swap.
@@ -182,8 +207,31 @@ class TranslationService:
             if batch:
                 self.stats["requests"] += 1
                 self.stats["items"] += len(batch)
-                self._futures.append(self._pool.submit(self._run, "final", batch, list(self._context)))
+                self._futures.append(self._pool.submit(self._run, "final", batch, list(self._context.values())))
         return bool(draft_batch or batch)
+
+    def _final_due(self, key: str, now: float) -> bool:
+        """Whether a final request for `key` may start now. Call with the lock held."""
+        return now >= self._backoff_until and key not in self._inflight and self._failed_until.get(key, 0.0) <= now
+
+    def _draft_due(self, key: str, now: float) -> bool:
+        """Whether a draft request for `key` may start now. Call with the lock held."""
+        return (
+            self.draft_translator is not None
+            and now >= self._draft_backoff_until
+            and key not in self._drafts
+            and key not in self._draft_inflight
+            and self._draft_failed_until.get(key, 0.0) <= now
+        )
+
+    def _remember(self, key: str, text: str, translation: str) -> None:
+        """Put a line at the new end of the context, once however often it is
+        seen, dropping the oldest beyond `context_lines`. Call with the lock held."""
+        self._context[key] = (text, translation)
+        self._context.move_to_end(key)
+        while len(self._context) > self.context_lines:
+            oldest, _ = self._context.popitem(last=False)
+            self._arrived.discard(oldest)
 
     def drain(self) -> int:
         """Fold finished batches into the cache. Returns the number of final
@@ -202,38 +250,46 @@ class TranslationService:
             else:
                 translated += self._absorb_final(batch)
         self.stats["translated"] += translated
-        if translated:
-            self._autosave()
+        # On every call, not only when something arrived: a translation that
+        # came in just after a save must not wait for the next one to reach the disk.
+        self._autosave()
         return translated
 
     def _autosave(self, force: bool = False) -> None:
         now = time.monotonic()
         if force or now - self._last_save >= self.autosave_seconds:
             try:
-                self.cache.save()
+                self.cache.save()  # returns at once when nothing changed
             except OSError as exc:
                 self._report(f"could not save the translation cache: {exc}")
             self._last_save = now
 
     def _absorb_draft(self, batch: BatchResult) -> None:
+        now = time.monotonic()
         with self._lock:
             for text, result in zip(batch.texts, batch.results, strict=True):
                 key = self.cache.key(text)
                 self._draft_inflight.discard(key)
-                if not result or self.cache.get(text, self.target_lang) is not None:
-                    continue  # nothing, or the final answer overtook the draft: no use keeping it
+                if not result:
+                    if batch.error is None:  # this item only; a failed request holds back the tier below
+                        self._draft_failed_until[key] = now + self.retry_cooldown
+                    continue
+                if self.cache.get(text, self.target_lang) is not None:
+                    continue  # the final answer overtook the draft: no use keeping it
                 self._drafts[key] = result
                 self.stats["drafts"] += 1
                 while len(self._drafts) > self.max_drafts:  # bounded: a long session must not grow memory
                     self._drafts.pop(next(iter(self._drafts)))
             if batch.error is None:
                 self.draft_latencies_ms.append(batch.elapsed_ms)
+            else:
+                self._draft_backoff_until = now + self._backoff_for(batch.error)
         if batch.error is not None:
             self._report(f"draft translation failed ({len(batch.texts)} items): {batch.error}")
 
     def _absorb_final(self, batch: BatchResult) -> int:
         translated = 0
-        retry_at = time.monotonic() + self.retry_cooldown
+        now = time.monotonic()
         with self._lock:
             for text, result in zip(batch.texts, batch.results, strict=True):
                 key = self.cache.key(text)
@@ -241,22 +297,37 @@ class TranslationService:
                 self._inflight_templates.discard(numeric_template(key)[0])
                 if result:
                     self.cache.put(text, self.target_lang, result)
-                    self._context.append((text, result))
                     self._drafts.pop(key, None)
+                    self._arrived.add(key)
+                    self._remember(key, text, result)
                     translated += 1
-                else:
-                    self._failed_until[key] = retry_at
+                elif batch.error is None:  # this item only; a failed request holds back the tier below
+                    self._failed_until[key] = now + self.retry_cooldown
+            if batch.error is None:
+                self.latencies_ms.append(batch.elapsed_ms)
+            else:
+                self._backoff_until = now + self._backoff_for(batch.error)
         if batch.error is None:
-            self.latencies_ms.append(batch.elapsed_ms)
-            self._report(f"translated {len(batch.texts)} item(s) in {batch.elapsed_ms:.0f} ms")
+            self._log(f"translated {len(batch.texts)} item(s) in {batch.elapsed_ms:.0f} ms")
         else:
             self.stats["errors"] += 1
             self._report(f"translation failed ({len(batch.texts)} items): {batch.error}")
         return translated
 
+    def _backoff_for(self, error: Exception) -> float:
+        """Seconds a tier waits after a failed request: the usual cooldown, or
+        longer when the backend asked for it (a rejected key, a used-up quota)."""
+        return max(self.retry_cooldown, getattr(error, "retry_after", 0.0))
+
     def _report(self, text: str) -> None:
+        """To the status line: what the player may need to act on."""
         if self.on_status:
             self.on_status(text)
+
+    @staticmethod
+    def _log(text: str) -> None:
+        """To the log only: routine timings would crowd the status line."""
+        print(text, flush=True)
 
     @property
     def pending(self) -> int:
@@ -264,6 +335,8 @@ class TranslationService:
             return len(self._inflight)
 
     def shutdown(self) -> None:
+        """Fold in what has already arrived, stop the workers and save the cache."""
+        self.drain()  # answers that came in after the last frame would otherwise be asked for again next session
         self._pool.shutdown()
         self._autosave(force=True)
 

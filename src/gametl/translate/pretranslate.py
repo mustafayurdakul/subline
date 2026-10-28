@@ -97,7 +97,8 @@ def _load_csv(text: str) -> list[str]:
 
 
 def chunked(items: list[str], size: int) -> list[list[str]]:
-    return [items[i : i + size] for i in range(0, len(items), max(1, size))]
+    size = max(1, size)  # the slice and the step must agree: a size of 0 would make empty chunks
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def uncached(lines: list[str], cache: TranslationCache, target_lang: str) -> list[str]:
@@ -228,7 +229,7 @@ def collect_batch(
             continue
         message = result.result.message
         try:
-            parsed = ClaudeTranslator._parse_text_json(message)
+            parsed = ClaudeTranslator._parse_text_json(message, len(sources))
         except Exception as exc:  # malformed reply for this chunk only
             failed += 1
             say(f"{result.custom_id}: unreadable reply ({exc})")

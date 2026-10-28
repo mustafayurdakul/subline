@@ -1,5 +1,5 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Controls.Basic as C
 
 // A multi-line field bound to `map[key]`, one entry per line (ignore
 // patterns, zones).
@@ -13,13 +13,17 @@ Rectangle {
     implicitHeight: 84
     radius: Theme.radius
     color: Theme.field
-    border.color: area.activeFocus ? Theme.accent : Theme.border
+    border.color: area.activeFocus ? Theme.accent : hover.hovered ? Theme.borderHover : Theme.borderStrong
+    border.width: area.activeFocus ? 2 : 1
+    opacity: enabled ? 1 : Theme.disabledOpacity
 
-    ScrollView {
+    HoverHandler { id: hover; cursorShape: Qt.IBeamCursor }
+
+    C.ScrollView {
         anchors.fill: parent
-        anchors.margins: 1
+        anchors.margins: 2  // inside the focus edge
         clip: true
-        TextArea {
+        C.TextArea {
             id: area
             placeholderText: root.placeholderText
             placeholderTextColor: Theme.muted
@@ -29,9 +33,9 @@ Rectangle {
             font.family: Theme.font
             font.pixelSize: Theme.size
             wrapMode: TextEdit.NoWrap
-            leftPadding: 11
-            rightPadding: 11
-            topPadding: 7
+            leftPadding: 10
+            rightPadding: 10
+            topPadding: 6
             background: null
             Binding on text { value: String(root.map[root.key] ?? "") }
             onTextChanged: if (activeFocus) root.map[root.key] = text  // the user's edits, not the binding's

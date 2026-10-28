@@ -39,11 +39,11 @@ def test_key_round_trip_and_tampering(keypair: tuple[bytes, str]) -> None:
     body, _, signature = key[len("GAMETL-") :].partition(".")
     other_pem, _ = generate_keypair()
     forged = make_key(other_pem, "Ada Lovelace", "ada@example.com", TODAY)
-    with pytest.raises(LicenseError):
+    with pytest.raises(LicenseError, match="was not issued for Subline"):
         parse_key(forged, public)  # signed with someone else's key
     with pytest.raises(LicenseError):
         parse_key("GAMETL-" + body[:-2] + "AA." + signature, public)  # payload changed
-    with pytest.raises(LicenseError):
+    with pytest.raises(LicenseError, match="not a Subline licence key"):  # the product's name, not the package's
         parse_key("not a key", public)
     with pytest.raises(LicenseError):
         parse_key("", public)

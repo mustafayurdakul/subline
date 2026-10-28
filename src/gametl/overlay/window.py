@@ -134,7 +134,13 @@ class OverlayWindow(QWidget):
 
     @Slot(list)
     def set_blocks(self, blocks: list[RenderBlock]) -> None:
-        self._blocks = list(blocks)
+        """The pipeline sends the blocks after every captured frame, mostly
+        the same ones again: repaint only when they change, since a repaint
+        pushes the whole translucent window to the screen."""
+        blocks = list(blocks)
+        if blocks == self._blocks:
+            return
+        self._blocks = blocks
         self.update()
 
     def paintEvent(self, _event) -> None:

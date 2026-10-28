@@ -14,7 +14,7 @@ ColumnLayout {
         }
         SettingRow {
             label: "Change that wakes OCR"
-            helper: "OCR waits while nothing in the area changes this much (0 to 255). Lower it if a line is ever missed."
+            helper: "OCR waits while nothing in the area changes this much. Lower it if a line is ever missed."
             Gauge { key: "change_threshold"; from: 0; to: 100; stepSize: 5; specialText: "off" }
         }
         SettingRow {
@@ -28,8 +28,8 @@ ColumnLayout {
             Stepper { key: "max_missing"; from: 0; to: 30; suffix: " frames" }
         }
         SettingRow {
-            label: "Sweep the whole area every"
-            helper: "With a zone set, also read the rest of the area now and then."
+            label: "Read the whole window every"
+            helper: "With an area set, also read the rest of the window now and then."
             Stepper { key: "full_scan_every"; from: 0; to: 600; step: 10; suffix: " frames"; specialText: "never" }
         }
     }
@@ -42,8 +42,8 @@ ColumnLayout {
         }
         SettingRow {
             label: "Translator by name"
-            helper: "Any of claude, deepl, offline; or uppercase, echo and verbose for testing without a key."
-            Field { key: "translator"; implicitWidth: 180 }
+            helper: "The three services, or uppercase, verbose and echo for testing without a key."
+            Combo { key: "translator"; options: backend.translators; implicitWidth: 180 }
         }
     }
 

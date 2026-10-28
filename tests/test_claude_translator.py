@@ -121,6 +121,28 @@ def test_system_prompt_is_stable_across_calls() -> None:
     assert first["system"] == second["system"]  # cacheable prefix
 
 
+def test_a_short_plain_list_is_rejected_not_shifted() -> None:
+    """Bare strings are matched by position: with one item dropped, every
+    later translation would land on the wrong text and be cached there."""
+    client = StubClient(text_response('{"items": ["B-cevap", "C-cevap"]}'))
+    translator = ClaudeTranslator(client=client)
+    with pytest.raises(TranslationError, match="2 items in response for 3 texts"):
+        translator.translate(TranslationRequest(["A", "B", "C"], target_lang="tr"))
+    # Numbered objects are matched by id, so a missing one is just missing.
+    client = StubClient(text_response('{"items": [{"id": 1, "text": "B-cevap"}]}'))
+    out = ClaudeTranslator(client=client).translate(TranslationRequest(["A", "B", "C"], target_lang="tr"))
+    assert out == [None, "B-cevap", None]
+
+
+def test_language_names_in_the_prompt() -> None:
+    translator = ClaudeTranslator(client=StubClient(response_with([])))
+    assert "from Slovak into Swedish" in translator.system_blocks("sk", "sv")[0]["text"]  # not "from sk into sv"
+    assert "from Japanese into Turkish" in translator.system_blocks("japan", "tr")[0]["text"]
+    # A script that covers several languages names none: the model detects it.
+    text = translator.system_blocks("cyrillic", "tr")[0]["text"]
+    assert "screen into Turkish" in text and "Russian" not in text
+
+
 def test_missing_or_blank_items_become_none() -> None:
     client = StubClient(response_with([(0, "Merhaba"), (1, "   "), (7, "ignored")]))
     translator = ClaudeTranslator(client=client, structured=True)

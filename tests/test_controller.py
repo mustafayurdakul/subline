@@ -5,8 +5,11 @@ selection, a pipeline that dies, and starts that cannot go ahead."""
 from __future__ import annotations
 
 import os
+import threading
 import time
+import weakref
 from datetime import date, timedelta
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -20,11 +23,21 @@ from PySide6.QtWidgets import QApplication
 from gametl.app import controller as controller_module
 from gametl.app import pipeline as pipeline_module
 from gametl.app.config import ProfileStore, Settings
-from gametl.app.controller import OverlayController
+from gametl.app.controller import (
+    CLAUDE_FIELDS,
+    SESSION_FIELDS,
+    OverlayController,
+    StartError,
+    build_translator,
+    pipeline_config,
+    restart_fields,
+)
 from gametl.app.credentials import MemorySecretStore
 from gametl.capture.base import Frame
 from gametl.capture.windows import WindowInfo
 from gametl.ocr.base import OcrResult, TextLine
+from gametl.translate.cache import TranslationCache
+from gametl.translate.dummy import UppercaseTranslator
 from tests.helpers import wait_until
 
 HWND = 4242
@@ -58,10 +71,12 @@ class FakeEngine:
 
 class FakeCapture:
     """Hands out a blank frame every few milliseconds; `fail` makes the
-    pipeline thread die, `closed` ends it as a closed window would."""
+    pipeline thread die, `closed` ends it as a closed window would, `size`
+    is the frames' (width, height)."""
 
     fail = False
     close = False
+    size = (FRAME[2], FRAME[3])
 
     def __init__(self, hwnd: int, min_interval_ms: int | None = None) -> None:
         self.hwnd = hwnd
@@ -80,7 +95,8 @@ class FakeCapture:
         if FakeCapture.close:
             self.closed = True
             return None
-        return Frame(np.full((600, 800, 3), 20, dtype=np.uint8), time.perf_counter())
+        width, height = FakeCapture.size
+        return Frame(np.full((height, width, 3), 20, dtype=np.uint8), time.perf_counter())
 
 
 class FakeOverlay(QObject):
@@ -111,17 +127,23 @@ class FakeOverlay(QObject):
 
 
 @pytest.fixture
-def fakes(monkeypatch: pytest.MonkeyPatch):
+def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     FakeEngine.created.clear()
     FakeEngine.delay = 0.0
     FakeCapture.fail = FakeCapture.close = False
+    FakeCapture.size = (FRAME[2], FRAME[3])
     FakeOverlay.instances.clear()
     info = WindowInfo(HWND, TITLE, "FakeClass", FRAME)
 
     def find_window(needle: str) -> WindowInfo | None:
         return info if needle.casefold() in TITLE.casefold() else None
 
+    # No key from the environment or an SDK config on the test machine.
+    for name in ("DEEPL_AUTH_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(controller_module, "find_window", find_window)
+    monkeypatch.setattr(controller_module, "is_window", lambda hwnd: hwnd == HWND)  # the game's window only
     monkeypatch.setattr(controller_module, "window_title", lambda hwnd: TITLE)
     monkeypatch.setattr(controller_module, "capture_area", lambda hwnd, include_frame: (FRAME, CLIENT))
     monkeypatch.setattr(controller_module, "RapidOcrEngine", FakeEngine)
@@ -187,7 +209,6 @@ def test_area_selection_reaches_the_running_pipeline(qapp, controller) -> None:
     controller._apply_selected_area((100, 480, 700, 580))  # frame pixels; client area starts 30 px down
     assert specs == ["0.1250,0.7895,0.7500,0.1754"]
     assert controller.settings is not None and controller.settings.roi == specs[0]
-    assert controller.settings.full_scan_every == 0
     wait_for(qapp, lambda: worker.cfg.roi == (100, 480, 700, 580))  # taken up on the pipeline thread
     assert controller.worker is worker and controller.running_log == [True]  # no restart
 
@@ -241,10 +262,37 @@ def test_start_failures_are_reported_not_raised(qapp, controller) -> None:
     assert controller.failures[0].startswith("invalid ignore pattern:")
 
     controller.failures.clear()
-    controller.start(settings(translator="deepl"))  # no key anywhere
+    controller.start(settings(translator="dee"))  # half a name never falls through to another translator
     wait_for(qapp, lambda: controller.failures)
-    assert controller.failures[0].startswith("translator setup failed: DeepL needs an API key")
+    assert controller.failures == ["unknown translator 'dee'"]
     assert FakeOverlay.instances == []
+
+
+def test_a_missing_key_is_reported_before_waiting_for_the_window(qapp, controller) -> None:
+    began = time.monotonic()
+    controller.start(settings(window_match="Not Open Yet", translator="deepl"), wait=5.0)
+    wait_for(qapp, lambda: controller.failures, timeout=2.0)
+    assert controller.failures == ["Add your DeepL key on the Translation page"]
+    assert time.monotonic() - began < 2.0  # not after the five seconds the window was waited for
+
+    controller.failures.clear()
+    controller.start(settings(draft="deepl"))  # the draft needs the key as much
+    wait_for(qapp, lambda: controller.failures)
+    assert controller.failures == ["Add your DeepL key on the Translation page"]
+
+    controller.failures.clear()
+    controller.start(settings(translator=" Claude "))  # read as "claude", so its key is checked
+    wait_for(qapp, lambda: controller.failures)
+    assert controller.failures == ["Add your Anthropic key on the Translation page"]
+    assert FakeOverlay.instances == []
+
+
+def test_translators_are_picked_by_name_only(tmp_path: Path) -> None:
+    store, secrets = ProfileStore(tmp_path), MemorySecretStore()
+    assert isinstance(build_translator(settings(translator=" Uppercase "), "game", store, secrets), UppercaseTranslator)
+    for name in ("dee", "Deep L", "", "gpt"):
+        with pytest.raises(StartError, match="unknown translator"):
+            build_translator(settings(translator=name), "game", store, secrets)
 
 
 def test_stop_during_start_abandons_the_preparation(qapp, controller) -> None:
@@ -286,11 +334,108 @@ def test_toggle_cancels_a_start_in_progress(qapp, controller) -> None:
     assert all(not w.isRunning() for w in controller._start_workers)
 
 
+def test_a_stale_window_handle_falls_back_to_the_title(qapp, controller) -> None:
+    controller.start(settings(), hwnd=0xDEAD)  # picked from a list before the game restarted
+    wait_for(qapp, lambda: controller.running)
+    assert controller.hwnd == HWND
+
+
+def test_a_live_handle_is_kept_when_the_window_title_changes(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    controller.start(settings(), hwnd=HWND)
+    wait_for(qapp, lambda: controller.running)
+    worker = controller.worker
+    # An emulator or a game that shows its frame rate or the level's name in the title.
+    monkeypatch.setattr(controller_module, "window_title", lambda hwnd: "Emu | FPS 59")
+    monkeypatch.setattr(controller_module, "find_window", lambda needle: None)
+    controller.apply(settings(target_lang="de"))  # a restart on the same window
+    wait_for(qapp, lambda: controller.failures or (controller.running and controller.worker is not worker))
+    assert controller.failures == []
+    assert controller.hwnd == HWND and controller.title == "Emu | FPS 59"
+
+
+def test_an_edit_during_a_start_naming_another_window_drops_the_handle(qapp, controller) -> None:
+    FakeEngine.delay = 0.3
+    controller.start(settings(), hwnd=HWND)
+    controller.apply(settings(window_match="Other Game"))  # picked while the model loads
+    wait_for(qapp, lambda: controller.failures or controller.running)
+    assert controller.failures == ["no visible window matching 'Other Game'"]
+    assert not controller.running
+
+
+def test_claude_options_do_not_restart_a_session_without_claude(qapp, controller) -> None:
+    controller.start(settings())
+    wait_for(qapp, lambda: controller.running)
+    worker = controller.worker
+    controller.apply(settings(model="claude-opus-5-5", tone="formal", effort="high"))
+    assert controller.worker is worker and "settings changed: restarting" not in controller.messages
+    assert controller.settings is not None and controller.settings.model == "claude-opus-5-5"  # kept for later
+
+    assert restart_fields(settings(translator="claude")) == SESSION_FIELDS
+    assert restart_fields(settings(translator="deepl")) == SESSION_FIELDS - CLAUDE_FIELDS
+
+
+def test_the_cache_is_read_on_the_start_thread(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = controller.store.cache_path(TITLE, "tr", "uppercase")
+    stored = TranslationCache(path)
+    stored.put("Stay close.", "tr", "Yakın dur.")
+    stored.save()
+    threads: list[threading.Thread] = []
+
+    def recording_cache(cache_path):
+        threads.append(threading.current_thread())
+        return TranslationCache(cache_path)
+
+    monkeypatch.setattr(controller_module, "TranslationCache", recording_cache)
+    controller.start(settings(use_cache_file=True))
+    wait_for(qapp, lambda: controller.running)
+    assert threads and threads[0] is not threading.main_thread()  # the UI thread never parses the file
+    assert controller.cache is not None and controller.cache.get("Stay close.", "tr") == "Yakın dur."
+
+
+def test_the_area_follows_a_resized_window(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    controller.start(settings(roi="0,0.75,1,0.25"))
+    wait_for(qapp, lambda: controller.running)
+    worker = controller.worker
+    assert worker.cfg.frame_size == (800, 600)
+
+    frame, client = (0, 0, 1280, 750), (0, 30, 1280, 750)  # the game went to a larger resolution
+    monkeypatch.setattr(controller_module, "capture_area", lambda hwnd, include_frame: (frame, client))
+    FakeCapture.size = (1280, 750)
+    expected = pipeline_config(controller.settings, frame, client)
+    wait_for(qapp, lambda: worker.cfg.frame_size == (1280, 750))
+    assert worker.cfg.roi == expected.roi and worker.cfg.area == client
+    assert controller.worker is worker  # taken up on the fly, no restart
+
+
+def test_stop_keeps_the_session_stats_and_a_second_stop_does_nothing(qapp, controller) -> None:
+    controller.start(settings())
+    wait_for(qapp, lambda: controller.running)
+    wait_for(qapp, lambda: bool(FakeOverlay.instances[0].blocks))
+    controller.stop()
+    assert controller.last_stats.startswith("frames ") and "translation:" in controller.last_stats
+    messages, running_log = list(controller.messages), list(controller.running_log)
+    controller.stop()  # idle: no second "stopped", no notices
+    controller.close()
+    assert controller.messages == messages and controller.running_log == running_log
+
+
+def test_finished_start_threads_are_let_go(qapp, controller) -> None:
+    threads = []
+    for lang in ("de", "tr", "fr"):
+        controller.start(settings(target_lang=lang))
+        threads += [weakref.ref(worker) for worker in controller._start_workers]
+        wait_for(qapp, lambda lang=lang: controller.running and controller.settings.target_lang == lang)
+    wait_for(qapp, lambda: not controller._start_workers)
+    assert all(ref() is None for ref in threads)  # nothing keeps a finished start's thread object
+
+
 def test_trial_over_refuses_to_start(qapp, fakes, tmp_path) -> None:
     secrets = MemorySecretStore()
     secrets.set("TRIAL_START", (date.today() - timedelta(days=60)).isoformat())
     c = OverlayController(ProfileStore(tmp_path), secrets)
     messages: list[str] = []
+    failures: list[str] = []
     c.status.connect(messages.append)
+    c.start_failed.connect(failures.append)  # the tray shows these in the window's banner
     assert c.start(settings()) is False
-    assert messages == ["trial over: a licence key is needed: enter one in Settings > Licence"]
+    assert messages == failures == ["trial over: a licence key is needed: enter one in Settings > Licence"]

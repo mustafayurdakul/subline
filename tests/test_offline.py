@@ -13,6 +13,7 @@ from gametl.translate.offline import (
     ensure_runtime,
     find_model,
     find_package,
+    iso_pair,
     locate_model_files,
     opus_dir,
     package_dir,
@@ -68,6 +69,14 @@ def test_find_model_prefers_converted_opus(tmp_path: Path) -> None:
     assert find_model(tmp_path, "en", "tr").kind == "opus"
 
 
+def test_ocr_model_names_and_typed_names_find_the_iso_named_model(tmp_path: Path) -> None:
+    assert iso_pair("japan", "tr") == ("ja", "tr")
+    assert iso_pair("German", "tr") == ("de", "tr")
+    assert iso_pair("cyrillic", "tr") == ("cyrillic", "tr")  # no one language: no model
+    _make_argos(package_dir(tmp_path, "ja", "tr"))
+    assert find_model(tmp_path, "japan", "tr").kind == "argos"
+
+
 def test_split_sentences() -> None:
     assert split_sentences("Stay close. Keep your voice down!") == ["Stay close.", "Keep your voice down!"]
     assert split_sentences("No punctuation here") == ["No punctuation here"]
@@ -101,16 +110,24 @@ def test_opus_models_get_the_end_of_sentence_token() -> None:
     assert argos.ct2.batches[0] == [["New", "Game"]]
 
 
-def test_offline_translator_keeps_lines_and_batches_sentences() -> None:
+def test_offline_translator_batches_sentences() -> None:
     ct2 = FakeCT2()
     translator = OfflineTranslator._from_components(ct2, FakeSP())
     out = translator.translate(
         TranslationRequest(["Stay close. Keep quiet!\nSecond line", "Another one."], source_lang="en", target_lang="tr")
     )
-    assert out == ["STAY CLOSE. KEEP QUIET!\nSECOND LINE", "ANOTHER ONE."]
+    assert out == ["STAY CLOSE. KEEP QUIET! SECOND LINE", "ANOTHER ONE."]
     assert len(ct2.batches) == 1  # all four sentences in one batch
     assert len(ct2.batches[0]) == 4
     assert translator.translate(TranslationRequest([], target_lang="tr")) == []
+
+
+def test_a_sentence_wrapped_over_two_lines_is_translated_whole() -> None:
+    ct2 = FakeCT2()
+    translator = OfflineTranslator._from_components(ct2, FakeSP())
+    out = translator.translate(TranslationRequest(["Where were you\nwhen the lights went out?"], target_lang="tr"))
+    assert ct2.batches[0] == [["Where", "were", "you", "when", "the", "lights", "went", "out?"]]  # one sentence
+    assert out == ["WHERE WERE YOU WHEN THE LIGHTS WENT OUT?"]
 
 
 def test_missing_model_raises_with_hint(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ Pure functions: text measurement is injected (`measure(text, font_px) ->
 width`), so the algorithm is testable without a GUI toolkit.
 
 Preference order when the translation is longer than the source:
-1. with `prefer_grow` (the default for subtitles): keep the source font
+1. with `prefer_grow` (what the overlay always uses): keep the source font
    size and wrap, letting the box grow into the free space the caller
    reports as `max_height`, so every line renders at the same size;
 2. shrink the font a little (down to `shrink_floor` of the source size) so

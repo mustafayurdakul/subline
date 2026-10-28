@@ -1,6 +1,7 @@
 # Build the packaged folder on a Windows runner and publish it.
 #
-# Three ways to cut a release; all must agree with the version in pyproject.toml:
+# Three ways to cut a release; all must agree with __version__ in
+# src/gametl/__init__.py (pyproject.toml reads the version from there):
 #
 #   a merge to main that carries a version no tag exists for yet
 #       releases that version: the tag v<version> is created at the merge
@@ -41,12 +42,16 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
       build: ${{ steps.tag.outputs.build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: tag
         env:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/gametl/__init__.py | head -1)
+          if [ -z "$version" ]; then
+            echo 'no __version__ = "..." line in src/gametl/__init__.py' >&2
+            exit 1
+          fi
           case "$GITHUB_REF" in
             refs/tags/*)
               tag="$GITHUB_REF_NAME"; build=true ;;
@@ -60,7 +65,7 @@ jobs:
               fi ;;
           esac
           if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
-            echo "tag $tag does not match pyproject.toml version $version" >&2
+            echo "tag $tag does not match version $version in src/gametl/__init__.py" >&2
             exit 1
           fi
           echo "version $version, tag '${tag}', build $build"
@@ -75,12 +80,12 @@ jobs:
       QT_QPA_PLATFORM: offscreen # the app icon is rendered with Qt during the build
       RELEASE_TAG: ${{ needs.decide.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
       - name: Install
-        run: uv sync --group build
+        run: uv sync --locked --group build
 
       - name: Name the archive
         id: name
@@ -92,13 +97,18 @@ jobs:
       - name: Build
         run: uv run --group build python scripts/build.py --clean
 
+      - name: Settings window in the frozen app
+        # The same check as CI's build job, on the folder that ships: a tag
+        # pushed by hand or a run from the Actions tab gets no other check.
+        run: dist\gametl\gametl-cli.exe --check-ui
+
       - name: Zip
         shell: pwsh
         run: 7z a -mx=5 "${{ steps.name.outputs.zip }}" ./dist/gametl
 
       - name: Publish the release
         if: needs.decide.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.decide.outputs.tag }}
           target_commitish: ${{ github.sha }}
@@ -108,7 +118,7 @@ jobs:
 
       - name: Keep the build as an artifact
         if: needs.decide.outputs.tag == ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.name.outputs.zip }}
           path: ${{ steps.name.outputs.zip }}

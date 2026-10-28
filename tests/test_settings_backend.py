@@ -13,6 +13,7 @@ from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
 from gametl.app.license import make_key
 from gametl.app.settings_backend import (
     BOTTOM_STRIP,
+    EMPTY_DEFAULTS,
     SettingsBackend,
     combo_from_key,
     invalid_hotkey,
@@ -52,7 +53,7 @@ def test_map_round_trips_settings(tmp_path: Path) -> None:
         subtitle_center_tolerance=0,
         subtitle_size_tolerance=50,
         short_line_confidence=0.75,
-        center_zone=True,
+        center_area=True,
         font="Arial",
         fps=8.0,
         change_threshold=30.0,
@@ -67,7 +68,8 @@ def test_map_round_trips_settings(tmp_path: Path) -> None:
     assert backend.to_settings() == Settings.from_dict(original.to_dict())
 
 
-def test_fields_without_a_control_survive_and_qml_values_are_coerced(tmp_path: Path) -> None:
+def test_untouched_fields_survive_and_qml_values_are_coerced(tmp_path: Path) -> None:
+    # stable_frames and the like have controls but are not touched here; debug has no control at all.
     loaded = Settings(window_match="Fake Game", stable_frames=3, max_missing=7, full_scan_every=5, debug=True)
     backend = backend_for(tmp_path, loaded)
     applied: list = []
@@ -95,6 +97,10 @@ def test_fields_without_a_control_survive_and_qml_values_are_coerced(tmp_path: P
     assert backend.to_settings().stable_frames == 1
 
 
+def test_an_emptied_control_means_the_settings_default() -> None:
+    assert {name: getattr(Settings(), name) for name in EMPTY_DEFAULTS} == EMPTY_DEFAULTS
+
+
 def test_invalid_pattern_or_hotkey_is_reported_and_blocks_start_and_save(tmp_path: Path) -> None:
     assert invalid_pattern(["^a$", r"\d+"]) is None
     problem = invalid_pattern(["^a$", "(unclosed"])
@@ -114,6 +120,19 @@ def test_invalid_pattern_or_hotkey_is_reported_and_blocks_start_and_save(tmp_pat
     backend.clearProblem()
     backend.start()
     assert applied == [] and "Start / stop overlay" in backend.problem
+    backend.settings.insert("hotkey_toggle", "t")  # a hand-edited profile: a bare letter
+    backend.clearProblem()
+    backend.start()
+    assert applied == [] and "needs Ctrl, Alt or Win" in backend.problem
+
+
+def test_a_hotkey_needs_a_modifier_unless_no_program_types_its_key() -> None:
+    """A global hotkey takes its key from every program: a letter, Tab or
+    Enter alone, or with Shift only, would stop working everywhere."""
+    for combo in ("t", "tab", "enter", "space", "shift+t", "shift+enter", "7"):
+        assert "needs Ctrl, Alt or Win" in (invalid_hotkey({"toggle": combo}) or ""), combo
+    for combo in ("ctrl+t", "alt+tab", "win+enter", "ctrl+shift+7", "f9", "shift+f12", "pause", "scrolllock"):
+        assert invalid_hotkey({"toggle": combo}) is None, combo
 
 
 def test_area_presets_and_window_handle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,6 +179,21 @@ def test_profiles_save_and_load(tmp_path: Path) -> None:
     assert backend.settings.value("target_lang") == "de" and backend.to_settings().window_match == "Other"
     backend.loadProfile("missing")
     assert "missing" in backend.problem
+
+
+def test_deleting_a_profile_forgets_it_everywhere(tmp_path: Path) -> None:
+    backend = backend_for(tmp_path, Settings(window_match="Fake Game", target_lang="de"))
+    backend.saveProfile("fake-game")
+    backend.saveProfile("other")
+    backend.loadProfile("fake-game")
+    changes: list[None] = []
+    backend.profilesChanged.connect(lambda: changes.append(None))
+    backend.deleteProfile("other")  # not the one shown: the name in the header stays
+    assert backend.profiles == ["fake-game"] and backend.profileName == "fake-game" and len(changes) == 1
+    backend.deleteProfile("fake-game")
+    store = ProfileStore(tmp_path)
+    assert backend.profiles == [] and backend.profileName == "" and store.last_profile is None
+    assert backend.to_settings().target_lang == "de"  # the settings shown stay; they are only no longer saved
 
 
 def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -273,9 +307,66 @@ def test_the_preview_follows_every_edit(qapp, tmp_path: Path) -> None:
     backend.set("subtitle_pill_alpha", 200)
     assert stamps == [first + 1, first + 2]
     size = QSize()
-    image = PreviewImageProvider(backend).requestImage("2", size, QSize(400, 225))
-    assert (image.width(), image.height()) == (400, 225) == (size.width(), size.height())
-    assert any(image.pixelColor(x, 190).alpha() > 0 for x in range(0, 400, 4))  # the line sits near the bottom
+    image = PreviewImageProvider(backend).requestImage("2", size, QSize(680, 170))
+    assert (image.width(), image.height()) == (680, 170) == (size.width(), size.height())
+    assert any(image.pixelColor(x, 150).alpha() > 0 for x in range(0, 680, 4))  # the translation at the bottom
+    assert any(image.pixelColor(x, 85).alpha() > 0 for x in range(0, 680, 4))  # the game's line in the middle
+
+
+def test_the_preview_shows_size_and_hiding_as_in_a_1080p_game(qapp) -> None:
+    from gametl.app.preview import render_preview
+
+    def opaque_rows(settings: Settings, width: int = 960, height: int = 270) -> list[int]:
+        image = render_preview(settings, width, height)
+        return [y for y in range(height) if any(image.pixelColor(x, y).alpha() > 0 for x in range(0, width, 3))]
+
+    # Sizes are to scale (half of 1920 wide: half the pixels), not clamped to the area: 100 and 150 px differ.
+    small = opaque_rows(Settings(subtitle_font_px=100, subtitle_background="none", subtitle_position="center"))
+    large = opaque_rows(Settings(subtitle_font_px=150, subtitle_background="none", subtitle_position="center"))
+    assert len(large) > len(small)
+    # The game's own line is drawn, so hiding it shows: the band covers it in the dark.
+    shown = render_preview(Settings(subtitle_background="none", subtitle_hide_source=False), 960, 270)
+    hidden = render_preview(Settings(subtitle_background="none", subtitle_hide_source=True), 960, 270)
+    assert shown != hidden
+    assert hidden.pixelColor(480, 135).alpha() > shown.pixelColor(480, 135).alpha()  # the band, opaque
+
+
+def test_colour_swatch_shows_what_the_overlay_draws(tmp_path: Path) -> None:
+    backend = backend_for(tmp_path)
+    assert backend.colourHex("#ffee00") == "#FFEE00"
+    assert backend.colourHex("10, 20, 300") == "#0A14FF"  # r,g,b is read too, clamped
+    assert backend.colourHex("#ff") == "#FFFFFF"  # what does not parse is drawn white
+
+
+def test_offline_download_can_run_again(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The finished thread is dropped before it is deleted: `downloading`
+    reads false afterwards and a second download starts."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from tests.helpers import wait_until
+
+    pairs: list[tuple[str, str]] = []
+
+    def fake_ensure_offline(source, target, models_dir, runtime_dir, progress):
+        pairs.append((source, target))
+        progress("fetching")
+        return models_dir / f"{source}-{target}"
+
+    monkeypatch.setattr("gametl.translate.offline.ensure_offline", fake_ensure_offline)
+
+    def tick() -> None:
+        qapp.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)  # what the event loop does
+
+    backend = backend_for(tmp_path, Settings(lang="en", target_lang="tr", draft="deepl"))
+    backend.downloadOffline()
+    assert backend.downloading
+    assert wait_until(lambda: not backend.downloading, tick=tick)
+    assert "offline translation ready" in backend.downloadStatus
+    backend.set("target_lang", "de")
+    backend.downloadOffline()
+    assert wait_until(lambda: not backend.downloading, tick=tick)
+    assert pairs == [("en", "tr"), ("en", "de")]
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:
@@ -287,7 +378,13 @@ def test_combo_from_key_press(tmp_path: Path) -> None:
     # QML hands the slot plain ints; here the enums' values stand in for them.
     assert combo_from_key(Qt.Key.Key_T, (ctrl | shift).value) == "ctrl+shift+t"
     assert combo_from_key(Qt.Key.Key_F5, alt.value) == "alt+f5"
-    assert combo_from_key(Qt.Key.Key_7, 0) == "7"
+    assert combo_from_key(Qt.Key.Key_F5, 0) == "f5"  # no program types F5: it may stand alone
+    assert combo_from_key(Qt.Key.Key_Pause, 0) == "pause"
+    # Typing keys need Ctrl, Alt or Win: Tab or Enter alone would be bound globally.
+    assert combo_from_key(Qt.Key.Key_7, 0) == ""
+    assert combo_from_key(Qt.Key.Key_Tab, 0) == ""
+    assert combo_from_key(Qt.Key.Key_Return, 0) == ""
+    assert combo_from_key(Qt.Key.Key_T, shift.value) == ""
     assert combo_from_key(Qt.Key.Key_Space, ctrl.value) == "ctrl+space"
     assert combo_from_key(Qt.Key.Key_Return, Qt.KeyboardModifier.MetaModifier.value) == "win+enter"
     assert combo_from_key(Qt.Key.Key_Control, ctrl.value) == ""  # a modifier alone is not a hotkey
@@ -317,3 +414,15 @@ def test_status_and_text_for_the_header(tmp_path: Path) -> None:
     backend.set_status_text("starting on 'Fake Game'...")
     assert backend.statusText == "starting on 'Fake Game'..."
     assert backend.appName == "Subline" and backend.version
+
+
+def test_the_pickers_list_what_the_app_accepts(tmp_path: Path) -> None:
+    """The Advanced page's translator names are the ones a start accepts,
+    and the Claude models are the ones with a known price, in that order."""
+    from gametl.app.controller import TRANSLATORS
+    from gametl.translate.claude import PRICES_PER_MTOK
+
+    backend = backend_for(tmp_path)
+    assert backend.translators == list(TRANSLATORS) and backend.translators[0] == "deepl"
+    assert backend.claudeModels == list(PRICES_PER_MTOK)
+    assert backend.claudeModels == ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
