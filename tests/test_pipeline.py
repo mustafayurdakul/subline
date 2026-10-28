@@ -200,6 +200,24 @@ def test_subtitle_zone_keeps_one_font_size_across_lines_of_different_box_heights
         thread.service.shutdown()
 
 
+def test_a_shown_subtitle_keeps_its_place_and_size_when_re_read() -> None:
+    engine = FakeEngine()
+    thread = pipeline(engine, roi=STRIP, render="subtitle", subtitle_position="source", change_threshold=0)
+    try:
+        (first,) = show_text(thread, engine, [line("Hold this line.", 320, 30, 680, 70)])
+        assert (first.font_px, first.anchor_y) == (32, 650)  # crop y 30..70 sits at 630..670 in the frame
+        # The same line read again 6 px lower and wider (a fade-in ended): the tracker adopts the box...
+        (again,) = show_text(thread, engine, [line("Hold this line.", 300, 36, 700, 76)])
+        assert again.bbox == (300, 636, 700, 676)
+        # ...but what is drawn stays put, at the size it had.
+        assert (again.font_px, again.anchor_y) == (first.font_px, first.anchor_y)
+        # A new line gets its own anchor.
+        (fresh,) = show_text(thread, engine, [line("Another line.", 320, 20, 680, 60)])
+        assert fresh.anchor_y == 640 and (1, "Hold this line.") not in thread._held
+    finally:
+        thread.service.shutdown()
+
+
 def test_subtitle_text_colour_is_sampled_unless_set() -> None:
     engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
     thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)

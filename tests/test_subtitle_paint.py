@@ -97,6 +97,27 @@ def test_in_place_pill_text_has_no_outline_either(overlay: BlockPainter) -> None
     assert (box[:, :, :3].min(axis=2) > 200).any()  # the letters are there
 
 
+def at_source(bbox, **kwargs) -> RenderBlock:
+    """A subtitle block positioned on its source line, the original left visible."""
+    kwargs.setdefault("hide_source", False)
+    return RenderBlock(bbox, ["Yakın dur."], style="subtitle", zone=ZONE, font_px=24, position="source", **kwargs)
+
+
+def test_pill_is_sized_by_the_text_not_the_source_box(overlay: BlockPainter) -> None:
+    narrow, wide = at_source((180, 262, 220, 282)), at_source((20, 262, 380, 282))
+    assert overlay.place_subtitle(narrow).pill == overlay.place_subtitle(wide).pill
+    assert np.array_equal(paint(overlay, narrow), paint(overlay, wide))  # no band, so the same pill
+    covered = paint(overlay, at_source((20, 262, 380, 282), hide_source=True))
+    assert (covered > 0).sum() > (paint(overlay, wide) > 0).sum()  # the band over the wide source line joins the pill
+
+
+def test_a_held_anchor_places_the_subtitle_not_the_box(overlay: BlockPainter) -> None:
+    first = at_source((120, 262, 280, 282))
+    moved, held = at_source((120, 240, 280, 260)), at_source((120, 240, 280, 260), anchor_y=272)
+    assert overlay.place_subtitle(held).text == overlay.place_subtitle(first).text  # where the line was first seen
+    assert overlay.place_subtitle(moved).text != overlay.place_subtitle(first).text
+
+
 def test_pill_opacity_is_the_setting(overlay: BlockPainter) -> None:
     block = subtitle(["Yakın dur."], background="pill", pill_alpha=100, hide_source=False)
     placed = overlay.place_subtitle(block)
