@@ -14,6 +14,7 @@ Button {
     font.pixelSize: Theme.size
 
     background: Rectangle {
+        radius: Theme.radius
         color: root.down ? Theme.cardRaised : root.hovered ? Theme.cardRaised : Theme.card
         border.color: root.danger ? Theme.danger : Theme.borderStrong
     }

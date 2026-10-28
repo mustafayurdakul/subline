@@ -23,7 +23,7 @@ from .icon import make_icon
 from .preview import PROVIDER, PreviewImageProvider
 from .settings_backend import SettingsBackend, qml_dir
 
-PAGES = ["game", "translation", "appearance", "hotkeys", "licence", "advanced"]
+PAGES = ["home", "game", "translation", "appearance", "hotkeys", "licence", "advanced"]
 WINDOW_SIZE = QSize(1000, 680)  # fixed; every page scrolls inside it
 _app = None  # the application check() made, kept for the life of the process
 

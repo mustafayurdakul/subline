@@ -41,10 +41,11 @@ Row {
         handle: Rectangle {
             x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
             y: slider.topPadding + slider.availableHeight / 2 - height / 2
-            width: 14; height: 14
-            color: Theme.text
-            border.color: Theme.window
-            border.width: 2
+            width: 16; height: 16
+            radius: 8
+            color: Theme.accent
+            border.color: Theme.card
+            border.width: 3
         }
     }
     Label {

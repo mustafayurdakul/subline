@@ -9,6 +9,7 @@ Rectangle {
 
     visible: text !== ""
     implicitHeight: visible ? Math.max(40, message.implicitHeight + 16) : 0
+    radius: Theme.radius
     color: Theme.card
     border.color: Theme.danger
 

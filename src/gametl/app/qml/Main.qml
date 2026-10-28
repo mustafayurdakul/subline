@@ -8,13 +8,14 @@ import "Icons.js" as Icons
 // is what the pages read and write.
 Rectangle {
     id: root
-    property string page: "game"
+    property string page: "home"
     // The height at which the current page shows whole (for full-page renders).
     readonly property int fullHeight: header.height + banner.height + pageLoader.y + pageLoader.height + 4 * Theme.space
     color: Theme.window
 
     // The one table the navigation, the header and the page loader read.
     readonly property var pages: [
+        { key: "home", label: "Home", subtitle: "", icon: Icons.home, source: "HomePage.qml" },
         { key: "game", label: "Game", subtitle: "Which window to read, and which part of it.", icon: Icons.gamepad, source: "GamePage.qml" },
         { key: "translation", label: "Translation", subtitle: "Languages, translator and keys.", icon: Icons.translate, source: "TranslationPage.qml" },
         { key: "appearance", label: "Appearance", subtitle: "How the subtitles look.", icon: Icons.palette, source: "AppearancePage.qml" },
@@ -44,6 +45,8 @@ Rectangle {
             Header {
                 id: header
                 Layout.fillWidth: true
+                visible: root.page !== "home"  // Home carries its own Start button
+                Layout.preferredHeight: visible ? implicitHeight : 0
                 title: root.current.label
                 subtitle: root.current.subtitle
                 status: backend.status

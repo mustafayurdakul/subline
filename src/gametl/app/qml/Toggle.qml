@@ -19,14 +19,16 @@ Switch {
 
     indicator: Rectangle {
         width: 44; height: 22
-        color: root.checked ? Theme.accent : Theme.borderStrong
+        radius: 11
+        color: root.checked ? Theme.accent : Theme.muted
         Behavior on color { ColorAnimation { duration: 120 } }
 
         Rectangle {
             width: 16; height: 16
+            radius: 8
             y: 3
             x: root.checked ? parent.width - width - 3 : 3
-            color: root.checked ? Theme.textOnAccent : Theme.text
+            color: Theme.textOnAccent
             Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         }
     }

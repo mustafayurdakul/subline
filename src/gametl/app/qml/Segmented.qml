@@ -31,13 +31,13 @@ Rectangle {
                 width: label.implicitWidth + 2 * 12
                 height: 26
                 radius: Theme.radius
-                color: active ? Theme.cardRaised : "transparent"
-                border.color: active ? Theme.borderStrong : "transparent"
+                color: active ? Theme.accentSoft : "transparent"
+                border.color: "transparent"
                 Label {
                     id: label
                     anchors.centerIn: parent
                     text: segment.modelData
-                    color: segment.active ? Theme.text : Theme.muted
+                    color: segment.active ? Theme.accent : Theme.muted
                     font.pixelSize: Theme.sizeCaption
                     font.weight: segment.active ? Font.DemiBold : Font.Normal
                 }

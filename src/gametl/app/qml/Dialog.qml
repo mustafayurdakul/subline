@@ -15,8 +15,8 @@ Popup {
     anchors.centerIn: Overlay.overlay
     width: 440
     padding: 3 * Theme.space
-    background: Rectangle { color: Theme.card; border.color: Theme.borderStrong }
-    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.6) }
+    background: Rectangle { radius: Theme.radius; color: Theme.card; border.color: Theme.borderStrong }
+    Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.3) }
 
     contentItem: ColumnLayout {
         id: body

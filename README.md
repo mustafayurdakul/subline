@@ -122,7 +122,8 @@ resize), Enter confirms, Esc cancels; holding Shift while dragging keeps
 the rectangle centred, so one edge and the height are enough. Translations
 appear in that area from then on, and the area is saved with the profile.
 
-The pages: **Game** (window, area, what to ignore), **Translation**
+The pages: **Home** (the language, the game, Start, and the three
+settings a player touches), **Game** (window, area, what to ignore), **Translation**
 (languages, translator, draft, keys, Claude options), **Appearance**
 (size, colour, font, weight, pill or shadow, placement, with a live
 preview drawn by the overlay's own painter),

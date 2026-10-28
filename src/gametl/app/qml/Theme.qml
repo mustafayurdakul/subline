@@ -2,28 +2,29 @@ pragma Singleton
 import QtQuick
 
 // The design tokens every component reads: one palette, one spacing grid,
-// one type scale. Sharp corners; zinc greys on near-black with one muted
-// accent (a dim gold) for the things that matter: the filled button, a
-// switch that is on, the active page, focus.
+// one type scale. A light, Windows 11 look: warm-grey window, white cards
+// with soft corners, near-black text, and one accent (Windows blue) for the
+// things that matter: the filled button, a switch that is on, the active
+// page, focus.
 QtObject {
-    readonly property color window: "#09090B"
-    readonly property color sidebar: "#0C0C0E"
-    readonly property color card: "#131316"
-    readonly property color cardRaised: "#1C1C21"
-    readonly property color border: "#27272A"
-    readonly property color borderStrong: "#3F3F46"
-    readonly property color field: "#0F0F12"
-    readonly property color text: "#FAFAFA"
-    readonly property color textSoft: "#D4D4D8"
-    readonly property color muted: "#8E8E97"
-    readonly property color accent: "#A98E5C"       // dim gold: filled button, switch on, active page, focus
-    readonly property color accentSoft: "#26221A"   // the accent at 15 %, for the active page's row
-    readonly property color textOnAccent: "#0B0A08"
-    readonly property color selection: "#4A4234"
-    readonly property color danger: "#B5484D"       // destructive actions only
+    readonly property color window: "#F3F3F3"
+    readonly property color sidebar: "#F3F3F3"
+    readonly property color card: "#FFFFFF"
+    readonly property color cardRaised: "#F6F6F6"
+    readonly property color border: "#E5E5E5"
+    readonly property color borderStrong: "#C8C8C8"
+    readonly property color field: "#FFFFFF"
+    readonly property color text: "#1B1B1B"
+    readonly property color textSoft: "#3A3A3A"
+    readonly property color muted: "#6B6B6B"
+    readonly property color accent: "#0067C0"       // filled button, switch on, active page, focus
+    readonly property color accentSoft: "#E6F0FA"   // the accent at 10 %, for the active page's row and segment
+    readonly property color textOnAccent: "#FFFFFF"
+    readonly property color selection: "#CCE4F7"
+    readonly property color danger: "#C42B1C"       // destructive actions only
 
     readonly property int space: 8
-    readonly property int radius: 0
+    readonly property int radius: 8
     readonly property int sidebarWidth: 224
     readonly property int contentWidth: 680
 
@@ -34,4 +35,5 @@ QtObject {
     readonly property int sizeTiny: 11     // tags
     readonly property int sizeTitle: 15
     readonly property int sizeHeading: 22
+    readonly property int sizeHero: 30     // the Home page's one sentence
 }

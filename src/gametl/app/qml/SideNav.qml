@@ -49,7 +49,7 @@ Rectangle {
                 radius: Theme.radius
                 color: active ? Theme.accentSoft : mouse.containsMouse ? Theme.card : "transparent"
 
-                Rectangle { visible: entry.active; width: 3; height: parent.height; color: Theme.accent }
+                Rectangle { visible: entry.active; x: 0; y: 9; width: 3; height: parent.height - 18; radius: 1.5; color: Theme.accent }
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 14

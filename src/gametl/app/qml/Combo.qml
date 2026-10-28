@@ -3,10 +3,13 @@ import QtQuick.Controls.Basic
 import "Icons.js" as Icons
 
 // A drop-down bound to `map[key]`: pick one of `options`, or type a value
-// when `editable`. `fontPreview` draws each option in the font it names.
+// when `editable`. With `values`, the options are labels and the matching
+// value is what gets written. `fontPreview` draws each option in the font
+// it names.
 ComboBox {
     id: root
     property var options: []
+    property var values: []  // empty: the options are the values
     property var map: backend.settings
     property string key: ""
     property bool fontPreview: false
@@ -22,11 +25,15 @@ ComboBox {
 
     // The text comes from the map, not from editText: a model reset (the
     // window list refreshing) blanks editText, and must not blank the field.
-    onActivated: function(index) { map[key] = String(options[index]) }
+    onActivated: function(index) { map[key] = String(values.length ? values[index] : options[index]) }
+    function shown(value) {
+        const i = values.indexOf(value)
+        return i >= 0 ? String(options[i]) : String(value ?? "")
+    }
 
     contentItem: TextInput {
         enabled: root.editable  // a disabled input lets the press through to the box, which opens the list
-        text: String(root.map[root.key] ?? "")
+        text: root.shown(root.map[root.key])
         color: Theme.text
         selectionColor: Theme.selection
         selectedTextColor: Theme.text
@@ -61,14 +68,14 @@ ComboBox {
             verticalAlignment: Text.AlignVCenter
             leftPadding: 4
         }
-        background: Rectangle { color: row.highlighted ? Theme.cardRaised : "transparent" }
+        background: Rectangle { color: row.highlighted ? Theme.accentSoft : "transparent" }
     }
     popup: Popup {
         y: root.height
         width: root.width
         implicitHeight: Math.min(list.contentHeight + 2, 300)
         padding: 1
-        background: Rectangle { color: Theme.card; border.color: Theme.borderStrong }
+        background: Rectangle { radius: Theme.radius; color: Theme.card; border.color: Theme.borderStrong }
         contentItem: ListView {
             id: list
             clip: true

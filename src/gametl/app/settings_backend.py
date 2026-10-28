@@ -46,6 +46,16 @@ HOTKEY_LABELS = {
 }
 LIST_FIELDS = ("ignore_zones", "ignore_patterns")  # one entry per line in the window
 # An emptied text control means the default, not an empty value.
+# The languages a translation can be asked for (DeepL's targets), shown by name.
+TARGET_LANGUAGES = [
+    ("tr", "Turkish"), ("en", "English"), ("de", "German"), ("fr", "French"), ("es", "Spanish"), ("it", "Italian"),
+    ("pt", "Portuguese"), ("pl", "Polish"), ("nl", "Dutch"), ("ru", "Russian"), ("uk", "Ukrainian"), ("ar", "Arabic"),
+    ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"), ("el", "Greek"), ("id", "Indonesian"), ("cs", "Czech"),
+    ("da", "Danish"), ("fi", "Finnish"), ("hu", "Hungarian"), ("nb", "Norwegian"), ("ro", "Romanian"),
+    ("sk", "Slovak"), ("sl", "Slovenian"), ("sv", "Swedish"), ("bg", "Bulgarian"), ("et", "Estonian"),
+    ("lt", "Lithuanian"), ("lv", "Latvian"), ("vi", "Vietnamese"),
+]  # fmt: skip
+
 EMPTY_DEFAULTS = {
     "lang": "en",
     "target_lang": "tr",
@@ -314,6 +324,8 @@ class SettingsBackend(QObject):
     appName = Property(str, lambda self: APP_NAME, constant=True)
     version = Property(str, lambda self: __version__, constant=True)
     ocrLangs = Property("QStringList", lambda self: list(OCR_LANGS), constant=True)
+    targetLanguageCodes = Property("QStringList", lambda self: [code for code, _ in TARGET_LANGUAGES], constant=True)
+    targetLanguageNames = Property("QStringList", lambda self: [name for _, name in TARGET_LANGUAGES], constant=True)
     claudeModels = Property("QStringList", lambda self: list(CLAUDE_MODELS), constant=True)
     trialDays = Property(int, lambda self: TRIAL_DAYS, constant=True)
     purchaseUrl = Property(str, lambda self: PURCHASE_URL, constant=True)

@@ -30,4 +30,4 @@ def test_every_page_loads_clean() -> None:
         timeout=300,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "6 pages loaded, 0 problems" in result.stdout, result.stdout
+    assert "7 pages loaded, 0 problems" in result.stdout, result.stdout

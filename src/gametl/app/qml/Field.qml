@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 
-// A text field on a dark well; the accent border shows focus. With a `key`
+// A text field; the accent border shows focus. With a `key`
 // it shows that entry of the backend's settings and writes every edit
 // back; without one it is a plain field (keys, names).
 TextField {

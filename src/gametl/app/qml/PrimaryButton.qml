@@ -15,6 +15,7 @@ Button {
     font.weight: Font.DemiBold
 
     background: Rectangle {
+        radius: Theme.radius
         color: root.down ? Qt.darker(root.fill, 1.2) : root.hovered ? Qt.lighter(root.fill, 1.1) : root.fill
     }
     contentItem: Row {

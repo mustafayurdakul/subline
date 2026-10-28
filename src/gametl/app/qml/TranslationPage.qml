@@ -22,7 +22,10 @@ ColumnLayout {
             helper: "What the translator is told the text is in; empty follows the OCR language."
             Field { key: "source_lang"; placeholderText: "same as OCR language"; implicitWidth: 180 }
         }
-        SettingRow { label: "Target language"; Field { key: "target_lang"; implicitWidth: 180 } }
+        SettingRow {
+            label: "Target language"
+            Combo { key: "target_lang"; options: backend.targetLanguageNames; values: backend.targetLanguageCodes; editable: false; implicitWidth: 180 }
+        }
     }
 
     Card {
