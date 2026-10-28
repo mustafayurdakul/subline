@@ -86,6 +86,17 @@ def test_text_on_the_pill_has_no_outline(overlay: BlockPainter) -> None:
     assert (box[:, :, :3].min(axis=2) > 200).any()  # the letters are there
 
 
+def test_in_place_pill_text_has_no_outline_either(overlay: BlockPainter) -> None:
+    block = RenderBlock((120, 230, 280, 254), ["Yakın dur."], style="pill", font_px=24)
+    rgba = paint_rgba(overlay, block)
+    box = rgba[228:257, 116:285]
+    # The box is PILL_COLOR (black, alpha 230). An outline would sit on top of it as a darker,
+    # more opaque halo around the letters; the letters' own edges blend towards white instead.
+    halo = (box[:, :, :3].max(axis=2) < 60) & (box[:, :, 3] > 240)
+    assert not halo.any()
+    assert (box[:, :, :3].min(axis=2) > 200).any()  # the letters are there
+
+
 def test_pill_opacity_is_the_setting(overlay: BlockPainter) -> None:
     block = subtitle(["Yakın dur."], background="pill", pill_alpha=100, hide_source=False)
     placed = overlay.place_subtitle(block)

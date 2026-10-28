@@ -8,7 +8,7 @@ Styles:
   source line when the text is drawn elsewhere;
 - "patch": the sampled background colour painted over the original and the
   translation drawn in the sampled text colour, in place;
-- "pill": a dark rounded box with white outlined text, in place (for busy
+- "pill": a dark rounded box with white text, in place (for busy
   backgrounds);
 - "outline": outlined text only, in place.
 
@@ -287,7 +287,7 @@ class BlockPainter:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(PILL_COLOR)
             p.drawRoundedRect(rect, 6, 6)
-            fg, decoration = WHITE, "outline"
+            fg, decoration = WHITE, "none"  # the box is the contrast, as on the subtitle pill
         else:  # outline
             fg = QColor(*block.fg) if block.fg != block.bg else WHITE
             decoration = "outline"
