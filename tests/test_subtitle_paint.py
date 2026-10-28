@@ -1,5 +1,5 @@
 """Subtitle painting into an image: line heights from the font's metrics
-so descenders fit, the three backgrounds, pill opacity, weights and grain.
+so descenders fit, the three backgrounds, pill opacity and weights.
 Runs offscreen."""
 
 from __future__ import annotations
@@ -104,22 +104,3 @@ def test_weights_are_distinct_fonts_and_bold_measures_wider(overlay: BlockPainte
     assert bold > regular
     placed = overlay.place_subtitle(subtitle(["Nereye gidiyorsun?"], weight="bold"))
     assert placed.text.width() >= int(bold) - 1
-
-
-def test_grain_textures_the_letters_and_nothing_else(overlay: BlockPainter) -> None:
-    plain = paint_rgba(overlay, subtitle(["Yakın dur."], background="shadow", hide_source=False)).astype(int)
-    grained = paint_rgba(overlay, subtitle(["Yakın dur."], background="shadow", hide_source=False, grain=12))
-    delta = np.abs(grained.astype(int) - plain)
-    text = plain[:, :, :3].max(axis=2) > 200  # the light pixels are the letters
-    assert text.any()
-    assert delta[:, :, :3][text].mean() > 4  # brightness varies on the letters
-    # The grained line is composited from an image a subpixel off the direct
-    # draw, so only the letters' edge pixels may differ; the shadow around is untouched.
-    near = text.copy()
-    for dy in (-2, -1, 0, 1, 2):
-        for dx in (-2, -1, 0, 1, 2):
-            near |= np.roll(np.roll(text, dy, axis=0), dx, axis=1)
-    assert delta[~near].max() <= 2
-    assert abs(int(plain[:, :, 3].sum()) - int(grained[:, :, 3].sum())) < plain[:, :, 3].sum() // 100  # same coverage
-    again = paint_rgba(overlay, subtitle(["Yakın dur."], background="shadow", hide_source=False, grain=12))
-    assert np.array_equal(grained, again)  # the pattern is fixed: no shimmer between frames

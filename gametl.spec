@@ -74,7 +74,7 @@ def licence_files() -> list[tuple[str, str]]:
     return pairs
 
 
-# config.yaml, default_models.yaml, fonts; not the models a dev install has
+# config.yaml, default_models.yaml; not the models a dev install has
 # downloaded into the package (they download on first run into %APPDATA%).
 datas = [
     (src, dst)
@@ -83,7 +83,6 @@ datas = [
 ]
 datas += [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
 datas += [(str(path), "gametl/app/qml") for path in Path("src/gametl/app/qml").iterdir() if path.is_file()]
-datas += [(str(path), "gametl/fonts") for path in Path("src/gametl/fonts").glob("*.ttf")]
 datas += licence_files()
 binaries = collect_dynamic_libs("onnxruntime")
 hiddenimports = (

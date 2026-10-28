@@ -33,7 +33,6 @@ from PySide6.QtWidgets import QApplication
 from gametl.app.config import ProfileStore, Settings
 from gametl.app.controller import build_translator, parse_zone, pipeline_config
 from gametl.app.credentials import WindowsCredentialStore
-from gametl.app.fonts import load_bundled_fonts
 from gametl.app.main import utf8_console
 from gametl.app.pipeline import PipelineThread
 from gametl.capture.base import Frame
@@ -154,7 +153,6 @@ def main() -> int:
     engine = RapidOcrEngine(lang="en", model_root_dir=str(store.models_dir / "ocr"))
     config = pipeline_config(settings, (0, 0, width, height), None)
     pipeline = PipelineThread(0, engine, service, config)
-    load_bundled_fonts()
     overlay = BlockPainter(settings.font)
 
     crop = parse_zone(args.crop, width, height) or (0, 0, width, height)

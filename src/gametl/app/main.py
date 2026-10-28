@@ -102,12 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     look.add_argument("--subtitle-weight", choices=["regular", "medium", "semibold", "bold"])
     look.add_argument(
-        "--subtitle-grain",
-        type=int,
-        metavar="PCT",
-        help=f"film grain over the text (default {Settings.subtitle_grain}; 0 = none)",
-    )
-    look.add_argument(
         "--subtitle-position", choices=["bottom", "source", "center"], help="default bottom (steady baseline)"
     )
     look.add_argument(
@@ -199,7 +193,7 @@ _VALUE_OPTIONS = {
         "style", "font", "fps", "full_scan_every", "stable_frames", "max_missing", "change_threshold",
         "autosave_seconds", "render", "subtitle_color", "subtitle_background", "subtitle_pill_alpha",
         "subtitle_position", "subtitle_center_tolerance", "subtitle_size_tolerance", "short_line_confidence",
-        "subtitle_weight", "subtitle_grain", "dump_dir",
+        "subtitle_weight", "dump_dir",
     )
 } | {"window": "window_match", "glossary": "glossary_path", "subtitle_font": "subtitle_font_px"}  # fmt: skip
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
@@ -368,9 +362,6 @@ def main(argv: list[str] | None = None) -> int:
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
-    from gametl.app.fonts import load_bundled_fonts
-
-    load_bundled_fonts()
     controller = OverlayController(store)
     controller.status.connect(lambda s: print(s, flush=True))
 

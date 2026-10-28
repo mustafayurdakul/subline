@@ -33,6 +33,9 @@ NO_LETTERS_PATTERN = r"^[\W\d_]*$"
 BOTTOM_STRIP = "0,0.75,1,0.25"  # the area most games' subtitles fall in: the bottom quarter
 
 
+REMOVED_FONTS = ("Source Sans 3", "Fira Sans", "Barlow Semi Condensed")  # bundled in 0.1.6 and 0.1.7
+
+
 @dataclass
 class Settings:
     # target
@@ -51,7 +54,6 @@ class Settings:
     subtitle_background: str = "pill"  # "pill" | "shadow" (soft drop shadow, no box) | "none" (outlined text)
     subtitle_pill_alpha: int = 230  # opacity of the pill, 0..255
     subtitle_weight: str = "semibold"  # regular | medium | semibold | bold
-    subtitle_grain: int = 10  # film grain over the glyphs, per cent of brightness; 0 = none
     subtitle_position: str = "bottom"  # "bottom" of the area (steady) | "source" (where the game drew it) | "center"
     subtitle_hide_source: bool = False  # cover the original line when the subtitle is drawn elsewhere
     # HUD text sharing the area: subtitles are centred and one size; prompts and objectives are not.
@@ -74,7 +76,7 @@ class Settings:
     use_cache_file: bool = True
     # appearance and ignores
     style: str = "auto"
-    font: str = "Source Sans 3"  # one of the bundled fonts (app/fonts.py) or any installed family
+    font: str = "Segoe UI"  # any installed font family
     ignore_zones: list[str] = field(default_factory=list)
     ignore_patterns: list[str] = field(default_factory=lambda: [NO_LETTERS_PATTERN])
     short_line_confidence: float = 0.9  # a line of one or two letters needs this OCR confidence; 0 = off
@@ -104,6 +106,8 @@ class Settings:
         kwargs = {k: v for k, v in (data or {}).items() if k in known}
         if "subtitle_weight" not in kwargs and (data or {}).get("subtitle_bold"):
             kwargs["subtitle_weight"] = "bold"  # profiles from before weights had a bold switch
+        if kwargs.get("font") in REMOVED_FONTS:
+            kwargs["font"] = cls.font  # 0.1.6 and 0.1.7 shipped these; now only installed fonts are offered
         settings = cls(**kwargs)
         settings.hotkeys = {**DEFAULT_HOTKEYS, **(settings.hotkeys or {})}
         settings.ignore_zones = list(settings.ignore_zones or [])
