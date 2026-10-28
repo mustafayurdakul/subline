@@ -26,7 +26,7 @@ dependencies = [
     "numpy",
     "pillow>=10",
     # overlay and settings window
-    "pyside6>=6.8",
+    "pyside6-essentials>=6.8",  # Core, Gui, Widgets, Qml, Quick; not the add-ons (3D, WebEngine, ...)
     # translation backends: Claude, DeepL (requests); the offline one is an extra, below
     "anthropic",
     "requests>=2.31",
