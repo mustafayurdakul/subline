@@ -4,7 +4,7 @@ renderer all paint through one BlockPainter, so they look the same.
 
 Styles:
 - "subtitle": one fixed font size and colour, centred in the selected zone,
-  on a pill, with a soft shadow, or bare with an outline; a band covers the
+  on a pill (plain text), with a soft shadow, or bare with an outline; a band covers the
   source line when the text is drawn elsewhere;
 - "patch": the sampled background colour painted over the original and the
   translation drawn in the sampled text colour, in place;
@@ -316,7 +316,12 @@ class BlockPainter:
             if block.background == "pill":
                 p.setBrush(pill_color)
                 p.drawRoundedRect(placed.pill, 8, 8)
-        decoration = "shadow" if block.background == "shadow" else "outline"
+        if block.background == "shadow":
+            decoration = "shadow"
+        elif block.background == "none":
+            decoration = "outline"  # bare text needs an edge to read over anything
+        else:
+            decoration = "none"  # the pill is the contrast; an outline would only thicken the letters
         self._draw_lines(
             p, placed.layout.lines, placed.text, placed.layout.line_height, QColor(*block.fg), decoration,
             placed.layout.font_px, block,

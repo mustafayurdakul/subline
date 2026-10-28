@@ -76,6 +76,16 @@ def test_pill_shadow_and_none_backgrounds(overlay: BlockPainter) -> None:
     assert np.nonzero(shadow.any(axis=1))[0].max() >= np.nonzero(bare.any(axis=1))[0].max()
 
 
+def test_text_on_the_pill_has_no_outline(overlay: BlockPainter) -> None:
+    block = subtitle(["Yakın dur."], background="pill", pill_alpha=100, hide_source=False)
+    placed = overlay.place_subtitle(block)
+    rgba = paint_rgba(overlay, block)
+    box = rgba[placed.pill.top() : placed.pill.bottom() + 1, placed.pill.left() : placed.pill.right() + 1]
+    dark_and_solid = (box[:, :, :3].max(axis=2) < 60) & (box[:, :, 3] > 150)  # an outline pixel over the pill
+    assert not dark_and_solid.any()
+    assert (box[:, :, :3].min(axis=2) > 200).any()  # the letters are there
+
+
 def test_pill_opacity_is_the_setting(overlay: BlockPainter) -> None:
     block = subtitle(["Yakın dur."], background="pill", pill_alpha=100, hide_source=False)
     placed = overlay.place_subtitle(block)
