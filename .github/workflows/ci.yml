@@ -40,7 +40,8 @@ jobs:
       - name: Install
         run: uv sync --locked --group build
       - name: Build
-        run: uv run --group build python scripts/build.py
+        # The folder and the installer: a broken installer/subline.iss fails here, not at release time.
+        run: uv run --group build python scripts/build.py --installer
       - name: Settings window in the frozen app
         env:
           QT_QPA_PLATFORM: offscreen

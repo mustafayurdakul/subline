@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--remove-all-data",
         action="store_true",
         help="delete the data folder and the Credential Manager entries (keys, licence) and exit; "
-        "the trial's start date is kept",
+        "the trial's used time is kept",
     )
     mode.add_argument(
         "--check-ui", action="store_true", help="load every settings page without a display, report problems and exit"
@@ -315,7 +315,7 @@ def show_settings_if_start_fails(controller: OverlayController, open_settings: C
 def license_command(key: str | None, store: ProfileStore) -> int:
     """Store a key when one is given, then print the licence or trial state."""
     from gametl.app.credentials import WindowsCredentialStore
-    from gametl.app.license import LicenseError, activate, license_status
+    from gametl.app.license import LicenseError, activate, license_status, machine_code
 
     secrets = WindowsCredentialStore()
     if key:
@@ -326,6 +326,7 @@ def license_command(key: str | None, store: ProfileStore) -> int:
             return 2
         print(f"activated: licensed to {licence.name}")
     print(license_status(secrets, store).text)
+    print(f"computer code: {machine_code()}  (a key is issued for this code)")
     return 0
 
 

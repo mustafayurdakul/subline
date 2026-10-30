@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 
 from gametl.app.config import DEFAULT_HOTKEYS, ProfileStore, Settings
 from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
-from gametl.app.license import make_key
+from gametl.app.license import machine_code, make_key
 from gametl.app.settings_backend import (
     BOTTOM_STRIP,
     EMPTY_DEFAULTS,
@@ -225,7 +225,10 @@ def test_licence_activates_and_removes_a_key(
     assert backend.licenseText.startswith("trial: ")
     backend.activateLicense("GAMETL-nonsense.x")
     assert backend.licenseText.startswith("key rejected")
-    backend.activateLicense(make_key(pem, "Ada Lovelace", "ada@example.com", date.today()))
+    assert backend.machineCode == machine_code() and len(backend.machineCode) == 19
+    backend.activateLicense(make_key(pem, "Eve", "eve@example.com", date.today(), machine_code("elsewhere")))
+    assert "another computer" in backend.licenseText  # a key shared from another computer
+    backend.activateLicense(make_key(pem, "Ada Lovelace", "ada@example.com", date.today(), machine_code()))
     assert backend.licenseText == "licensed to Ada Lovelace"
     assert secrets.get("LICENSE_KEY").startswith("GAMETL-")
     backend.removeLicense()

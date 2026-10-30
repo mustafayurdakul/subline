@@ -37,7 +37,7 @@ def populated(tmp_path: Path) -> tuple[ProfileStore, MemorySecretStore]:
     secrets = MemorySecretStore()
     for name in SECRET_NAMES:
         secrets.set(name, f"value of {name}")
-    secrets.set(TRIAL_SECRET, "2026-10-01")
+    secrets.set(TRIAL_SECRET, "120")  # two minutes of the trial used
     secrets.set("UNRELATED", "kept")
     return store, secrets
 
@@ -50,7 +50,7 @@ def test_everything_gametl_wrote_is_gone(tmp_path: Path) -> None:
     assert not store.root.exists()
     assert all(secrets.get(name) is None for name in SECRET_NAMES)
     assert secrets.get("UNRELATED") == "kept"  # only gametl's own entries
-    assert secrets.get(TRIAL_SECRET) == "2026-10-01"  # the trial's start stays
+    assert secrets.get(TRIAL_SECRET) == "120"  # the trial's used time stays
     assert str(store.root) in report.removed
     assert f"memory entry {LICENSE_SECRET}" in report.removed
     assert f"memory entry {TRIAL_SECRET}" not in report.removed
@@ -60,17 +60,14 @@ def test_everything_gametl_wrote_is_gone(tmp_path: Path) -> None:
 
 
 def test_the_trial_does_not_start_again(tmp_path: Path) -> None:
-    from datetime import date, timedelta
-
-    from gametl.app.license import license_status
+    from gametl.app.license import TRIAL_SECONDS, license_status
 
     store, secrets = populated(tmp_path)
-    old = date.today() - timedelta(days=30)
-    secrets.set(TRIAL_SECRET, old.isoformat())
+    secrets.set(TRIAL_SECRET, str(TRIAL_SECONDS))
     assert license_status(secrets, store).may_run is False  # trial over
     remove_all_data(store, secrets)
     assert license_status(secrets, store).may_run is False  # still over
-    assert store.load_config()["trial_start"] == old.isoformat()  # and written back to a fresh config.json
+    assert store.load_config()["trial_used"] == TRIAL_SECONDS  # and written back to a fresh config.json
 
 
 class FailingSecrets(MemorySecretStore):
@@ -96,7 +93,7 @@ def test_failures_are_reported_and_do_not_stop_the_rest(tmp_path: Path) -> None:
 def test_describe_data_names_the_folder_and_the_entries(tmp_path: Path) -> None:
     text = describe_data(ProfileStore(tmp_path), MemorySecretStore())
     assert str(tmp_path) in text
-    assert "gametl/LICENSE_KEY" in text and "gametl/TRIAL_START" not in text
+    assert "gametl/LICENSE_KEY" in text and "gametl/TRIAL_USED" not in text
 
 
 def test_release_log_closes_the_log_and_redirects_the_streams(monkeypatch: pytest.MonkeyPatch) -> None:

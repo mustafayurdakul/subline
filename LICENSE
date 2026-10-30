@@ -1,52 +1,54 @@
-gametl End-User Licence Agreement
+Subline End-User Licence Agreement
 
 Copyright (c) 2026 Mustafa Yurdakul. All rights reserved.
 
-This software ("gametl") is licensed, not sold. By installing or using it
-you accept these terms.
+This software ("Subline", distributed as the gametl package) is licensed,
+not sold. By installing or using it you accept these terms.
 
-1. Trial. You may use gametl without a licence key for 14 days from its
-   first start, to decide whether to buy it.
+1. Trial. You may use Subline without a licence key for three hours of
+   translation in all, counted while it runs, to decide whether to buy it.
+   After that it stops translating until a licence key is entered.
 
 2. Licence. A licence key bought from Mustafa Yurdakul grants you a
    personal, non-exclusive, non-transferable right to install and use
-   gametl on computers you own or control, up to the number of seats the
-   key states, for as long as the key is valid.
+   Subline on the one computer the key is issued for, identified by the
+   computer code shown on its Licence page, for as long as the key is
+   valid. A key for another computer is bought separately.
 
-3. Restrictions. You may not copy gametl except for backup, distribute,
+3. Restrictions. You may not copy Subline except for backup, distribute,
    sell, rent, lease, lend or sublicense it, share or publish a licence
    key, remove or alter its licence check or copyright notices, or use it
    to build a competing product. Reverse engineering is permitted only to
    the extent applicable law allows it despite this clause.
 
-4. Source code. If the source code of gametl is made available to you, it
+4. Source code. If the source code of Subline is made available to you, it
    is for reading and for building the software for your own licensed use.
    It is not open source; the restrictions above apply to it as well.
 
-5. Third-party components. gametl bundles open-source components listed in
+5. Third-party components. Subline bundles open-source components listed in
    THIRD_PARTY_NOTICES.md. Each remains under its own licence, which may
    grant you more rights to that component than this agreement does. The
    Qt libraries (PySide6) are used under the LGPL version 3 and ship as
    separate files so that you can replace them.
 
 6. Services. Translation through DeepL or Anthropic uses your own account
-   with those services, under their terms. gametl sends them only the text
-   it reads from the game. gametl does not collect or transmit anything
+   with those services, under their terms. Subline sends them only the text
+   it reads from the game. Subline does not collect or transmit anything
    else.
 
-7. No warranty. gametl is provided "as is", without warranty of any kind,
+7. No warranty. Subline is provided "as is", without warranty of any kind,
    express or implied, including merchantability, fitness for a particular
    purpose and non-infringement. OCR and machine translation make
    mistakes; you use the output at your own risk.
 
 8. Limitation of liability. To the extent permitted by law, Mustafa
    Yurdakul is not liable for any damages arising from the use of or
-   inability to use gametl, and total liability is limited to the amount
+   inability to use Subline, and total liability is limited to the amount
    you paid for your licence.
 
 9. Termination. This licence ends automatically if you breach it. On
-   termination you must stop using gametl and delete your copies.
+   termination you must stop using Subline and delete your copies.
 
-10. Changes. Updates to gametl are covered by the terms shipped with them.
+10. Changes. Updates to Subline are covered by the terms shipped with them.
 
 Contact: mustafa@yurdakul.dev
