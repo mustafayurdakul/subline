@@ -97,6 +97,10 @@ def test_trial_counts_translation_time_and_survives_deleted_copies(tmp_path: Pat
     # A copy wound back by hand does not help: the largest wins.
     secrets.set("TRIAL_USED", "5")
     assert license_status(secrets, store, TODAY, public, machine=HERE).trial_seconds_left == TRIAL_SECONDS - 1200
+    # The registry copy (in memory here, HKEY_CURRENT_USER on Windows) is the third: alone, it still counts.
+    secrets.delete("TRIAL_USED")
+    store.config_path.unlink()
+    assert license_status(secrets, store, TODAY, public, machine=HERE).trial_seconds_left == TRIAL_SECONDS - 1200
 
     assert record_trial_use(secrets, store, TRIAL_SECONDS) == 0
     over = license_status(secrets, store, TODAY, public, machine=HERE)
