@@ -93,9 +93,13 @@ jobs:
         run: |
           $label = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "${{ github.sha }}".Substring(0, 7) }
           "zip=gametl-$label-win64.zip" >> $env:GITHUB_OUTPUT
+          $version = (Select-String -Path src/gametl/__init__.py -Pattern '^__version__ = "(.*)"').Matches[0].Groups[1].Value
+          "setup=Subline-v$version-setup.exe" >> $env:GITHUB_OUTPUT
 
       - name: Build
-        run: uv run --group build python scripts/build.py --clean
+        # The portable folder, then the installer around it (Inno Setup 6 is
+        # on the Windows runner image).
+        run: uv run --group build python scripts/build.py --clean --installer
 
       - name: Settings window in the frozen app
         # The same check as CI's build job, on the folder that ships: a tag
@@ -112,7 +116,9 @@ jobs:
         with:
           tag_name: ${{ needs.decide.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          files: ${{ steps.name.outputs.zip }}
+          files: |
+            dist/${{ steps.name.outputs.setup }}
+            ${{ steps.name.outputs.zip }}
           generate_release_notes: true
           prerelease: ${{ contains(needs.decide.outputs.tag, '-') }}
 
@@ -121,5 +127,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.name.outputs.zip }}
-          path: ${{ steps.name.outputs.zip }}
+          path: |
+            ${{ steps.name.outputs.zip }}
+            dist/${{ steps.name.outputs.setup }}
           retention-days: 7

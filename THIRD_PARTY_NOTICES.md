@@ -26,6 +26,7 @@ packages.
 | [requests](https://requests.readthedocs.io/) | DeepL translation, downloads | Apache-2.0 |
 | [cryptography](https://cryptography.io/) (with OpenSSL) | licence-key signatures | Apache-2.0 or BSD-3-Clause; OpenSSL under Apache-2.0 |
 | [PyInstaller](https://pyinstaller.org/) | building the packaged folder (bootloader included in the build) | GPL-2.0 with the bootloader exception, which permits proprietary builds |
+| [Inno Setup](https://jrsoftware.org/isinfo.php) | the installer (`Subline-v<version>-setup.exe`; its setup stub is part of the file) | Inno Setup licence, which permits distributing the installers it makes |
 
 The components above bring these with them:
 

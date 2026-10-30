@@ -7,10 +7,19 @@ ColumnLayout {
 
     Card {
         title: "Licence"
-        helper: "Without a key the app runs for a " + backend.trialDays + "-day trial. The key is kept in Windows Credential Manager, never in a profile."
+        helper: "Without a key the app translates for " + backend.trialHours + " hours in all, then stops. A key is issued for one computer, named by the code below, and is kept in Windows Credential Manager, never in a profile."
         SettingRow {
             label: "Status"
             Label { text: backend.licenseText; color: Theme.textSoft; wrapMode: Text.WordWrap; width: 360; horizontalAlignment: Text.AlignRight }
+        }
+        SettingRow {
+            label: "Computer code"
+            helper: "Send this code when buying a key; the key works on this computer only."
+            RowLayout {
+                spacing: Theme.space
+                Label { text: backend.machineCode; font.family: "Consolas"; font.pixelSize: Theme.size; color: Theme.textSoft }
+                SecondaryButton { text: "Copy"; onClicked: backend.copyMachineCode() }
+            }
         }
         SettingRow {
             label: "Licence key"
@@ -35,14 +44,14 @@ ColumnLayout {
         }
         Caption {
             Layout.fillWidth: true
-            text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models, API keys and the licence key. Then the app quits. Only the trial's start date (gametl/TRIAL_START) is kept, so the trial does not start over."
+            text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models, API keys and the licence key. Then the app quits. Only the trial's used time (gametl/TRIAL_USED) is kept, so the trial does not start over."
         }
     }
 
     Confirm {
         id: confirm
         title: "Remove all data and quit?"
-        text: "Every profile, translation cache, downloaded model, the API keys and the licence key go; only the trial's start date stays. This cannot be undone."
+        text: "Every profile, translation cache, downloaded model, the API keys and the licence key go; only the trial's used time stays. This cannot be undone."
         confirmText: "Remove and quit"
         onConfirmed: backend.removeAllData()
     }

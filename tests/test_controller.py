@@ -8,7 +8,7 @@ import os
 import threading
 import time
 import weakref
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +33,7 @@ from gametl.app.controller import (
     restart_fields,
 )
 from gametl.app.credentials import MemorySecretStore
+from gametl.app.license import TRIAL_SECONDS
 from gametl.capture.base import Frame
 from gametl.capture.windows import WindowInfo
 from gametl.ocr.base import OcrResult, TextLine
@@ -431,7 +432,7 @@ def test_finished_start_threads_are_let_go(qapp, controller) -> None:
 
 def test_trial_over_refuses_to_start(qapp, fakes, tmp_path) -> None:
     secrets = MemorySecretStore()
-    secrets.set("TRIAL_START", (date.today() - timedelta(days=60)).isoformat())
+    secrets.set("TRIAL_USED", str(TRIAL_SECONDS))
     c = OverlayController(ProfileStore(tmp_path), secrets)
     messages: list[str] = []
     failures: list[str] = []
@@ -439,3 +440,32 @@ def test_trial_over_refuses_to_start(qapp, fakes, tmp_path) -> None:
     c.start_failed.connect(failures.append)  # the tray shows these in the window's banner
     assert c.start(settings()) is False
     assert messages == failures == ["trial over: a licence key is needed: enter one in Settings > Licence"]
+
+
+def test_the_trial_clock_counts_running_time_and_stops_the_session(qapp, controller) -> None:
+    controller.secrets.set("TRIAL_USED", str(TRIAL_SECONDS - 12 * 60))  # twelve minutes left
+    assert controller.start(settings()) is True
+    wait_for(qapp, lambda: controller.running)
+    assert controller._trial_timer.isActive()  # unlicensed: the session's time is counted
+    controller._trial_mark = time.monotonic() - 90  # as if a minute and a half had run
+    controller._trial_tick()
+    assert controller.running and int(controller.secrets.get("TRIAL_USED")) >= TRIAL_SECONDS - 12 * 60 + 90
+    assert controller.messages[-1] == "trial: 11 min left"  # inside the last quarter hour: counted down
+    controller._trial_mark = time.monotonic() - 20 * 60  # the rest of the trial
+    controller._trial_tick()
+    assert not controller.running and not controller._trial_timer.isActive()
+    assert controller.failures[-1] == "trial over: a licence key is needed: enter one in Settings > Licence"
+    assert controller.start(settings()) is False  # and it stays over
+
+
+def test_a_licensed_session_is_not_counted(qapp, controller, keypair, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gametl.app.license import machine_code, make_key
+
+    pem, public = keypair
+    monkeypatch.setattr("gametl.app.license.PUBLIC_KEY_HEX", public)
+    controller.secrets.set("LICENSE_KEY", make_key(pem, "Ada", "ada@example.com", date.today(), machine_code()))
+    assert controller.start(settings()) is True
+    wait_for(qapp, lambda: controller.running)
+    assert not controller._trial_timer.isActive()
+    controller.stop()
+    assert controller.secrets.get("TRIAL_USED") in (None, "0")

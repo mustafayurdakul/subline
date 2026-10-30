@@ -9,7 +9,8 @@ second after a line appears. The package and the executables are named
 `gametl`; the app presents itself as Subline.
 
 Copyright (c) 2026 Mustafa Yurdakul. Proprietary software: free to try for
-14 days, then a licence key is required (see [Licensing](#licensing)).
+three hours of translation, then a licence key is required (see
+[Licensing](#licensing)).
 
 ![Alan Wake 2: the game's English subtitle above, the same moment with Subline's Turkish subtitle below](docs/demo.gif)
 
@@ -77,13 +78,23 @@ from a recording by an earlier build (see
 
 ## Installation
 
-### Packaged build
+### Installer
 
-Unzip the release folder anywhere and run `gametl.exe`. The OCR models
-(about 20 MB) download on first run into `%APPDATA%\gametl\models`; Korean,
-Cyrillic and Arabic text need one more model, which downloads the first
-time that OCR language is used. The app runs as a 14-day trial until a
-licence key is entered on the Licence page.
+Run `Subline-v<version>-setup.exe` from the release. It installs for the
+current user (no administrator prompt) into
+`%LOCALAPPDATA%\Programs\Subline`, adds a Start menu entry and, if asked,
+a desktop icon, and can start the app when it finishes. Windows SmartScreen
+may warn that the publisher is unknown: the installer is not code-signed.
+The OCR models (about 20 MB) download on first run into
+`%APPDATA%\gametl\models`; Korean, Cyrillic and Arabic text need one more
+model, which downloads the first time that OCR language is used. The app
+translates for three hours in all, then stops until a licence key is
+entered on the Licence page.
+
+### Portable build
+
+`gametl-v<version>-win64.zip` is the same app without the installer: unzip
+the folder anywhere and run `gametl.exe`.
 
 The folder holds two executables. `gametl.exe` is the tray app: it has no
 console and writes its output to `%APPDATA%\gametl\gametl.log`. From a
@@ -91,16 +102,19 @@ terminal, use `gametl-cli.exe`: the same app with the same options, its
 output in the terminal (and `gametl-cli pretranslate ...` for scripts, see
 [Translating a script up front](#translating-a-script-up-front)).
 
-**Uninstall:** delete the unzipped folder. Everything else Subline keeps
-lives in `%APPDATA%\gametl` (profiles, translation caches, downloaded
-models and runtime, `config.json`, the log) and in four Windows Credential
-Manager entries (`gametl/DEEPL_AUTH_KEY`, `gametl/ANTHROPIC_API_KEY`,
-`gametl/LICENSE_KEY`, `gametl/TRIAL_START`). **Remove all data and quit**
-on the Licence page, or `gametl-cli --remove-all-data`, deletes the folder
-and the first three entries. `gametl/TRIAL_START`, the date the trial
-began, stays, so the trial does not start over. Nothing is written to the
-registry. While it runs, Subline keeps a small lock file in `%TEMP%`
-(`gametl-<id>.lock`), which goes when it quits.
+**Uninstall:** Settings > Apps > Subline (or delete the unzipped folder
+of the portable build). That removes the program only. Everything else
+Subline keeps lives in `%APPDATA%\gametl` (profiles, translation caches,
+downloaded models and runtime, `config.json`, the log), in four Windows
+Credential Manager entries (`gametl/DEEPL_AUTH_KEY`,
+`gametl/ANTHROPIC_API_KEY`, `gametl/LICENSE_KEY`, `gametl/TRIAL_USED`) and
+in one registry value, `HKEY_CURRENT_USER\Software\Subline\trial`.
+**Remove all data and quit** on the Licence page, or
+`gametl-cli --remove-all-data`, deletes the folder and the first three
+entries. `gametl/TRIAL_USED` and the registry value, the trial time used
+so far, stay, so the trial does not start over. While it runs, Subline
+keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`), which goes when
+it quits.
 
 ### From source
 
@@ -194,11 +208,15 @@ with Shift alone.
 
 ### Licence key
 
-The Licence page shows how many trial days are left. Paste the key there
-and press **Activate**; it is kept in Windows Credential Manager.
-**Remove** deletes it from this computer, after asking. From the command
-line, `gametl-cli --activate KEY` stores a key and
-`gametl-cli --license-status` prints the state.
+The Licence page shows how much of the trial is left: three hours of
+translation in all, counted while a session runs, with a countdown in the
+status line for the last fifteen minutes. The page also shows this
+computer's code (like `ABCD-1234-EF56-7890`, with a Copy button): a key is
+issued for one computer and works only there, so send the code when
+buying. Paste the key on the page and press **Activate**; it is kept in
+Windows Credential Manager. **Remove** deletes it from this computer,
+after asking. From the command line, `gametl-cli --activate KEY` stores a
+key and `gametl-cli --license-status` prints the state and the code.
 
 ## Translators
 
@@ -459,7 +477,8 @@ opencv-python-headless provides `cv2`); in an environment that had both,
   frames the app would skip.
 - `scripts/bench_translate.py` measures Claude request latency per
   configuration (real API calls).
-- `scripts/make_license.py` issues licence keys; it needs the private
+- `scripts/make_license.py` issues licence keys (`--name`, `--email` and the
+  customer's `--machine` code); it needs the private
   signing key, which is not in the repository.
 
 ## Releases
@@ -469,7 +488,9 @@ uv run --group build python scripts/build.py
 ```
 
 builds the distributable folder `dist/gametl` with PyInstaller: `gametl.exe`
-and `gametl-cli.exe` on one shared runtime. GitHub Actions
+and `gametl-cli.exe` on one shared runtime; `--installer` also compiles
+`installer/subline.iss` with Inno Setup 6 into
+`dist/Subline-v<version>-setup.exe`. GitHub Actions
 (`.github/workflows/release.yml`) does the same on a Windows runner: bump
 `__version__` in `src/gametl/__init__.py` (the one place the version
 lives; `pyproject.toml` reads it from there) and merge to `main`, and the
@@ -501,8 +522,9 @@ APIs.
 ## Licensing
 
 Subline (gametl) is proprietary software, copyright (c) 2026 Mustafa
-Yurdakul. It may be used for a 14-day trial, after which a licence key
-bought from the author is required; see [LICENSE](LICENSE) for the terms.
+Yurdakul. It may be tried for three hours of translation, after which a
+licence key bought from the author, issued for one computer, is required;
+see [LICENSE](LICENSE) for the terms.
 The open-source components it bundles or downloads are listed with their
 licences in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licence
 enquiries: mustafa@yurdakul.dev.

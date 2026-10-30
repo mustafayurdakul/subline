@@ -1,7 +1,8 @@
-"""Build the distributable folder with PyInstaller.
+"""Build the distributable folder with PyInstaller, and the installer.
 
-  uv run --group build python scripts/build.py          # -> dist/gametl/
-  uv run --group build python scripts/build.py --clean  # wipe build/ and dist/ first
+  uv run --group build python scripts/build.py              # -> dist/gametl/
+  uv run --group build python scripts/build.py --clean      # wipe build/ and dist/ first
+  uv run --group build python scripts/build.py --installer  # plus dist/Subline-v<version>-setup.exe (Inno Setup 6)
 
 Generates the app icon from the same drawing the tray uses, runs the spec,
 moves the licence files up next to the executables, and prints the size of
@@ -18,6 +19,39 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+ISCC_DEFAULT = Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")  # where the Inno Setup installer puts it
+
+
+def find_iscc() -> str | None:
+    """The Inno Setup compiler: $ISCC, then the default install path, then PATH."""
+    candidate = os.environ.get("ISCC")
+    if candidate and Path(candidate).exists():
+        return candidate
+    if ISCC_DEFAULT.exists():
+        return str(ISCC_DEFAULT)
+    return shutil.which("ISCC")
+
+
+def build_installer(dist: Path, version: str, icon: Path) -> Path:
+    """Compile installer/subline.iss around the built folder into dist/."""
+    iscc = find_iscc()
+    if iscc is None:
+        raise SystemExit("Inno Setup 6 not found: install it (https://jrsoftware.org/isinfo.php) or set ISCC")
+    out_dir = dist.parent
+    cmd = [
+        iscc,
+        f"/DAppVersion={version}",
+        f"/DSourceDir={dist}",
+        f"/DOutputDir={out_dir}",
+        f"/DIconFile={icon}",
+        str(ROOT / "installer" / "subline.iss"),
+    ]
+    print(" ".join(cmd), flush=True)
+    subprocess.run(cmd, cwd=ROOT, check=True)
+    setup = out_dir / f"Subline-v{version}-setup.exe"
+    if not setup.exists():
+        raise SystemExit(f"Inno Setup finished but {setup} is missing")
+    return setup
 
 
 def make_ico(path: Path) -> None:
@@ -53,6 +87,7 @@ def folder_size(path: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
+    parser.add_argument("--installer", action="store_true", help="also build the Inno Setup installer into dist/")
     parser.add_argument(
         "--distpath", default="dist", help="output folder (default dist; use another when dist/gametl is in use)"
     )
@@ -82,6 +117,11 @@ def main() -> int:
     relocate_licences(dist)
     exes = sorted(p.name for p in dist.glob("*.exe"))
     print(f"\nbuilt {dist}: {folder_size(dist) / 1_000_000:.0f} MB, executables: {', '.join(exes)}")
+    if args.installer:
+        from gametl import __version__
+
+        setup = build_installer(dist, __version__, ROOT / "build" / "gametl.ico")
+        print(f"installer {setup}: {setup.stat().st_size / 1_000_000:.0f} MB")
     return 0
 
 

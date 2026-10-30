@@ -3,9 +3,9 @@
 Two places hold data: the folder under %APPDATA%\\gametl (profiles,
 translation caches, downloaded models, config.json, the log, batch job
 files) and the Windows Credential Manager (the API keys, the licence key
-and the trial start). Everything goes except the trial start: kept in the
-Credential Manager, it restores itself on the next start, so removing the
-data does not begin a new trial.
+and the trial's used time). Everything goes except the used time: kept in
+the Credential Manager (and the registry), it restores itself on the next
+start, so removing the data does not begin a new trial.
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ class CleanupReport:
 
 
 def remove_all_data(store: ProfileStore, secrets: SecretStore) -> CleanupReport:
-    """Delete the Credential Manager entries (all but the trial start) and
+    """Delete the Credential Manager entries (all but the trial's used time) and
     the data folder. Never raises: whatever could not be removed is listed
     in the report."""
     report = CleanupReport()

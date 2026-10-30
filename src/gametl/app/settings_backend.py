@@ -32,7 +32,7 @@ from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .controller import TRANSLATORS, parse_color
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_WIN, NAMED_KEYS, parse_combo
-from .license import PURCHASE_URL, TRIAL_DAYS, LicenseError, activate, deactivate, license_status
+from .license import PURCHASE_URL, TRIAL_SECONDS, LicenseError, activate, deactivate, license_status, machine_code
 
 # fmt: off
 OCR_LANGS = [
@@ -348,7 +348,8 @@ class SettingsBackend(QObject):
     targetLanguageNames = Property("QStringList", lambda self: [name for _, name in TARGET_LANGUAGES], constant=True)
     claudeModels = Property("QStringList", lambda self: list(CLAUDE_MODELS), constant=True)
     translators = Property("QStringList", lambda self: list(TRANSLATORS), constant=True)  # the names a start accepts
-    trialDays = Property(int, lambda self: TRIAL_DAYS, constant=True)
+    trialHours = Property(int, lambda self: TRIAL_SECONDS // 3600, constant=True)
+    machineCode = Property(str, lambda self: machine_code(), constant=True)  # named in a key; shown to send when buying
     purchaseUrl = Property(str, lambda self: PURCHASE_URL, constant=True)
     dataFolder = Property(str, lambda self: str(self.store.root), constant=True)
     dataDescription = Property(str, lambda self: describe_data(self.store, self.secrets), constant=True)
@@ -554,6 +555,10 @@ class SettingsBackend(QObject):
     def removeLicense(self) -> None:
         deactivate(self.secrets)
         self._refresh_license_status()
+
+    @Slot()
+    def copyMachineCode(self) -> None:
+        QGuiApplication.clipboard().setText(machine_code())
 
     # -- data ------------------------------------------------------------------------------------------
 
