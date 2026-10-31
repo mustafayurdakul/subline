@@ -46,6 +46,8 @@ _SYSTEM_RULES = "\n".join(
         "says otherwise.",
         "Items may contain OCR errors (l/1, O/0, spacing): translate the intended text.",
         '"context" holds recent lines with their translations, oldest first; use it only for consistency.',
+        '"speakers", when present, names who says each item (same order, "" = unknown): translate the item only, '
+        "never the name, and let the speaker guide register and pronouns.",
         "Reply with JSON only, no notes.",
     ]
 )
@@ -156,6 +158,8 @@ class ClaudeTranslator:
         }
         if request.context:  # the last few pairs: enough for consistency, cheap in tokens
             payload["context"] = [[source, target] for source, target in request.context[-10:]]
+        if request.speakers and any(request.speakers):
+            payload["speakers"] = list(request.speakers)
         if self.structured:
             payload["items"] = [{"id": i, "text": t} for i, t in enumerate(request.texts)]
         else:

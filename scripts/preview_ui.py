@@ -26,7 +26,7 @@ os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 from gametl.app.settings_window import PAGES, WINDOW_SIZE
 
 
-def sample_backend(folder: Path, background: str, translator: str = "deepl"):
+def sample_backend(folder: Path, background: str, translator: str = "deepl", render: str = "subtitle"):
     from gametl.app.config import ProfileStore, Settings
     from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
     from gametl.app.settings_backend import SettingsBackend
@@ -38,6 +38,7 @@ def sample_backend(folder: Path, background: str, translator: str = "deepl"):
         translator=translator,
         target_lang="tr",
         subtitle_background=background,
+        render=render,
         ignore_patterns=[r"^[\W\d_]*$", r"^(Objective|Press)\b"],
     )
     secrets = MemorySecretStore()
@@ -65,6 +66,7 @@ def main() -> int:
     p.add_argument(
         "--translator", choices=["deepl", "claude", "offline"], default="deepl", help="the sample's translator"
     )
+    p.add_argument("--render", choices=["subtitle", "chat", "inplace"], default="subtitle", help="the sample's mode")
     p.add_argument("--profiles", action="store_true", help="also render the Profiles popup, open over Home")
     args = p.parse_args()
     width = args.width or round(WINDOW_SIZE.width() * args.scale)
@@ -94,7 +96,7 @@ def main() -> int:
         return True
 
     with tempfile.TemporaryDirectory() as folder:
-        backend = sample_backend(Path(folder), args.background, args.translator)
+        backend = sample_backend(Path(folder), args.background, args.translator, args.render)
         view = SettingsWindow(backend, scale=args.scale)
         if view.problems:
             print("\n".join(view.problems))
@@ -110,7 +112,9 @@ def main() -> int:
             if args.full:
                 view.resize(width, max(height, int(view.rootObject().property("fullHeight"))))
                 settle()
-            suffix = f"-{args.background}" if page == "appearance" and args.background != "pill" else ""
+            suffix = ""
+            if page == "appearance":
+                suffix = "".join(f"-{v}" for v in (args.background, args.render) if v not in ("pill", "subtitle"))
             if not save(view, page + suffix):
                 return 2
         if args.profiles:

@@ -37,6 +37,11 @@ class BatchResult:
     elapsed_ms: float
 
 
+def _said_by(speaker: str, text: str) -> str:
+    """A line as the context shows it: with its speaker in front, when one was named."""
+    return f"{speaker}: {text}" if speaker else text
+
+
 def _unexpired(until: dict[str, float], now: float) -> dict[str, float]:
     """The cooldowns in `until` (key -> monotonic time) that have not passed."""
     return {key: t for key, t in until.items() if t > now} if until else until
@@ -128,8 +133,11 @@ class TranslationService:
         self._draft_failed_until: dict[str, float] = {}
         self._draft_backoff_until = 0.0
         self._last_save = time.monotonic()
-        # The lines of the scene, each once: key -> (source, translation), oldest first.
+        # The lines of the scene, each once: key -> (source, translation), oldest first. The source
+        # carries its speaker ("Casey: Go.") so the translator sees who said what; the texts sent
+        # never do (see `speakers` in submit).
         self._context: OrderedDict[str, tuple[str, str]] = OrderedDict()
+        self._speakers: dict[str, str] = {}  # key -> who says it, for the texts in flight
         self._arrived: set[str] = set()  # keys whose final answer just came in: their next lookup is no cache hit
         self._futures: list[Future[BatchResult]] = []
         self.stats = {"requests": 0, "items": 0, "translated": 0, "errors": 0, "cache_hits": 0, "drafts": 0}
@@ -138,7 +146,7 @@ class TranslationService:
 
     # -- pipeline side ---------------------------------------------------------
 
-    def lookup(self, text: str) -> str | None:
+    def lookup(self, text: str, speaker: str = "") -> str | None:
         """The final translation from the cache, or None."""
         key = self.cache.key(text)
         with self._lock:
@@ -151,27 +159,33 @@ class TranslationService:
                     self._arrived.discard(key)
                 else:
                     self.stats["cache_hits"] += 1
-                self._remember(key, text, hit)  # a line shown from the cache is part of the scene too
+                self._remember(key, _said_by(speaker, text), hit)  # a line shown from the cache is in the scene too
         return hit
 
-    def lookup_best(self, text: str) -> tuple[str, bool] | None:
+    def lookup_best(self, text: str, speaker: str = "") -> tuple[str, bool] | None:
         """(translation, is_final): the cached final translation, else a
         draft if one has arrived, else None."""
-        final = self.lookup(text)
+        final = self.lookup(text, speaker)
         if final is not None:
             return final, True
         with self._lock:
             draft = self._drafts.get(self.cache.key(text))
         return (draft, False) if draft is not None else None
 
-    def submit(self, texts: list[str]) -> bool:
+    def submit(self, texts: list[str], speakers: list[str] | None = None) -> bool:
         """Queue one final batch (and one draft batch when a draft translator
         exists) for the texts the cache cannot answer and that are not
-        already in flight or cooling down. Returns True when any request was
+        already in flight or cooling down. `speakers`, one per text, names
+        who says each ("" = nobody named): it goes along as a hint and into
+        the context, never into the text. Returns True when any request was
         started."""
         todo: dict[str, str] = {}  # key -> text: each text once
-        for text in texts:
-            todo.setdefault(self.cache.key(text), text)
+        said: dict[str, str] = {}  # key -> speaker, where one is named
+        for i, text in enumerate(texts):
+            key = self.cache.key(text)
+            todo.setdefault(key, text)
+            if speakers and speakers[i]:
+                said[key] = speakers[i]
         todo.pop("", None)
         # What the cache answers (exactly, by number swap or fuzzily) lookup()
         # shows at once; a request would only spend characters, delay the line
@@ -182,6 +196,7 @@ class TranslationService:
         batch: list[str] = []
         draft_batch: list[str] = []
         with self._lock:
+            self._speakers.update(said)
             # Cooldowns that have passed are of no further use.
             self._failed_until = _unexpired(self._failed_until, now)
             self._draft_failed_until = _unexpired(self._draft_failed_until, now)
@@ -203,12 +218,18 @@ class TranslationService:
                 batch.append(text)
             # One request per tier. The draft goes without context: speed over consistency.
             if draft_batch:
-                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, []))
+                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, [], self._said(draft_batch)))
             if batch:
                 self.stats["requests"] += 1
                 self.stats["items"] += len(batch)
-                self._futures.append(self._pool.submit(self._run, "final", batch, list(self._context.values())))
+                context = list(self._context.values())
+                self._futures.append(self._pool.submit(self._run, "final", batch, context, self._said(batch)))
         return bool(draft_batch or batch)
+
+    def _said(self, texts: list[str]) -> list[str] | None:
+        """Who says each of `texts`, or None when nobody is named. Call with the lock held."""
+        speakers = [self._speakers.get(self.cache.key(text), "") for text in texts]
+        return speakers if any(speakers) else None
 
     def _final_due(self, key: str, now: float) -> bool:
         """Whether a final request for `key` may start now. Call with the lock held."""
@@ -295,11 +316,12 @@ class TranslationService:
                 key = self.cache.key(text)
                 self._inflight.discard(key)
                 self._inflight_templates.discard(numeric_template(key)[0])
+                speaker = self._speakers.pop(key, "")  # a retry names the speaker again
                 if result:
                     self.cache.put(text, self.target_lang, result)
                     self._drafts.pop(key, None)
                     self._arrived.add(key)
-                    self._remember(key, text, result)
+                    self._remember(key, _said_by(speaker, text), result)
                     translated += 1
                 elif batch.error is None:  # this item only; a failed request holds back the tier below
                     self._failed_until[key] = now + self.retry_cooldown
@@ -342,11 +364,13 @@ class TranslationService:
 
     # -- worker side -----------------------------------------------------------
 
-    def _run(self, kind: str, texts: list[str], context: list[tuple[str, str]]) -> BatchResult:
+    def _run(
+        self, kind: str, texts: list[str], context: list[tuple[str, str]], speakers: list[str] | None
+    ) -> BatchResult:
         translator = self.draft_translator if kind == "draft" else self.translator
         assert translator is not None
         request = TranslationRequest(
-            texts=texts, source_lang=self.source_lang, target_lang=self.target_lang, context=context
+            texts=texts, source_lang=self.source_lang, target_lang=self.target_lang, context=context, speakers=speakers
         )
         t0 = time.perf_counter()
         results: list[str | None] = [None] * len(texts)

@@ -6,9 +6,49 @@ ColumnLayout {
     readonly property var s: backend.settings
     readonly property string colour: String(root.s.subtitle_color)
     readonly property bool ownColour: colour === ""
+    readonly property bool chat: String(root.s.render) === "chat"
     spacing: 2 * Theme.space
 
     SubtitlePreview { Layout.fillWidth: true }
+
+    Card {
+        title: "Mode"
+        SettingRow {
+            label: "Render"
+            helper: "Subtitle: one style in the area. Chat: the last lines as a transcript, with who said them. In place: each translation on its own box, in the game's colours."
+            Segmented { key: "render"; options: ["Subtitle", "Chat", "In place"]; values: ["subtitle", "chat", "inplace"] }
+        }
+        SettingRow {
+            visible: root.chat
+            label: "Lines kept"
+            helper: "How much of the conversation the card shows."
+            Stepper { key: "chat_lines"; from: 1; to: 8 }
+        }
+        SettingRow {
+            visible: root.chat
+            label: "Clear after"
+            helper: "A line leaves the card this long after it was said, so the screen is clear between conversations."
+            Stepper { key: "chat_seconds"; from: 0; to: 120; step: 5; suffix: " s"; specialText: "never" }
+        }
+        SettingRow {
+            visible: root.chat
+            label: "Corner"
+            helper: "At the bottom, the card sits above the area read, so it never covers the game's own subtitles."
+            Segmented { key: "chat_corner"; options: ["Bottom left", "Bottom right", "Top left", "Top right"]; values: ["bottom-left", "bottom-right", "top-left", "top-right"] }
+        }
+        SettingRow {
+            visible: root.chat
+            label: "Card width"
+            helper: "As a share of the game window."
+            Gauge { key: "chat_width"; from: 20; to: 70; stepSize: 2; suffix: "%" }
+        }
+        SettingRow {
+            visible: String(root.s.render) === "inplace"
+            label: "In-place style"
+            helper: "Auto patches the original out in its own colours, or uses a pill where the background is busy."
+            Segmented { key: "style"; options: ["Auto", "Patch", "Pill", "Outline"]; values: ["auto", "patch", "pill", "outline"] }
+        }
+    }
 
     Card {
         title: "Text"
@@ -19,11 +59,11 @@ ColumnLayout {
         }
         SettingRow {
             label: "Colour"
-            helper: "The game's own subtitle colour, sampled, or one of yours."
+            helper: root.chat ? "White on the card, or one of yours." : "The game's own subtitle colour, sampled, or one of yours."
             RowLayout {
                 spacing: Theme.space
                 Toggle { checked: root.ownColour; onToggled: root.s.subtitle_color = checked ? "" : "#FFFFFF" }
-                Label { text: "game's own"; color: Theme.textSoft; font.pixelSize: Theme.sizeCaption }
+                Label { text: root.chat ? "white" : "game's own"; color: Theme.textSoft; font.pixelSize: Theme.sizeCaption }
                 Field { visible: !root.ownColour; key: "subtitle_color"; placeholderText: "#RRGGBB"; implicitWidth: 110 }
                 // The colour as the overlay will draw it (white when the text does not parse).
                 Rectangle {
@@ -49,16 +89,18 @@ ColumnLayout {
     Card {
         title: "Background"
         SettingRow {
+            visible: !root.chat
             label: "Style"
             helper: "A dark pill, a soft shadow like the game's own text, or bare outlined text."
             Segmented { key: "subtitle_background"; options: ["Pill", "Shadow", "None"]; values: ["pill", "shadow", "none"] }
         }
-        SettingRow { label: "Pill opacity"; Gauge { key: "subtitle_pill_alpha"; factor: 100 / 255; suffix: "%" } }
+        SettingRow { label: root.chat ? "Card opacity" : "Pill opacity"; Gauge { key: "subtitle_pill_alpha"; factor: 100 / 255; suffix: "%" } }
     }
 
     Card {
         title: "Placement"
         SettingRow {
+            visible: !root.chat
             label: "Position"
             helper: "Bottom gives a steady baseline. Source follows where the game drew the line."
             Segmented { key: "subtitle_position"; options: ["Bottom", "Source", "Centre"]; values: ["bottom", "source", "center"] }
@@ -85,18 +127,4 @@ ColumnLayout {
         }
     }
 
-    Card {
-        title: "Mode"
-        SettingRow {
-            label: "Render"
-            helper: "Subtitle: one style in the area. In place: each translation on its own box, in the game's colours."
-            Segmented { key: "render"; options: ["Subtitle", "In place"]; values: ["subtitle", "inplace"] }
-        }
-        SettingRow {
-            visible: String(root.s.render) === "inplace"
-            label: "In-place style"
-            helper: "Auto patches the original out in its own colours, or uses a pill where the background is busy."
-            Segmented { key: "style"; options: ["Auto", "Patch", "Pill", "Outline"]; values: ["auto", "patch", "pill", "outline"] }
-        }
-    }
 }

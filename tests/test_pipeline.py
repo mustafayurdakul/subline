@@ -17,6 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from gametl.app.pipeline import PipelineConfig, PipelineThread
 from gametl.capture.base import Frame
 from gametl.ocr.base import OcrResult, TextLine
+from gametl.overlay.paint import ChatCard, ChatLine
 from gametl.translate.base import TranslationRequest
 from gametl.translate.cache import TranslationCache
 from gametl.translate.dummy import UppercaseTranslator
@@ -113,10 +114,56 @@ class RecordingTranslator(UppercaseTranslator):
 
     def __init__(self) -> None:
         self.requests: list[list[str]] = []
+        self.speakers: list[list[str] | None] = []
 
     def translate(self, request: TranslationRequest) -> list[str]:
         self.requests.append(list(request.texts))
+        self.speakers.append(request.speakers)
         return super().translate(request)
+
+
+def test_chat_mode_keeps_a_transcript_with_the_speakers() -> None:
+    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="chat", chat_corner="top-left", change_threshold=0)
+    translator = thread.service.translator = RecordingTranslator()
+    try:
+        (card,) = process_until(thread, lambda r: bool(r))
+        assert isinstance(card, ChatCard)
+        assert card.lines == [ChatLine("Casey", "STAY CLOSE.", 0)]  # the name is kept, the words translated
+        assert card.corner == "top-left" and card.zone == STRIP and card.area == (0, 0, WIDTH, HEIGHT)
+        assert card.covers == []  # hide_source off
+        assert translator.requests == [["Stay close."]] and translator.speakers == [["Casey"]]
+        for _ in range(3):  # the line seen again is not said again
+            (card,) = thread._process(frame())
+        assert len(card.lines) == 1
+        # The next line at the same spot joins the transcript; the first stays.
+        engine.lines = [line("Alan: Go.", 300, 20, 700, 60)]
+        (card,) = process_until(thread, lambda r: r and len(r[0].lines) == 2)
+        assert [(ln.speaker, ln.text, ln.speaker_index) for ln in card.lines] == [
+            ("Casey", "STAY CLOSE.", 0),
+            ("Alan", "GO.", 1),
+        ]
+        # The card's words are the cache's keys: the line comes back as a cache hit.
+        assert thread.service.cache.get("Go.", "tr") == "GO."
+        thread.update_config(replace(thread.cfg, subtitle_hide_source=True))
+        (card,) = thread._process(frame())
+        assert card.covers == [(300, 620, 700, 660)]  # the live source line is hidden under a band
+        thread.update_config(replace(thread.cfg, subtitle_hide_source=False, chat_seconds=0.001))
+        time.sleep(0.01)
+        assert thread._process(frame()) == []  # every line aged out: nothing is drawn
+    finally:
+        thread.service.shutdown()
+
+
+def test_a_speaker_name_stays_in_front_of_a_subtitle() -> None:
+    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        assert block.lines == ["Casey: STAY CLOSE."]  # the words translated, the name as the game printed it
+        assert thread.service.cache.get("Stay close.", "tr") == "STAY CLOSE."  # cached without the name
+    finally:
+        thread.service.shutdown()
 
 
 def test_a_cached_line_is_shown_and_never_sent() -> None:

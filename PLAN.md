@@ -982,3 +982,27 @@ page. `cleanup.forget_trial()`, run at every start, removes what 0.2.x
 left behind (the `LICENSE_KEY` and `TRIAL_USED` entries, `trial_used` in
 config.json, the `Software\Subline` registry key). The installer no longer
 shows a licence page. Released as 0.3.0.
+
+## 26. Chat mode (2026-10-31)
+
+A third render mode, `chat`: instead of the line on screen, the overlay
+draws a transcript card with the last lines of dialogue ("Casey: ...").
+`tracking/transcript.py` turns the pipeline's sightings of translated
+blocks into utterances: a block's utterance follows its text (a reveal or
+an OCR correction replaces it), the next line at the same spot is a new
+one, a line lost and found again within five seconds is not doubled, and
+lines age out after `chat_seconds`. `overlay/paint.py` gets `ChatCard`,
+`ChatLine` and `place_chat`: a translucent card with a hairline border in
+a corner of the client area (above the area read at the bottom corners),
+names bold in a six-colour palette by order of first speaking, words
+wrapped beside them, the newest line bright and older ones faded in steps
+of 0.3 to a floor of 0.4; sizes follow the subtitle font size. Speaker
+names are parsed in every mode (`textutil.split_speaker`: one or two
+capitalised words before a colon): the words alone are translated and
+cached, the subtitle and in-place modes put the name back in front, and
+the service carries the speaker to the translator as
+`TranslationRequest.speakers` and into the context lines ("Casey: ..."),
+so DeepL reads it in its context and Claude beside the items. Settings
+`chat_lines`, `chat_seconds`, `chat_corner`, `chat_width` (live-applied);
+the Appearance page's Mode card moved to the top with the chat rows; the
+preview shows the whole frame in chat mode, the card above the strip.

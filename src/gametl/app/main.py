@@ -86,9 +86,19 @@ def build_parser() -> argparse.ArgumentParser:
     look = p.add_argument_group("appearance and ignores")
     look.add_argument(
         "--render",
-        choices=["subtitle", "inplace"],
-        help="with an area: one fixed subtitle style centred in it (default), or per-block at the OCR box",
+        choices=["subtitle", "chat", "inplace"],
+        help="with an area: one fixed subtitle style centred in it (default), the last lines as a chat transcript "
+        "in a corner, or per-block at the OCR box",
     )
+    look.add_argument("--chat-lines", type=int, metavar="N", help=f"chat: lines kept (default {Settings.chat_lines})")
+    look.add_argument(
+        "--chat-seconds",
+        type=int,
+        metavar="S",
+        help=f"chat: a line leaves this long after it was said; 0 = never (default {Settings.chat_seconds})",
+    )
+    look.add_argument("--chat-corner", choices=["bottom-left", "bottom-right", "top-left", "top-right"])
+    look.add_argument("--chat-width", type=int, metavar="%", help=f"chat: card width (default {Settings.chat_width})")
     look.add_argument(
         "--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size"
     )
@@ -203,7 +213,7 @@ _VALUE_OPTIONS = {
         "style", "font", "fps", "full_scan_every", "stable_frames", "max_missing", "change_threshold",
         "autosave_seconds", "render", "subtitle_color", "subtitle_background", "subtitle_pill_alpha",
         "subtitle_position", "subtitle_center_tolerance", "subtitle_size_tolerance", "short_line_confidence",
-        "subtitle_weight", "dump_dir",
+        "subtitle_weight", "chat_lines", "chat_seconds", "chat_corner", "chat_width", "dump_dir",
     )
 } | {"window": "window_match", "glossary": "glossary_path", "subtitle_font": "subtitle_font_px"}  # fmt: skip
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.

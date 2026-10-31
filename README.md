@@ -47,6 +47,12 @@ from a recording by an earlier build (see
   centred in the area.
   Long translations wrap at the same size, and lines shown together stack
   instead of overlapping.
+- **Or a chat transcript.** Chat mode keeps the last lines of dialogue on
+  a card in a corner, each with its speaker's name in a colour of its own
+  ("Casey: ..."), the newest bright and the older ones fading, and clears
+  the card when the conversation pauses. Turn speaker names on in the
+  game: the name in front of a line is kept as it is and the words alone
+  are translated, with the speaker passed to DeepL and Claude as a hint.
 - **Three translators.** DeepL (the default: fast, strong for European
   languages, free tier), Claude (glossary, tone notes, any language), or
   an offline CTranslate2 model (no network; an optional download). DeepL
@@ -272,11 +278,12 @@ Most settings have a command-line equivalent (the hotkeys do not);
   both work; given a code they do not know, or a script such as
   `cyrillic`, DeepL and Claude detect the language themselves.
 - **Render** (Appearance page): `subtitle` draws every line in one style
-  centred in the selected area; `inplace` puts each translation on its own
-  OCR box in the game's own colours. In subtitle mode the font size and
-  the text colour are learned from the game's first lines and then held
-  for the session (set a size or a `#RRGGBB` colour to override), and the
-  text sits on a steady baseline at the bottom of the area (**Position**
+  centred in the selected area; `chat` keeps the last lines as a
+  transcript card; `inplace` puts each translation on its own OCR box in
+  the game's own colours. In subtitle mode the font size and the text
+  colour are learned from the game's first lines and then held for the
+  session (set a size or a `#RRGGBB` colour to override), and the text
+  sits on a steady baseline at the bottom of the area (**Position**
   `bottom`; `source` follows the game's own line; `center` centres it in
   the area). At `bottom` and `center`, lines on screen together, such as a
   speaker line and a prompt, stack in the game's order. The background is
@@ -284,6 +291,22 @@ Most settings have a command-line equivalent (the hotkeys do not);
   takes 0-255), a `shadow` like the game's own text, or `none`. **Hide the
   original line** covers the game's own text when the translation is drawn
   elsewhere; off by default.
+- **Chat mode** (Appearance page, **Render** `chat`): the card shows the
+  last **Lines kept** (default 4) lines of dialogue, oldest first, each
+  with its speaker's name in a fixed colour; a line leaves **Clear after**
+  seconds (default 20; 0 keeps it) after it was said, so the card is gone
+  between conversations. The card takes **Card width** (default 38 %) of
+  the game window in its **Corner** (default bottom left); at a bottom
+  corner it sits above the area read, so it never covers the game's own
+  subtitles, which **Hide the original line** can cover as in subtitle
+  mode. The text is the subtitle size, font and weight, white unless a
+  colour is set, on a card of the pill's opacity. Turn speaker names on in
+  the game: a capitalised name before a colon ("Casey: ...") is taken as
+  the speaker in every mode, kept as it is while the words alone are
+  translated and cached, and passed to DeepL (in its context) and Claude
+  (beside the items) as a hint for register and pronouns. A line that
+  grows (a typewriter reveal) or is read differently by OCR replaces its
+  earlier version; the next line at the same spot is a new entry.
 - **Font and Weight** (Appearance page): any font installed on the
   computer (default Segoe UI) and a weight from Regular to Bold (default
   SemiBold). The preview on the page is painted by the overlay's own
@@ -449,7 +472,8 @@ opencv-python-headless provides `cv2`); in an environment that had both,
   `--scale 1.5` renders as on a 150 % screen, `--profiles` adds the open
   Profiles popup and `--translator claude` shows the Claude card. The
   renders in `docs/ui` come from `preview_ui.py --full --profiles --out docs/ui`
-  and `--page appearance --full --background shadow --out docs/ui`.
+  and `--page appearance --full --background shadow --out docs/ui` (and
+  `--render chat` for the chat-mode page).
 - `gametl --check-ui` (or `python -m gametl.app.settings_window --check`)
   loads every page and popup offscreen and reports QML problems. CI and
   the release workflow run it on the frozen build too

@@ -1,6 +1,7 @@
 """How translations are drawn: fonts, layouts and the painting of render
-blocks. The overlay window, the settings window's preview and the demo
-renderer all paint through one BlockPainter, so they look the same.
+blocks and the chat card. The overlay window, the settings window's
+preview and the demo renderer all paint through one BlockPainter, so they
+look the same.
 
 Styles:
 - "subtitle": one fixed font size and colour, centred in the selected zone,
@@ -13,6 +14,10 @@ Styles:
 - "pill": a dark rounded box with white text, in place (for busy
   backgrounds);
 - "outline": outlined text only, in place.
+
+The chat card (ChatCard) is the transcript of chat mode: the last lines of
+dialogue, each with its speaker's name in a colour of its own, the newest
+bright and the older ones fading, on a translucent card in a corner.
 
 Line heights come from the font's own metrics (ascent plus descent), so
 descenders are never clipped.
@@ -28,7 +33,7 @@ from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 
 from ..geometry import RGB, Box
-from ..layout.fit import TextLayout, fit_text
+from ..layout.fit import TextLayout, fit_text, wrap_words
 
 WEIGHTS = {
     "regular": QFont.Weight.Normal,
@@ -55,6 +60,22 @@ _REFERENCE_SIZES = (12, 16, 24, 32, 48, 100)  # font sizes the line-height ratio
 # Subtitle positions that ignore the source line, so blocks shown at once would share one spot: they are stacked.
 _STACKED = ("bottom", "center")
 _STACK_GAP = 4  # pixels between the pills of stacked subtitles
+# The chat card. Speakers take the palette's colours in the order they first speak: light,
+# distinct and readable on the dark card. Sizes are in the card's font size, so the card
+# scales with the game's subtitles.
+CHAT_PALETTE: tuple[RGB, ...] = (
+    (242, 193, 78),  # amber
+    (127, 184, 255),  # sky
+    (142, 224, 170),  # mint
+    (255, 150, 170),  # rose
+    (190, 170, 255),  # lavender
+    (255, 178, 120),  # peach
+)
+CHAT_CARD_RGB = (12, 12, 16)
+CHAT_BORDER_COLOR = QColor(255, 255, 255, 28)  # a hairline that lifts the card off a dark scene
+CHAT_CORNERS = ("bottom-left", "bottom-right", "top-left", "top-right")
+_CHAT_FADE_STEP = 0.3  # opacity each older line loses on the newest
+_CHAT_FADE_FLOOR = 0.4
 
 
 @dataclass(slots=True)
@@ -91,6 +112,58 @@ class SubtitlePlacement:
     source: QRect
 
 
+@dataclass(slots=True)
+class ChatLine:
+    """One utterance on the chat card."""
+
+    speaker: str  # "" when no speaker was named
+    text: str
+    speaker_index: int = -1  # picks the name's colour from CHAT_PALETTE; -1 = no speaker
+
+
+@dataclass(slots=True)
+class ChatCard:
+    """The chat transcript to draw: `lines`, oldest first, on a card `width`
+    of `area`'s width in `corner`; at a bottom corner the card sits above
+    `zone` (the area read, where the game's own subtitles are), so the two
+    never overlap. `covers` are source lines to hide under a band."""
+
+    area: Box
+    lines: list[ChatLine] = field(default_factory=list)
+    zone: Box | None = None
+    corner: str = "bottom-left"  # one of CHAT_CORNERS
+    width: float = 0.38
+    font_px: int = 32
+    fg: RGB = (255, 255, 255)
+    weight: str = "semibold"
+    alpha: int = 230  # of the card
+    covers: list[Box] = field(default_factory=list)
+
+
+Drawable = RenderBlock | ChatCard
+
+
+@dataclass(slots=True)
+class ChatEntry:
+    """One line of the card as laid out: the name's rectangle (empty without a
+    speaker), the words' rectangle with the rows they wrap to, and how
+    bright the line is (1 for the newest)."""
+
+    line: ChatLine
+    name: QRect
+    text: QRect
+    rows: list[str]
+    opacity: float
+
+
+@dataclass(slots=True)
+class ChatPlacement:
+    card: QRect
+    entries: list[ChatEntry]
+    line_height: float
+    radius: int
+
+
 def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: str, margin: int = 12) -> QRect:
     """Where a subtitle of `text_w` x `text_h` goes inside `zone`: centred
     horizontally; vertically on the source line, at the bottom, or in the
@@ -110,6 +183,28 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
 def _is_subtitle(block: RenderBlock) -> bool:
     """A block drawn in the subtitle style, placed in its zone."""
     return not block.outline and bool(block.lines) and block.style == "subtitle" and block.zone is not None
+
+
+def chat_card_rect(card: ChatCard, width: int, height: int, margin: int) -> QRect:
+    """Where a card `width` x `height` goes: `margin` in from the corner's
+    edges; at a bottom corner above the zone when the zone lies in the lower
+    half of the area (the subtitle strip), else at the area's bottom. A card
+    taller than the room keeps its top edge in view."""
+    ax0, ay0, ax1, ay1 = card.area
+    x = ax0 + margin if card.corner.endswith("left") else ax1 - margin - width
+    if card.corner.startswith("top"):
+        y = ay0 + margin
+    else:
+        bottom = ay1 - margin
+        if card.zone is not None and card.zone[1] > (ay0 + ay1) / 2:
+            bottom = card.zone[1] - margin // 2
+        y = max(ay0 + margin, bottom - height)
+    return QRect(x, y, width, height)
+
+
+def chat_opacity(age: int) -> float:
+    """How bright a line `age` places behind the newest is drawn."""
+    return max(_CHAT_FADE_FLOOR, 1.0 - _CHAT_FADE_STEP * age)
 
 
 def _shift(placed: SubtitlePlacement, dy: int) -> None:
@@ -278,6 +373,41 @@ class BlockPainter:
         )
         return SubtitlePlacement(layout, text, pill, source)
 
+    def place_chat(self, card: ChatCard) -> ChatPlacement:
+        """Lay the card out: each line a row of the speaker's name and the
+        words wrapped beside it, stacked oldest first, padded and placed in
+        the corner."""
+        px = card.font_px
+        line_h = px * self.spacing_ratio(card.weight)
+        pad, gap, radius, margin = round(px * 0.55), round(px * 0.3), round(px * 0.4), px
+        ax0, _, ax1, _ = card.area
+        width = min(ax1 - ax0 - 2 * margin, max(8 * px, round((ax1 - ax0) * card.width)))
+        inner = width - 2 * pad
+        measure = self.measurer(card.weight)
+        names = self.metrics_at(px, "bold")
+        laid: list[tuple[ChatLine, int, list[str]]] = []
+        for line in card.lines:
+            name_w = names.horizontalAdvance(line.speaker + ":") + round(px * 0.3) if line.speaker else 0
+            rows = wrap_words(line.text, max(px, inner - name_w), lambda s: measure(s, px))
+            laid.append((line, name_w, rows))
+        height = 2 * pad + sum(len(rows) * line_h for _, _, rows in laid) + gap * max(0, len(laid) - 1)
+        rect = chat_card_rect(card, width, int(height) + 1, margin)
+        entries: list[ChatEntry] = []
+        top = float(rect.top() + pad)
+        for i, (line, name_w, rows) in enumerate(laid):  # oldest at the top, the newest last and brightest
+            x, y = rect.left() + pad, int(top)
+            entries.append(
+                ChatEntry(
+                    line,
+                    QRect(x, y, name_w, int(line_h) + 1) if name_w else QRect(),
+                    QRect(x + name_w, y, inner - name_w, int(len(rows) * line_h) + 1),
+                    rows,
+                    chat_opacity(len(laid) - 1 - i),
+                )
+            )
+            top += len(rows) * line_h + gap
+        return ChatPlacement(rect, entries, line_h, radius)
+
     def place_subtitles(self, blocks: list[RenderBlock]) -> dict[int, SubtitlePlacement]:
         """Placements of the subtitle blocks among `blocks`, by index.
 
@@ -297,13 +427,15 @@ class BlockPainter:
 
     # -- painting ----------------------------------------------------------------
 
-    def paint_blocks(self, p: QPainter, blocks: list[RenderBlock]) -> None:
-        """Draw blocks with `p`, which may target a window or any image, in
-        list order. The texts of the subtitles go on after every background,
-        so a band over one block's source line never covers another block's
-        translation, whatever the order of the list. (Something meant to lie
-        under a band, as the settings preview's game line, is drawn by a
-        call of its own before.)"""
+    def paint_blocks(self, p: QPainter, drawables: list[Drawable]) -> None:
+        """Draw blocks and chat cards with `p`, which may target a window or
+        any image, in list order. The texts of the subtitles go on after
+        every background, so a band over one block's source line never
+        covers another block's translation, whatever the order of the list;
+        the chat cards go on last. (Something meant to lie under a band, as
+        the settings preview's game line, is drawn by a call of its own
+        before.)"""
+        blocks = [d for d in drawables if isinstance(d, RenderBlock)]
         placements = self.place_subtitles(blocks)
         for i, block in enumerate(blocks):
             placed = placements.get(i)
@@ -313,6 +445,9 @@ class BlockPainter:
                 self._paint_subtitle_background(p, block, placed)
         for i, placed in placements.items():
             self._paint_subtitle_text(p, blocks[i], placed)
+        for card in drawables:
+            if isinstance(card, ChatCard):
+                self._paint_chat(p, card)
 
     def _paint_block(self, p: QPainter, block: RenderBlock) -> None:
         """A debug outline, or a block drawn on its own box."""
@@ -390,6 +525,43 @@ class BlockPainter:
         layout = placed.layout
         font = self.font_at(layout.font_px, block.weight)
         self._draw_lines(p, layout.lines, placed.text, layout.line_height, QColor(*block.fg), decoration, font)
+
+    def _paint_chat(self, p: QPainter, card: ChatCard) -> None:
+        """The bands over the source lines, the card, then each line: the
+        speaker's name in its colour and the words beside it, the older the
+        fainter."""
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(PILL_COLOR)
+        for box in card.covers:
+            p.drawRoundedRect(_padded(box, *self._pads(box)), 6, 6)
+        if not card.lines:
+            return
+        placed = self.place_chat(card)
+        alpha = max(0, min(255, int(card.alpha)))
+        p.setBrush(QColor(*CHAT_CARD_RGB, alpha))
+        p.drawRoundedRect(placed.card, placed.radius, placed.radius)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(CHAT_BORDER_COLOR, 1))
+        p.drawRoundedRect(placed.card.adjusted(0, 0, -1, -1), placed.radius, placed.radius)
+        name_font = self.font_at(card.font_px, "bold")
+        text_font = self.font_at(card.font_px, card.weight)
+        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        for entry in placed.entries:
+            if entry.line.speaker:
+                color = QColor(*CHAT_PALETTE[entry.line.speaker_index % len(CHAT_PALETTE)])
+                color.setAlphaF(entry.opacity)
+                p.setFont(name_font)
+                p.setPen(color)
+                p.drawText(entry.name, flags, entry.line.speaker + ":")
+            color = QColor(*card.fg)
+            color.setAlphaF(entry.opacity)
+            p.setFont(text_font)
+            p.setPen(color)
+            top = float(entry.text.top())
+            for row in entry.rows:
+                rect = QRect(entry.text.left(), int(top), entry.text.width(), int(placed.line_height) + 1)
+                p.drawText(rect, flags, row)
+                top += placed.line_height
 
     def _draw_lines(
         self,

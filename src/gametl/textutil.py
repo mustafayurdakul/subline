@@ -1,4 +1,4 @@
-"""Text comparison helpers shared by tracking and the translation cache."""
+"""Text helpers shared by tracking, translation and the chat transcript."""
 
 from __future__ import annotations
 
@@ -7,6 +7,11 @@ from difflib import SequenceMatcher
 
 _WS = re.compile(r"\s+")
 _DIGITS = re.compile(r"\d+")
+# A speaker name in front of a line, as games print it with speaker names on:
+# one or two capitalised or upper-case words (Casey, Dr. Darling, SAGA
+# ANDERSON) and a colon, then the words spoken. Never a lower-case word: "Note:
+# the door is locked" is a sentence, not a speaker.
+_SPEAKER = re.compile(r"^\s*((?:[A-Z][A-Za-z'’.\-]*)(?: (?:[A-Z][A-Za-z'’.\-]*))?)\s*[:：]\s+(\S.*)$", re.DOTALL)
 
 
 def normalize_text(s: str) -> str:
@@ -16,6 +21,16 @@ def normalize_text(s: str) -> str:
 def letter_count(s: str) -> int:
     """Letters of any script in `s`; digits, punctuation and spaces do not count."""
     return sum(1 for ch in s if ch.isalpha())
+
+
+def split_speaker(text: str) -> tuple[str, str]:
+    """`text` as (speaker, words): the name before the colon and the rest,
+    or ("", text) when no speaker is named. A line break after the name
+    counts as the space ("CASEY:\nGo." reads "CASEY: Go.")."""
+    match = _SPEAKER.match(text)
+    if match is None:
+        return "", text
+    return match.group(1), match.group(2)
 
 
 def text_similarity(a: str, b: str) -> float:
