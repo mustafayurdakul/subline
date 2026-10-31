@@ -105,10 +105,10 @@ downloaded models and runtime, `config.json`, the log) and in two Windows
 Credential Manager entries (`gametl/DEEPL_AUTH_KEY`,
 `gametl/ANTHROPIC_API_KEY`). **Remove all data and quit** on the Advanced
 page, or `gametl-cli --remove-all-data`, deletes the folder and the
-entries (and the `gametl/LICENSE_KEY` and `gametl/TRIAL_USED` entries
-versions before 0.3 kept; their registry value,
-`HKEY_CURRENT_USER\Software\Subline`, can be deleted by hand). While it
-runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
+entries. What versions up to 0.2.1 kept for their licence and trial (two
+more entries, `trial_used` in `config.json` and the registry key
+`HKEY_CURRENT_USER\Software\Subline`) is removed the first time 0.3 or
+later starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
 which goes when it quits.
 
 ### From source

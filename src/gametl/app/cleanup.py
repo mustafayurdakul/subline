@@ -19,7 +19,12 @@ from .config import ProfileStore
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore
 
 SECRET_NAMES = (DEEPL_KEY, ANTHROPIC_KEY)  # the Credential Manager entries the app keeps
-STALE_SECRET_NAMES = ("LICENSE_KEY", "TRIAL_USED")  # what versions before 0.3 kept for their licence and trial
+
+# What versions up to 0.2.1 kept for their licence key and trial: two
+# Credential Manager entries, a registry key and a key in config.json.
+STALE_SECRET_NAMES = ("LICENSE_KEY", "TRIAL_USED")
+STALE_REGISTRY_KEY = r"Software\Subline"
+STALE_CONFIG_KEY = "trial_used"
 
 _log: IO[str] | None = None
 
@@ -50,6 +55,25 @@ def release_log() -> None:
         log.close()
 
 
+def forget_trial(store: ProfileStore, secrets: SecretStore) -> None:
+    """Remove what versions up to 0.2.1 left behind (see STALE_*). Run at
+    every start; after the first there is nothing to do. Never raises."""
+    for name in STALE_SECRET_NAMES:
+        with contextlib.suppress(Exception):
+            secrets.delete(name)
+    config = store.load_config()
+    if STALE_CONFIG_KEY in config:
+        del config[STALE_CONFIG_KEY]
+        with contextlib.suppress(OSError):
+            store.save_config(config)
+    try:
+        import winreg
+
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, STALE_REGISTRY_KEY)
+    except (ImportError, AttributeError, OSError):  # not Windows, or no such key
+        pass
+
+
 def describe_data(store: ProfileStore, secrets: SecretStore) -> str:
     """Where the data "Remove all data" deletes lives, for the settings window."""
     entries = ", ".join(f"gametl/{name}" for name in SECRET_NAMES)
@@ -76,7 +100,8 @@ def remove_all_data(store: ProfileStore, secrets: SecretStore) -> CleanupReport:
     """Delete the Credential Manager entries and the data folder. Never raises: whatever could not be removed is listed
     in the report."""
     report = CleanupReport()
-    for name in SECRET_NAMES + STALE_SECRET_NAMES:
+    forget_trial(store, secrets)
+    for name in SECRET_NAMES:
         try:
             secrets.delete(name)
         except Exception as exc:  # a vault error must not stop the rest

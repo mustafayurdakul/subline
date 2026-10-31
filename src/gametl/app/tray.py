@@ -138,6 +138,7 @@ class TrayApp(QObject):
 
         self.apply_hotkeys(settings)
         self._refresh_labels()
+        self._on_status("idle")
         self.tray.show()
 
     # -- actions ---------------------------------------------------------------

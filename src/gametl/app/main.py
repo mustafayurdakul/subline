@@ -381,11 +381,13 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
+    from gametl.app.cleanup import forget_trial
     from gametl.app.controller import OverlayController
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     controller = OverlayController(store)
+    forget_trial(store, controller.secrets)  # what 0.2.x left behind
     controller.status.connect(lambda s: print(s, flush=True))
 
     tray_mode = args.tray or (not settings.window_match and hwnd is None)

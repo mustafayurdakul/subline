@@ -24,7 +24,7 @@ packages.
 | [windows-capture](https://github.com/NiiightmareXD/windows-capture) | Windows Graphics Capture | MIT |
 | [anthropic](https://github.com/anthropics/anthropic-sdk-python) SDK | Claude translation | MIT |
 | [requests](https://requests.readthedocs.io/) | DeepL translation, downloads | Apache-2.0 |
-| [PyInstaller](https://pyinstaller.org/) | building the packaged folder (bootloader included in the build) | GPL-2.0 with the bootloader exception, which permits proprietary builds |
+| [PyInstaller](https://pyinstaller.org/) | building the packaged folder (bootloader included in the build) | GPL-2.0 with the bootloader exception, which keeps the packaged program under its own licence |
 | [Inno Setup](https://jrsoftware.org/isinfo.php) | the installer (`Subline-v<version>-setup.exe`; its setup stub is part of the file) | Inno Setup licence, which permits distributing the installers it makes |
 
 The components above bring these with them:

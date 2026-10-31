@@ -978,6 +978,7 @@ the sale needed goes: `app/license.py` (keys, the three-hour trial and its
 three copies), `scripts/make_license.py`, the Licence page, `--activate`
 and `--license-status`, the `cryptography` dependency. The controller
 starts without a check; "Remove all data and quit" moves to the Advanced
-page and also deletes the `LICENSE_KEY` and `TRIAL_USED` entries earlier
-versions left in Credential Manager. The installer and the portable zip
-are unchanged otherwise.
+page. `cleanup.forget_trial()`, run at every start, removes what 0.2.x
+left behind (the `LICENSE_KEY` and `TRIAL_USED` entries, `trial_used` in
+config.json, the `Software\Subline` registry key). The installer no longer
+shows a licence page. Released as 0.3.0.

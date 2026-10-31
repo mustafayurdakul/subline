@@ -11,9 +11,11 @@ import pytest
 
 from gametl.app.cleanup import (
     SECRET_NAMES,
+    STALE_CONFIG_KEY,
     STALE_SECRET_NAMES,
     CleanupReport,
     describe_data,
+    forget_trial,
     register_log,
     release_log,
     remove_all_data,
@@ -33,11 +35,24 @@ def populated(tmp_path: Path) -> tuple[ProfileStore, MemorySecretStore]:
     (store.models_dir / "ocr").mkdir(parents=True)
     (store.models_dir / "ocr" / "det.onnx").write_bytes(b"\0" * 10)
     (store.root / "gametl.log").write_text("log\n", encoding="utf-8")
+    store.save_config({**store.load_config(), STALE_CONFIG_KEY: 10800})
     secrets = MemorySecretStore()
     for name in SECRET_NAMES + STALE_SECRET_NAMES:
         secrets.set(name, f"value of {name}")
     secrets.set("UNRELATED", "kept")
     return store, secrets
+
+
+def test_forget_trial_removes_what_0_2_left_and_nothing_else(tmp_path: Path) -> None:
+    store, secrets = populated(tmp_path)
+    forget_trial(store, secrets)
+    assert all(secrets.get(name) is None for name in STALE_SECRET_NAMES)
+    assert all(secrets.get(name) for name in SECRET_NAMES) and secrets.get("UNRELATED") == "kept"
+    config = store.load_config()
+    assert STALE_CONFIG_KEY not in config and config["last_profile"] == "fake-game"
+    assert store.load("fake-game").window_match == "Fake Game"
+    forget_trial(store, secrets)  # nothing left: harmless
+    forget_trial(ProfileStore(tmp_path / "never-run"), MemorySecretStore())  # no folder: harmless
 
 
 def test_everything_gametl_wrote_is_gone(tmp_path: Path) -> None:
