@@ -10,7 +10,6 @@ from PySide6.QtCore import Qt
 
 from gametl.app.config import DEFAULT_HOTKEYS, ProfileStore, Settings
 from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
-from gametl.app.license import machine_code, make_key
 from gametl.app.settings_backend import (
     BOTTOM_STRIP,
     EMPTY_DEFAULTS,
@@ -211,28 +210,6 @@ def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch
     assert secrets.get("SOMETHING_ELSE") is None  # only the two known keys
     backend.clearKey(DEEPL_KEY)
     assert secrets.get(DEEPL_KEY) is None and backend.deeplKeyStatus == "not set"
-
-
-def test_licence_activates_and_removes_a_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keypair: tuple[bytes, str]
-) -> None:
-    from datetime import date
-
-    pem, public_hex = keypair
-    monkeypatch.setattr("gametl.app.license.PUBLIC_KEY_HEX", public_hex)
-    secrets = MemorySecretStore()
-    backend = backend_for(tmp_path, secrets=secrets)
-    assert backend.licenseText.startswith("trial: ")
-    backend.activateLicense("GAMETL-nonsense.x")
-    assert backend.licenseText.startswith("key rejected")
-    assert backend.machineCode == machine_code() and len(backend.machineCode) == 19
-    backend.activateLicense(make_key(pem, "Eve", "eve@example.com", date.today(), machine_code("elsewhere")))
-    assert "another computer" in backend.licenseText  # a key shared from another computer
-    backend.activateLicense(make_key(pem, "Ada Lovelace", "ada@example.com", date.today(), machine_code()))
-    assert backend.licenseText == "licensed to Ada Lovelace"
-    assert secrets.get("LICENSE_KEY").startswith("GAMETL-")
-    backend.removeLicense()
-    assert backend.licenseText.startswith("trial: ")
 
 
 def test_remove_all_data_only_asks_the_owner(tmp_path: Path) -> None:

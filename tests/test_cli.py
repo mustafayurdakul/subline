@@ -64,7 +64,7 @@ class FakeController(QObject):
 def test_a_start_of_its_own_that_fails_opens_the_settings(qapp) -> None:
     controller, opened = FakeController(), []
     show_settings_if_start_fails(controller, lambda: opened.append(True))
-    controller.start_failed.emit("trial over: a licence key is needed")
+    controller.start_failed.emit("deepl: no key saved")
     assert opened == [True]  # the reason is in the window's banner, not only in the tray's tooltip
     controller.start_failed.emit("no visible window matching 'Fake Game'")
     assert opened == [True]  # that start only: later ones were asked for by the user

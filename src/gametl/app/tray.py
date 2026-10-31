@@ -19,7 +19,6 @@ from .config import ProfileStore, Settings, slug
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
 from .icon import make_icon
-from .license import license_status
 from .settings_backend import SettingsBackend
 from .settings_window import SettingsWindow
 
@@ -139,7 +138,6 @@ class TrayApp(QObject):
 
         self.apply_hotkeys(settings)
         self._refresh_labels()
-        self._on_status(license_status(controller.secrets, store).text)
         self.tray.show()
 
     # -- actions ---------------------------------------------------------------
@@ -294,7 +292,7 @@ class TrayApp(QObject):
         self.tray.setToolTip(f"{APP_NAME}\n{text}"[:127])
 
     def _on_start_failed(self, message: str) -> None:
-        """A start that did not begin (licence, no matching window, a missing
+        """A start that did not begin (no matching window, a missing
         key...). Home shows guidance rather than the status line while idle,
         so the reason goes to the banner above every page."""
         self._start_problem = message

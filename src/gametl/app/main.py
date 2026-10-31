@@ -39,13 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="download the offline translator (its runtime, once) and the model for the language pair, then exit",
     )
-    mode.add_argument("--activate", metavar="KEY", help="store a licence key and exit")
-    mode.add_argument("--license-status", action="store_true", help="print the licence or trial state and exit")
     mode.add_argument(
         "--remove-all-data",
         action="store_true",
-        help="delete the data folder and the Credential Manager entries (keys, licence) and exit; "
-        "the trial's used time is kept",
+        help="delete the data folder and the Credential Manager entries (the API keys) and exit",
     )
     mode.add_argument(
         "--check-ui", action="store_true", help="load every settings page without a display, report problems and exit"
@@ -292,7 +289,7 @@ def open_window_titles() -> list[str]:
 
 def show_settings_if_start_fails(controller: OverlayController, open_settings: Callable[[], None]) -> None:
     """Open the settings when the start under way fails, so its reason
-    (licence, a missing key, the OCR model) is seen: a tray app started
+    (a missing key, no matching window, the OCR model) is seen: a tray app started
     without its window has only the tray's tooltip to show it in. Only that
     one start: once it runs or is given up, later failures stay in the tray."""
 
@@ -310,24 +307,6 @@ def show_settings_if_start_fails(controller: OverlayController, open_settings: C
 
     controller.start_failed.connect(on_failed)
     controller.running_changed.connect(on_running_changed)
-
-
-def license_command(key: str | None, store: ProfileStore) -> int:
-    """Store a key when one is given, then print the licence or trial state."""
-    from gametl.app.credentials import WindowsCredentialStore
-    from gametl.app.license import LicenseError, activate, license_status, machine_code
-
-    secrets = WindowsCredentialStore()
-    if key:
-        try:
-            licence = activate(key, secrets)
-        except LicenseError as exc:
-            print(f"key rejected: {exc}")
-            return 2
-        print(f"activated: licensed to {licence.name}")
-    print(license_status(secrets, store).text)
-    print(f"computer code: {machine_code()}  (a key is issued for this code)")
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -363,8 +342,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     store = ProfileStore(args.data_dir)
-    if args.activate or args.license_status:
-        return license_command(args.activate, store)
     if args.remove_all_data:
         from gametl.app.cleanup import remove_all_data
         from gametl.app.credentials import WindowsCredentialStore
@@ -435,14 +412,13 @@ def main(argv: list[str] | None = None) -> int:
         tray = TrayApp(app, controller, store, settings, profile_name)
         if start_now:
             if not (args.profile or args.window or hwnd):
-                # Started on its own, with no window open: a failure must not go unseen (the trial over, no key...).
+                # Started on its own, with no window open: a failure must not go unseen (no key, no window...).
                 show_settings_if_start_fails(controller, tray.open_settings)
             controller.start(settings, hwnd, wait=args.wait)
         else:
             tray.open_settings()
     else:
-        if not controller.start(settings, hwnd, wait=args.wait):
-            return 2
+        controller.start(settings, hwnd, wait=args.wait)
         # The session starts on a thread: a failure to start, or the end of
         # the session (window closed, pipeline error), ends the process.
         controller.start_failed.connect(lambda _message: app.exit(2))

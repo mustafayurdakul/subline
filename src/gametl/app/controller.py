@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
 from ..geometry import RGB, Box
@@ -31,7 +31,6 @@ from .credentials import (
     has_anthropic_credentials,
     resolve_key,
 )
-from .license import license_status, record_trial_use, trial_text
 from .pipeline import PipelineConfig, PipelineThread
 
 # -- zones and colours -------------------------------------------------------------
@@ -258,10 +257,6 @@ class Prepared:
     config: PipelineConfig
 
 
-TRIAL_TICK_MS = 60_000  # how often a running session's time is added to the trial
-TRIAL_WARNING_SECONDS = 15 * 60  # from here on the status line counts the trial down
-
-
 class _StartWorker(QThread):
     """Runs `OverlayController.prepare` away from the UI thread, so the tray
     and the settings window stay responsive while the window is waited for
@@ -305,8 +300,7 @@ class OverlayController(QObject):
     start() returns at once: the slow part (waiting for the window, building
     the translators, loading the OCR engine) runs on a thread, and the
     session begins when it is done. `running_changed(True)` or
-    `start_failed(message)` reports the outcome; a start the licence
-    refuses is reported as `start_failed` too."""
+    `start_failed(message)` reports the outcome."""
 
     status = Signal(str)
     running_changed = Signal(bool)
@@ -337,12 +331,6 @@ class OverlayController(QObject):
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
         self.last_stats = ""  # stats_text() of the last session, kept when it stops
-        # The trial counts time while a session runs: a minute at a time, and
-        # the rest when it stops, so a crash loses at most a minute.
-        self._trial_timer = QTimer(self)
-        self._trial_timer.setInterval(TRIAL_TICK_MS)
-        self._trial_timer.timeout.connect(self._trial_tick)
-        self._trial_mark: float | None = None  # when the running trial time was last recorded
 
     # -- state -------------------------------------------------------------
 
@@ -399,15 +387,9 @@ class OverlayController(QObject):
                 self._engines[(lang, gpu)] = engine
         return engine
 
-    def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> bool:
-        """Begin a session on the window `settings` (or `hwnd`) names. False
-        when the licence forbids it (reported at once as `start_failed`);
-        otherwise True, and the outcome arrives as `running_changed(True)`
-        or `start_failed(message)`."""
-        licence = license_status(self.secrets, self.store)
-        if not licence.may_run:
-            self._fail(f"{licence.text}: enter one in Settings > Licence")
-            return False
+    def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> None:
+        """Begin a session on the window `settings` (or `hwnd`) names; the
+        outcome arrives as `running_changed(True)` or `start_failed(message)`."""
         if self.running:
             self.stop()
         self._generation += 1
@@ -423,7 +405,6 @@ class OverlayController(QObject):
         target = f"window {hwnd:#x}" if hwnd else f"{settings.window_match!r}"
         self._say(f"starting on {target}...")
         worker.start()
-        return True
 
     def prepare(
         self,
@@ -517,32 +498,6 @@ class OverlayController(QObject):
             f"running on {self.title!r}: {prepared.settings.effective_source_lang} -> "
             f"{prepared.settings.target_lang} via {prepared.translator.name}"
         )
-        if not license_status(self.secrets, self.store).licensed:
-            self._trial_mark = time.monotonic()
-            self._trial_timer.start()
-
-    def _record_trial(self) -> int | None:
-        """Add the time run since the last record to the trial; the seconds
-        left, or None when nothing is being counted (licensed, not running)."""
-        if self._trial_mark is None:
-            return None
-        now = time.monotonic()
-        elapsed, self._trial_mark = now - self._trial_mark, now
-        if license_status(self.secrets, self.store).licensed:  # a key entered during the session
-            self._trial_mark = None
-            self._trial_timer.stop()
-            return None
-        return record_trial_use(self.secrets, self.store, elapsed)
-
-    def _trial_tick(self) -> None:
-        left = self._record_trial()
-        if left is None:
-            return
-        if left <= 0:
-            self.stop()
-            self._fail(f"{trial_text(0)}: enter one in Settings > Licence")
-        elif left <= TRIAL_WARNING_SECONDS:
-            self._say(trial_text(left))
 
     def _on_start_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
@@ -609,9 +564,6 @@ class OverlayController(QObject):
             worker.wait(3000)
         if worker is not None or self.service is not None:
             self.last_stats = self.stats_text()  # the session's numbers, before they are let go
-        self._record_trial()
-        self._trial_mark = None
-        self._trial_timer.stop()
         self._release()
         self.running_changed.emit(False)
         self.paused_changed.emit(False)

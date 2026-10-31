@@ -7,7 +7,6 @@ var gamepad = "<rect x='2' y='7' width='20' height='11' rx='4'/><path d='M7 12h4
 var translate = "<path d='M4 5h8M8 3v2M11 5c-.6 3.5-2.8 6.6-6 8.5'/><path d='M6 8.5c1 2.4 3 4.4 5.5 5.5'/><path d='M13 21l4-10 4 10M14.3 17.5h5.4'/>";
 var palette = "<path d='M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.6 0-.8-.6-1.2-.6-2 0-.9.7-1.4 1.6-1.4H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8z'/><circle cx='7.5' cy='11' r='1'/><circle cx='10' cy='7.5' r='1'/><circle cx='14' cy='7.5' r='1'/><circle cx='17' cy='11' r='1'/>";
 var keyboard = "<rect x='2' y='6' width='20' height='12' rx='2'/><path d='M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8'/>";
-var key = "<circle cx='8' cy='15' r='4'/><path d='M10.8 12.2 20 3M17 6l2 2M14 9l2 2'/>";
 var sliders = "<path d='M4 6h10M18 6h2M4 12h3M11 12h9M4 18h12M20 18h0'/><circle cx='16' cy='6' r='2'/><circle cx='9' cy='12' r='2'/><circle cx='18' cy='18' r='2'/>";
 var play = "<path d='M7 4.5v15l12-7.5z'/>";
 var stop = "<rect x='6' y='6' width='12' height='12' rx='2'/>";
@@ -19,5 +18,4 @@ var chevron = "<path d='M9 6l6 6-6 6'/>";
 var chevronDown = "<path d='M6 9l6 6 6-6'/>";
 var close = "<path d='M6 6l12 12M18 6L6 18'/>";
 var trash = "<path d='M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3'/>";
-var external = "<path d='M14 4h6v6M20 4l-9 9'/><path d='M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5'/>";
 var download = "<path d='M12 4v11M7 10l5 5 5-5'/><path d='M4 19h16'/>";

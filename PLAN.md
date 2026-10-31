@@ -969,3 +969,15 @@ stored both in config.json and in Credential Manager (the earliest copy
 wins). The controller refuses to start when neither a valid key nor trial
 days remain; the Licence tab, `--activate` and `--license-status` manage
 the key. The commit authors were rewritten to Mustafa Yurdakul.
+
+## 25. Free software again (2026-10-31)
+
+Decision: the app is given away, not sold; donations may be asked for
+later. The end-user licence is replaced by the MIT licence, and everything
+the sale needed goes: `app/license.py` (keys, the three-hour trial and its
+three copies), `scripts/make_license.py`, the Licence page, `--activate`
+and `--license-status`, the `cryptography` dependency. The controller
+starts without a check; "Remove all data and quit" moves to the Advanced
+page and also deletes the `LICENSE_KEY` and `TRIAL_USED` entries earlier
+versions left in Credential Manager. The installer and the portable zip
+are unchanged otherwise.

@@ -3,13 +3,13 @@ name = "gametl"
 dynamic = ["version"]  # read from src/gametl/__init__.py, the one place to bump it (see [tool.hatch.version])
 description = "Real-time in-game text translation overlay for Windows"
 readme = "README.md"
-license = "LicenseRef-Proprietary"
+license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "Mustafa Yurdakul", email = "mustafa@yurdakul.dev" }]
 keywords = ["translation", "overlay", "ocr", "games", "subtitles", "windows"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Environment :: Win32 (MS Windows)",
     "Operating System :: Microsoft :: Windows :: Windows 10",
     "Operating System :: Microsoft :: Windows :: Windows 11",
@@ -30,8 +30,6 @@ dependencies = [
     # translation backends: Claude, DeepL (requests); the offline one is an extra, below
     "anthropic",
     "requests>=2.31",
-    # licence keys (Ed25519 signatures)
-    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

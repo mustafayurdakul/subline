@@ -8,9 +8,7 @@ the translation over the game in place of the original, about half a
 second after a line appears. The package and the executables are named
 `gametl`; the app presents itself as Subline.
 
-Copyright (c) 2026 Mustafa Yurdakul. Proprietary software: free to try for
-three hours of translation, then a licence key is required (see
-[Licensing](#licensing)).
+Free software under the MIT licence (see [Licensing](#licensing)).
 
 ![Alan Wake 2: the game's English subtitle above, the same moment with Subline's Turkish subtitle below](docs/demo.gif)
 
@@ -87,9 +85,7 @@ a desktop icon, and can start the app when it finishes. Windows SmartScreen
 may warn that the publisher is unknown: the installer is not code-signed.
 The OCR models (about 20 MB) download on first run into
 `%APPDATA%\gametl\models`; Korean, Cyrillic and Arabic text need one more
-model, which downloads the first time that OCR language is used. The app
-translates for three hours in all, then stops until a licence key is
-entered on the Licence page.
+model, which downloads the first time that OCR language is used.
 
 ### Portable build
 
@@ -105,20 +101,19 @@ output in the terminal (and `gametl-cli pretranslate ...` for scripts, see
 **Uninstall:** Settings > Apps > Subline (or delete the unzipped folder
 of the portable build). That removes the program only. Everything else
 Subline keeps lives in `%APPDATA%\gametl` (profiles, translation caches,
-downloaded models and runtime, `config.json`, the log), in four Windows
+downloaded models and runtime, `config.json`, the log) and in two Windows
 Credential Manager entries (`gametl/DEEPL_AUTH_KEY`,
-`gametl/ANTHROPIC_API_KEY`, `gametl/LICENSE_KEY`, `gametl/TRIAL_USED`) and
-in one registry value, `HKEY_CURRENT_USER\Software\Subline\trial`.
-**Remove all data and quit** on the Licence page, or
-`gametl-cli --remove-all-data`, deletes the folder and the first three
-entries. `gametl/TRIAL_USED` and the registry value, the trial time used
-so far, stay, so the trial does not start over. While it runs, Subline
-keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`), which goes when
-it quits.
+`gametl/ANTHROPIC_API_KEY`). **Remove all data and quit** on the Advanced
+page, or `gametl-cli --remove-all-data`, deletes the folder and the
+entries (and the `gametl/LICENSE_KEY` and `gametl/TRIAL_USED` entries
+versions before 0.3 kept; their registry value,
+`HKEY_CURRENT_USER\Software\Subline`, can be deleted by hand). While it
+runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
+which goes when it quits.
 
 ### From source
 
-Needs [uv](https://docs.astral.sh/uv/) and a licence for use beyond the trial.
+Needs [uv](https://docs.astral.sh/uv/).
 
 ```
 git clone git@github.com:mustafayurdakul/yurdakuls-gameclt.git
@@ -146,7 +141,7 @@ development install; the packaged app downloads it on demand instead.
    **Refresh** after launching the game), then press **Start**. While the
    overlay runs the button reads **Stop**, and the line under it says what
    the overlay is doing; while it is off, what to do next. A start that
-   fails (no matching window, a missing key, the trial over) says why in a
+   fails (no matching window, a missing key) says why in a
    banner at the top of the window. The other pages have the same button
    at the top right.
 4. The bottom quarter of the window is read by default. If the subtitles
@@ -169,9 +164,8 @@ key show only when Claude is the translator, the offline **Download** only
 when the offline model is the translator or the draft), **Appearance**
 (size, colour, font, weight, pill or shadow, placement, with a live
 preview drawn by the overlay's own painter, to scale for a 1080p game),
-**Hotkeys** (click a field and press the keys), **Licence** and
-**Advanced** (capture rate, timing, the translator by name, the data
-folder). The window follows the Windows display scaling, and Tab reaches
+**Hotkeys** (click a field and press the keys) and **Advanced** (capture
+rate, timing, the translator by name, the data on this computer). The window follows the Windows display scaling, and Tab reaches
 every control.
 
 Changes take effect as you make them, on the running overlay too: a typed
@@ -205,18 +199,6 @@ Pause and rescan are held only while the overlay runs, so the same keys
 work in other programs while Subline is idle. A hotkey needs Ctrl, Alt or
 Win; only F1-F24, Pause, Scroll Lock and Print Screen may stand alone or
 with Shift alone.
-
-### Licence key
-
-The Licence page shows how much of the trial is left: three hours of
-translation in all, counted while a session runs, with a countdown in the
-status line for the last fifteen minutes. The page also shows this
-computer's code (like `ABCD-1234-EF56-7890`, with a Copy button): a key is
-issued for one computer and works only there, so send the code when
-buying. Paste the key on the page and press **Activate**; it is kept in
-Windows Credential Manager. **Remove** deletes it from this computer,
-after asking. From the command line, `gametl-cli --activate KEY` stores a
-key and `gametl-cli --license-status` prints the state and the code.
 
 ## Translators
 
@@ -411,7 +393,7 @@ needs no GPU, and a Direct3D window opening beside a game can make a
 display flicker). The pages are QML files under `app/qml/`, styled by hand
 (`Theme.qml` holds the colours and sizes); `app/settings_backend.py` is
 what they read and write: a property map with one entry per setting, plus
-the actions (start, select an area, save a key, activate a licence) that
+the actions (start, select an area, save a key, remove all data) that
 go to the tray as signals. The window is laid out at 96 dpi and scaled by
 the screen's display scaling; the overlay and the area selector work in
 physical pixels.
@@ -477,9 +459,6 @@ opencv-python-headless provides `cv2`); in an environment that had both,
   frames the app would skip.
 - `scripts/bench_translate.py` measures Claude request latency per
   configuration (real API calls).
-- `scripts/make_license.py` issues licence keys (`--name`, `--email` and the
-  customer's `--machine` code); it needs the private
-  signing key, which is not in the repository.
 
 ## Releases
 
@@ -521,10 +500,7 @@ APIs.
 
 ## Licensing
 
-Subline (gametl) is proprietary software, copyright (c) 2026 Mustafa
-Yurdakul. It may be tried for three hours of translation, after which a
-licence key bought from the author, issued for one computer, is required;
-see [LICENSE](LICENSE) for the terms.
-The open-source components it bundles or downloads are listed with their
-licences in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licence
-enquiries: mustafa@yurdakul.dev.
+Subline (gametl) is free software, copyright (c) 2026 Mustafa Yurdakul,
+under the [MIT licence](LICENSE). The open-source components it bundles
+or downloads are listed with their licences in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

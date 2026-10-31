@@ -2,10 +2,7 @@
 
 Two places hold data: the folder under %APPDATA%\\gametl (profiles,
 translation caches, downloaded models, config.json, the log, batch job
-files) and the Windows Credential Manager (the API keys, the licence key
-and the trial's used time). Everything goes except the used time: kept in
-the Credential Manager (and the registry), it restores itself on the next
-start, so removing the data does not begin a new trial.
+files) and the Windows Credential Manager (the API keys).
 """
 
 from __future__ import annotations
@@ -20,10 +17,9 @@ from typing import IO
 
 from .config import ProfileStore
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore
-from .license import LICENSE_SECRET
 
-# The entries removed. license.TRIAL_SECRET is not among them: the trial must not restart.
-SECRET_NAMES = (DEEPL_KEY, ANTHROPIC_KEY, LICENSE_SECRET)
+SECRET_NAMES = (DEEPL_KEY, ANTHROPIC_KEY)  # the Credential Manager entries the app keeps
+STALE_SECRET_NAMES = ("LICENSE_KEY", "TRIAL_USED")  # what versions before 0.3 kept for their licence and trial
 
 _log: IO[str] | None = None
 
@@ -77,11 +73,10 @@ class CleanupReport:
 
 
 def remove_all_data(store: ProfileStore, secrets: SecretStore) -> CleanupReport:
-    """Delete the Credential Manager entries (all but the trial's used time) and
-    the data folder. Never raises: whatever could not be removed is listed
+    """Delete the Credential Manager entries and the data folder. Never raises: whatever could not be removed is listed
     in the report."""
     report = CleanupReport()
-    for name in SECRET_NAMES:
+    for name in SECRET_NAMES + STALE_SECRET_NAMES:
         try:
             secrets.delete(name)
         except Exception as exc:  # a vault error must not stop the rest

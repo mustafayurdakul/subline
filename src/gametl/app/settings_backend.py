@@ -32,7 +32,6 @@ from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .controller import TRANSLATORS, parse_color
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_WIN, NAMED_KEYS, parse_combo
-from .license import PURCHASE_URL, TRIAL_SECONDS, LicenseError, activate, deactivate, license_status, machine_code
 
 # fmt: off
 OCR_LANGS = [
@@ -226,7 +225,6 @@ class SettingsBackend(QObject):
     profilesChanged = Signal()
     windowsChanged = Signal()
     keyStatusChanged = Signal()
-    licenseTextChanged = Signal()
     downloadChanged = Signal()
     problemChanged = Signal()
     previewChanged = Signal()  # the Appearance preview asks for a fresh image
@@ -250,7 +248,6 @@ class SettingsBackend(QObject):
         self._status_text = ""
         self._profile_name = profile_name or ""
         self._windows: dict[str, int] = {}  # title -> hwnd, from the last refresh
-        self._license_text = ""
         self._download: OfflineDownloadThread | None = None
         self._download_status = ""
         self._problem = ""
@@ -262,7 +259,6 @@ class SettingsBackend(QObject):
         self._edit_timer.timeout.connect(self._emit_edit)
         self.load(settings)
         self._map.valueChanged.connect(self._on_value_changed)
-        self._refresh_license_status()
 
     # -- settings <-> map ---------------------------------------------------------
 
@@ -348,10 +344,6 @@ class SettingsBackend(QObject):
     targetLanguageNames = Property("QStringList", lambda self: [name for _, name in TARGET_LANGUAGES], constant=True)
     claudeModels = Property("QStringList", lambda self: list(CLAUDE_MODELS), constant=True)
     translators = Property("QStringList", lambda self: list(TRANSLATORS), constant=True)  # the names a start accepts
-    trialHours = Property(int, lambda self: TRIAL_SECONDS // 3600, constant=True)
-    machineCode = Property(str, lambda self: machine_code(), constant=True)  # named in a key; shown to send when buying
-    purchaseUrl = Property(str, lambda self: PURCHASE_URL, constant=True)
-    dataFolder = Property(str, lambda self: str(self.store.root), constant=True)
     dataDescription = Property(str, lambda self: describe_data(self.store, self.secrets), constant=True)
     hotkeyNames = Property("QStringList", lambda self: list(DEFAULT_HOTKEYS), constant=True)  # in menu order
     defaultHotkeys = Property("QVariantMap", lambda self: dict(DEFAULT_HOTKEYS), constant=True)
@@ -523,42 +515,6 @@ class SettingsBackend(QObject):
         if name in (DEEPL_KEY, ANTHROPIC_KEY):
             self.secrets.delete(name)
             self.keyStatusChanged.emit()
-
-    # -- licence ------------------------------------------------------------------------------------
-
-    def _get_license_text(self) -> str:
-        return self._license_text
-
-    licenseText = Property(str, _get_license_text, notify=licenseTextChanged)
-
-    def _refresh_license_status(self) -> None:
-        self._set_license_text(license_status(self.secrets, self.store).text)
-
-    def _set_license_text(self, text: str) -> None:
-        if text != self._license_text:
-            self._license_text = text
-            self.licenseTextChanged.emit()
-
-    @Slot(str)
-    def activateLicense(self, key: str) -> None:
-        key = key.strip()
-        if not key:
-            return
-        try:
-            activate(key, self.secrets)
-        except LicenseError as exc:
-            self._set_license_text(f"key rejected: {exc}")
-            return
-        self._refresh_license_status()
-
-    @Slot()
-    def removeLicense(self) -> None:
-        deactivate(self.secrets)
-        self._refresh_license_status()
-
-    @Slot()
-    def copyMachineCode(self) -> None:
-        QGuiApplication.clipboard().setText(machine_code())
 
     # -- data ------------------------------------------------------------------------------------------
 
