@@ -1,8 +1,8 @@
 """The chat card: laid out in its corner above the strip, lines oldest
-first, the time and the name in front of the words, names in their
-speaker's colour, words wrapped to the card, the bands over the source
-lines, and the card drawn only when it has lines. Runs offscreen; nothing
-reads glyph shapes, so a font-less runner passes too."""
+first, each with a bar in its speaker's colour, the name over the words
+and the time at the right, words wrapped to the card, the bands over the
+source lines, and the card drawn only when it has lines. Runs offscreen;
+nothing reads glyph shapes, so a font-less runner passes too."""
 
 from __future__ import annotations
 
@@ -83,27 +83,24 @@ def test_lines_run_oldest_to_newest(painter: BlockPainter) -> None:
     assert [e.line.text for e in entries] == [text for _, text in SAMPLE]
     assert entries[0].text.top() < entries[1].text.top() < entries[2].text.top()
     assert all(e.text.top() >= placed.card.top() and e.text.bottom() <= placed.card.bottom() for e in entries)
-    # A line without a speaker has no name box and its words start at the card's padding.
+    # Every line has its bar beside it; a line without a speaker has no name row and its words start at the top.
+    for entry in entries:
+        assert entry.bar.right() < entry.text.left() and entry.bar.top() >= entry.name.top()
+        assert entry.text.top() == entry.name.top() + int(placed.line_height)  # the name over the words
     (entry,) = painter.place_chat(card([("", "Hello.")])).entries
     assert entry.name.isEmpty() and entry.stamp.isEmpty() and entry.text.left() == placed.entries[0].name.left()
+    assert entry.bar.right() < entry.text.left()
 
 
-def test_the_time_goes_in_front_of_the_name(painter: BlockPainter) -> None:
-    # The widest card: on a font-less runner every glyph is a full box, and the time and the
-    # name must still fit side by side with room left for the words.
-    placed = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=1.0))
+def test_the_time_sits_at_the_right_of_the_name_row(painter: BlockPainter) -> None:
+    placed = painter.place_chat(card(SAMPLE, stamp="21:36:05"))
     for entry in placed.entries:
-        assert entry.stamp.left() == placed.card.left() + round(20 * 0.55)
-        assert entry.stamp.right() < entry.name.left() < entry.text.left()  # time, name, words
-        assert entry.stamp.top() == entry.name.top() == entry.text.top()
-    (plain,) = painter.place_chat(card([("", "Hello.")], stamp="21:36:05", width=1.0)).entries
-    assert plain.name.isEmpty() and plain.stamp.right() < plain.text.left()  # no name: time, then the words
-    with_time = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=1.0)).entries[0].text.width()
-    without = painter.place_chat(card(SAMPLE, width=1.0)).entries[0].text.width()
-    assert with_time < without  # the words give way to the time
-    # On a narrow card the time and the name together would leave the words no room: the name takes a row.
-    (narrow,) = painter.place_chat(card(SAMPLE[:1], stamp="21:36:05", width=0.25)).entries
-    assert narrow.stamp.right() < narrow.name.left() and narrow.text.top() > narrow.name.top()
+        assert entry.stamp.top() == entry.name.top() and entry.stamp.right() == entry.text.right()
+        assert entry.name.right() < entry.stamp.left()  # the name is clipped before the time, never under it
+        assert entry.text.width() == entry.name.width() + entry.stamp.width()  # the words take the whole row
+    (plain,) = painter.place_chat(card([("", "Hello.")], stamp="21:36:05")).entries
+    assert plain.stamp.top() == plain.text.top() and plain.text.right() < plain.stamp.left()  # on the first row
+    assert plain.text.width() < painter.place_chat(card([("", "Hello.")])).entries[0].text.width()
 
 
 def test_long_lines_wrap_to_the_card(painter: BlockPainter) -> None:
@@ -116,10 +113,10 @@ def test_long_lines_wrap_to_the_card(painter: BlockPainter) -> None:
     assert placed.card.height() > painter.place_chat(card([("Alan", "Short.")])).card.height()
 
 
-def test_a_wide_name_takes_a_row_of_its_own(painter: BlockPainter) -> None:
+def test_a_wide_name_stays_inside_the_card(painter: BlockPainter) -> None:
     placed = painter.place_chat(card([("Commander Shepard Vakarian", "We should go now.")], width=0.3))
     (entry,) = placed.entries
-    assert entry.name.width() == entry.text.width() > 0  # the name spans the card, the words start under it
+    assert entry.name.width() == entry.text.width() > 0  # the name's row spans the words' column
     assert entry.text.top() >= entry.name.top() + int(placed.line_height)
     assert entry.text.right() <= placed.card.right() and entry.name.right() <= placed.card.right()
     assert placed.card.bottom() >= entry.text.bottom()
@@ -139,7 +136,8 @@ def test_a_faint_card_loses_its_border_and_shadows_its_text(painter: BlockPainte
     rect = painter.place_chat(card(SAMPLE)).card
     assert full[rect.top(), rect.center().x(), 3] > 0  # the hairline on the full card
     assert faint[rect.top(), rect.center().x(), 3] == 0  # none on the invisible one
-    assert faint[rect.center().y(), rect.center().x(), 3] == 0  # and no fill
+    assert faint[rect.center().y(), rect.left() + 3, 3] == 0  # and no fill (inside the card, left of the bars)
+    assert full[rect.center().y(), rect.left() + 3, 3] == 255
     text = painter.place_chat(card(SAMPLE)).entries[-1].text
     assert faint[text.top() : text.bottom(), text.left() : text.right(), 3].max() > 0  # the text still shows
 
@@ -152,12 +150,10 @@ def test_the_card_the_names_and_the_bands_are_drawn(painter: BlockPainter) -> No
     assert image[rect.center().y(), rect.center().x(), 3] >= 200  # the card, at its opacity
     assert image[390, 400, 3] >= 230  # the band over the source line, dark whatever the card's opacity
     assert image[10, 400, 3] == 0  # nothing outside
-    # The newest speaker's name is painted in its palette colour (BGRA in the buffer).
-    name = placed.entries[-1].name
-    patch = image[name.top() : name.bottom(), name.left() : name.right()]
-    r, g, b = CHAT_PALETTE[0]
-    tinted = patch[(patch[:, :, 3] > 0) & (np.abs(patch[:, :, 2].astype(int) - r) < 40)]
-    assert len(tinted) > 0 and all(abs(int(px[1]) - g) < 60 and abs(int(px[0]) - b) < 60 for px in tinted[:50])
+    # Each line's bar is painted in its speaker's palette colour (BGRA in the buffer).
+    for entry, index in zip(placed.entries, (0, 1, 0), strict=True):
+        b, g, r = image[entry.bar.center().y(), entry.bar.center().x(), :3]
+        assert (r, g, b) == CHAT_PALETTE[index]
 
 
 def test_an_empty_card_draws_nothing_but_its_bands(painter: BlockPainter) -> None:

@@ -994,10 +994,12 @@ one, a line lost and found again within five seconds is not doubled, and
 lines age out after `chat_seconds`. `overlay/paint.py` gets `ChatCard`,
 `ChatLine` and `place_chat`: a translucent card with a hairline border in
 a corner of the client area (above the area read at the bottom corners),
-names bold in a six-colour palette by order of first speaking, words
-wrapped beside them, every line at full strength (a first cut faded the
-older ones; dropped on request), the clock time each line was said in
-front of it (`chat_timestamps`); sizes follow the subtitle font size. Speaker
+a bar in a six-colour palette by order of first speaking beside each line,
+the name in white over the words (a first cut coloured the name and put
+the words beside it; the bar won among five rendered looks), every line at
+full strength (a first cut faded the older ones; dropped on request), the
+clock time each line was said small at the right (`chat_timestamps`);
+sizes follow the subtitle font size. Speaker
 names are parsed in every mode (`textutil.split_speaker`: one or two
 capitalised words before a colon): the words alone are translated and
 cached, the subtitle and in-place modes put the name back in front, and

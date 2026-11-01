@@ -16,8 +16,9 @@ Styles:
 - "outline": outlined text only, in place.
 
 The chat card (ChatCard) is the transcript of chat mode: the last lines of
-dialogue, each with the time it was said and its speaker's name in a
-colour of its own, on a translucent card in a corner.
+dialogue on a translucent card in a corner, each with a bar in its
+speaker's colour, the name over the words and the time it was said at the
+right.
 
 Line heights come from the font's own metrics (ascent plus descent), so
 descenders are never clipped.
@@ -74,8 +75,11 @@ CHAT_PALETTE: tuple[RGB, ...] = (
 CHAT_CARD_RGB = (12, 12, 16)
 CHAT_BORDER_ALPHA = 28  # of a white hairline that lifts the card off a dark scene, at full card opacity
 CHAT_CORNERS = ("bottom-left", "bottom-right", "top-left", "top-right")
-CHAT_STAMP_ALPHA = 110  # the time a line was said: small and faint beside the name, never louder than it
-CHAT_STAMP_SCALE = 0.7  # of the card's font size
+CHAT_NAME_SCALE = 0.85  # the name's font size, of the card's: a heading over the words
+CHAT_STAMP_SCALE = 0.55  # the time's font size, of the card's
+CHAT_STAMP_ALPHA = 100  # the time a line was said: small and faint at the right of the name row
+CHAT_BAR_SCALE = 0.15  # the width of the bar in the speaker's colour beside each line, of the font size
+CHAT_BAR_PLAIN = QColor(255, 255, 255, 90)  # the bar of a line with no speaker
 _CHAT_SHADOW_BELOW = 128  # a card fainter than this no longer carries its text: the text gets a shadow
 
 
@@ -147,11 +151,13 @@ Drawable = RenderBlock | ChatCard
 
 @dataclass(slots=True)
 class ChatEntry:
-    """One line of the card as laid out: the stamp's and the name's
-    rectangles (empty without one; the name on a row of its own when it is
-    wide) and the words' rectangle with the rows they wrap to."""
+    """One line of the card as laid out: the bar beside it, the name's row
+    (empty without a speaker), the stamp at the right of that row (or of
+    the first words row) and the words' rectangle with the rows they wrap
+    to."""
 
     line: ChatLine
+    bar: QRect
     stamp: QRect
     name: QRect
     text: QRect
@@ -185,6 +191,11 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
 def _is_subtitle(block: RenderBlock) -> bool:
     """A block drawn in the subtitle style, placed in its zone."""
     return not block.outline and bool(block.lines) and block.style == "subtitle" and block.zone is not None
+
+
+def name_px(font_px: int) -> int:
+    """The speaker name's font size for a card of `font_px`."""
+    return max(6, round(font_px * CHAT_NAME_SCALE))
 
 
 def stamp_px(font_px: int) -> int:
@@ -380,35 +391,33 @@ class BlockPainter:
         return SubtitlePlacement(layout, text, pill, source)
 
     def place_chat(self, card: ChatCard) -> ChatPlacement:
-        """Lay the card out: each line a row of the time it was said, the
-        speaker's name and the words wrapped beside them (under them, when
-        the name takes more than half the width), stacked oldest first,
-        padded and placed in the corner. The oldest lines go when the card
-        would not fit the room."""
+        """Lay the card out: each line a bar in its speaker's colour, the
+        name on a row of its own with the time at the right, and the words
+        wrapped under it (a line with no speaker keeps the time at the right
+        of its first row), stacked oldest first, padded and placed in the
+        corner. The oldest lines go when the card would not fit the room."""
         px = card.font_px
         line_h = px * self.spacing_ratio(card.weight)
-        pad, gap, radius, margin = round(px * 0.55), round(px * 0.3), round(px * 0.4), px
+        pad, gap, radius, margin = round(px * 0.55), round(px * 0.25), round(px * 0.4), px
+        bar_w = max(2, round(px * CHAT_BAR_SCALE))
+        indent = bar_w + round(px * 0.5)  # from the bar to the text
         ax0, _, ax1, _ = card.area
         width = min(ax1 - ax0 - 2 * margin, max(5 * px, round((ax1 - ax0) * card.width)))
-        inner = width - 2 * pad
+        inner = width - 2 * pad - indent  # the text column
         measure = self.measurer(card.weight)
-        names = self.metrics_at(px, "bold")
         stamps = self.metrics_at(stamp_px(px), "regular")
-        # (line, the stamp's width, the name's width or 0 for a row of its own, rows)
-        laid: list[tuple[ChatLine, int, int, list[str]]] = []
+        laid: list[tuple[ChatLine, int, list[str]]] = []  # (line, the stamp's width, rows)
         for line in card.lines:
-            stamp_w = stamps.horizontalAdvance(line.stamp) + round(px * 0.35) if line.stamp else 0
-            name_w = names.horizontalAdvance(line.speaker + ":") + round(px * 0.3) if line.speaker else 0
-            if stamp_w + name_w > inner // 2:
-                name_w = 0
-            rows = wrap_words(line.text, inner - stamp_w - name_w, lambda s: measure(s, px))
-            laid.append((line, stamp_w, name_w, rows))
+            stamp_w = stamps.horizontalAdvance(line.stamp) + round(px * 0.4) if line.stamp else 0
+            text_w = inner if line.speaker else inner - stamp_w  # with no name row the time shares the first row
+            rows = wrap_words(line.text, max(px, text_w), lambda s: measure(s, px))
+            laid.append((line, stamp_w, rows))
 
-        def rows_of(entry: tuple[ChatLine, int, int, list[str]]) -> int:
-            line, _, name_w, rows = entry
-            return len(rows) + (1 if line.speaker and not name_w else 0)
+        def rows_of(entry: tuple[ChatLine, int, list[str]]) -> int:
+            line, _, rows = entry
+            return len(rows) + (1 if line.speaker else 0)
 
-        def height_of(entries: list[tuple[ChatLine, int, int, list[str]]]) -> int:
+        def height_of(entries: list[tuple[ChatLine, int, list[str]]]) -> int:
             return int(2 * pad + sum(rows_of(e) for e in entries) * line_h + gap * max(0, len(entries) - 1)) + 1
 
         room_top, room_bottom = chat_room(card, margin)
@@ -417,16 +426,17 @@ class BlockPainter:
         rect = chat_card_rect(card, width, height_of(laid), margin)
         entries: list[ChatEntry] = []
         top = float(rect.top() + pad)
-        for line, stamp_w, name_w, rows in laid:  # oldest at the top, the newest last
-            x, y = rect.left() + pad, int(top)
+        for line, stamp_w, rows in laid:  # oldest at the top, the newest last
+            x, y = rect.left() + pad + indent, int(top)
             row_h = int(line_h) + 1
-            own_row = bool(line.speaker) and not name_w
-            stamp = QRect(x, y, stamp_w, row_h) if stamp_w else QRect()
-            name = QRect(x + stamp_w, y, inner - stamp_w if own_row else name_w, row_h) if line.speaker else QRect()
-            text_x, text_y = x + stamp_w + name_w, y + int(line_h) if own_row else y
-            text = QRect(text_x, text_y, inner - stamp_w - name_w, int(len(rows) * line_h) + 1)
-            entries.append(ChatEntry(line, stamp, name, text, rows))
-            top += rows_of((line, stamp_w, name_w, rows)) * line_h + gap
+            whole = int(rows_of((line, stamp_w, rows)) * line_h) + 1
+            bar = QRect(rect.left() + pad, y + round(px * 0.1), bar_w, whole - round(px * 0.3))
+            name = QRect(x, y, inner - stamp_w, row_h) if line.speaker else QRect()
+            stamp = QRect(x + inner - stamp_w, y, stamp_w, row_h) if stamp_w else QRect()
+            text_y = y + int(line_h) if line.speaker else y
+            text = QRect(x, text_y, inner if line.speaker else inner - stamp_w, int(len(rows) * line_h) + 1)
+            entries.append(ChatEntry(line, bar, stamp, name, text, rows))
+            top += rows_of((line, stamp_w, rows)) * line_h + gap
         return ChatPlacement(rect, entries, line_h, radius)
 
     def place_subtitles(self, blocks: list[RenderBlock]) -> dict[int, SubtitlePlacement]:
@@ -548,9 +558,8 @@ class BlockPainter:
         self._draw_lines(p, layout.lines, placed.text, layout.line_height, QColor(*block.fg), decoration, font)
 
     def _paint_chat(self, p: QPainter, card: ChatCard) -> None:
-        """The bands over the source lines, the card, then each line: the
-        time muted, the speaker's name in its colour and the words beside
-        them."""
+        """The bands over the source lines, the card, then each line: its
+        bar, the time at the right, the name and the words."""
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(PILL_COLOR)
         for box in card.covers:
@@ -565,19 +574,24 @@ class BlockPainter:
         p.setPen(QPen(QColor(255, 255, 255, CHAT_BORDER_ALPHA * alpha // 255), 1))
         p.drawRoundedRect(QRectF(placed.card).adjusted(0.5, 0.5, -0.5, -0.5), placed.radius, placed.radius)  # crisp
         stamp_font = self.font_at(stamp_px(card.font_px), "regular")
-        name_font = self.font_at(card.font_px, "bold")
+        name_font = self.font_at(name_px(card.font_px), "bold")
         text_font = self.font_at(card.font_px, card.weight)
-        flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        left = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         decoration = "shadow" if alpha < _CHAT_SHADOW_BELOW else "none"  # a faint card needs the text to carry itself
         line_h = placed.line_height
+        fg = QColor(*card.fg)
         for entry in placed.entries:
+            colour = QColor(*CHAT_PALETTE[entry.line.speaker_index % len(CHAT_PALETTE)]) if entry.line.speaker else None
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(colour or CHAT_BAR_PLAIN)
+            p.drawRoundedRect(QRectF(entry.bar), entry.bar.width() / 2, entry.bar.width() / 2)
             if entry.line.stamp:
                 muted = QColor(*card.fg, CHAT_STAMP_ALPHA)
-                self._draw_lines(p, [entry.line.stamp], entry.stamp, line_h, muted, decoration, stamp_font, flags)
+                self._draw_lines(p, [entry.line.stamp], entry.stamp, line_h, muted, decoration, stamp_font, right)
             if entry.line.speaker:
-                color = QColor(*CHAT_PALETTE[entry.line.speaker_index % len(CHAT_PALETTE)])
-                self._draw_lines(p, [entry.line.speaker + ":"], entry.name, line_h, color, decoration, name_font, flags)
-            self._draw_lines(p, entry.rows, entry.text, line_h, QColor(*card.fg), decoration, text_font, flags)
+                self._draw_lines(p, [entry.line.speaker], entry.name, line_h, fg, decoration, name_font, left)
+            self._draw_lines(p, entry.rows, entry.text, line_h, fg, decoration, text_font, left)
 
     def _draw_lines(
         self,

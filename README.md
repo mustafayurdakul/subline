@@ -48,9 +48,9 @@ from a recording by an earlier build (see
   Long translations wrap at the same size, and lines shown together stack
   instead of overlapping.
 - **Or a chat transcript.** Chat mode keeps the last lines of dialogue on
-  a card in a corner, each with the time it was said and its speaker's
-  name in a colour of its own ("21:36:05 Casey: ..."), and clears the
-  card when the conversation pauses. Turn speaker names on in the
+  a card in a corner, each with a bar in its speaker's colour, the name
+  over the words and the time it was said, and clears the card when the
+  conversation pauses. Turn speaker names on in the
   game: the name in front of a line is kept as it is and the words alone
   are translated, with the speaker passed to DeepL and Claude as a hint.
 - **Three translators.** DeepL (the default: fast, strong for European
@@ -293,7 +293,8 @@ Most settings have a command-line equivalent (the hotkeys do not);
   elsewhere; off by default.
 - **Chat mode** (Appearance page, **Render** `chat`): the card shows the
   last **Lines kept** (`--chat-lines`, default 4) lines of dialogue,
-  oldest first, each with its speaker's name in a fixed colour; a line
+  oldest first, each with a bar in its speaker's fixed colour, the name
+  over the words and the time at the right; a line
   leaves **Clear after** seconds (`--chat-seconds`, default 20; 0 keeps
   it) after it was last on screen, so the card is gone between
   conversations and a line the game leaves up stays. The card takes
@@ -302,8 +303,8 @@ Most settings have a command-line equivalent (the hotkeys do not);
   corner sits above the area read when that is the lower part of the
   window, clear of the game's own subtitles, which **Hide the original
   line** can cover as in subtitle mode; the oldest lines are dropped when
-  the card would not fit. Each line starts with the clock time it was
-  said (**Time stamps**, `--no-chat-timestamps` turns them off). The text
+  the card would not fit. Each line carries the clock time it was said,
+  `HH:MM:SS` (**Time stamps**, `--no-chat-timestamps` turns them off). The text
   is the subtitle size (held from the first line up), font and weight,
   white unless a colour is set, on a card of the pill's opacity. Turn
   speaker names on in the game: a capitalised
