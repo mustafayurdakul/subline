@@ -155,6 +155,11 @@ _NAMED_QT_KEYS = {
 }
 
 
+def settings_problem(settings: Settings) -> str | None:
+    """Why `settings` cannot run (a bad ignore pattern or hotkey), or None."""
+    return invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
+
+
 def combo_from_key(key: int, modifiers: int) -> str:
     """The hotkey text for a Qt key press ('ctrl+shift+t'), or '' for a
     press of modifiers alone, of a key the parser cannot register, or of a
@@ -200,9 +205,9 @@ class OfflineDownloadThread(QThread):
                 self.source, self.target, self.store.models_dir, self.store.runtime_dir, self.progress.emit
             )
         except Exception as exc:  # reported in the window
-            self.finished_ok.emit(False, f"download failed: {exc}")
+            self.finished_ok.emit(False, f"Download failed: {exc}")
             return
-        self.finished_ok.emit(True, f"offline translation ready: {model_dir}")
+        self.finished_ok.emit(True, f"Offline translation ready ({model_dir.name}).")
 
 
 class SettingsBackend(QObject):
@@ -297,6 +302,8 @@ class SettingsBackend(QObject):
         self._on_value_changed(name, value)
 
     def _on_value_changed(self, key: str, _value: Any) -> None:
+        if key in ("lang", "source_lang", "target_lang") and self._download_status and not self._get_downloading():
+            self._set_download_status("")  # it spoke of the old language pair
         if key.startswith("hotkey_"):
             self.hotkeys_changed.emit(self.to_settings())
         else:
@@ -311,7 +318,7 @@ class SettingsBackend(QObject):
         """The typing has paused: the settings go out if they are valid; a
         problem shows in the banner until the edit is corrected."""
         settings = self.to_settings()
-        problem = invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
+        problem = settings_problem(settings)
         if problem:
             self._edit_problem = True
             self.report_problem(problem)
@@ -324,7 +331,7 @@ class SettingsBackend(QObject):
     def _checked_settings(self) -> Settings | None:
         """The map's settings when they can run, else None with the problem reported."""
         settings = self.to_settings()
-        problem = invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
+        problem = settings_problem(settings)
         if problem:
             self.report_problem(problem)
             return None
@@ -449,11 +456,12 @@ class SettingsBackend(QObject):
     profileName = Property(str, _get_profile_name, notify=profileNameChanged)
     profiles = Property("QStringList", _get_profiles, notify=profilesChanged)
 
-    @Slot(str)
-    def saveProfile(self, name: str) -> None:
+    @Slot(str, result=bool)
+    def saveProfile(self, name: str) -> bool:
+        """Save the map's settings as a profile; False (and the banner) when they cannot run."""
         settings = self._checked_settings()
         if settings is None:
-            return
+            return False
         name = slug(name.strip() or settings.game or settings.window_match or "game")
         self.store.save(name, settings)
         self.store.last_profile = name
@@ -461,6 +469,7 @@ class SettingsBackend(QObject):
         self.set_profile_name(name)
         self.profilesChanged.emit()
         self.profile_saved.emit(name)
+        return True
 
     @Slot(str)
     def loadProfile(self, name: str) -> None:
@@ -553,7 +562,7 @@ class SettingsBackend(QObject):
         thread.finished.connect(self._download_finished)
         self._download = thread
         thread.start()
-        self._set_download_status(f"downloading offline translation for {source} -> {target}...")
+        self._set_download_status(f"Downloading offline translation for {source} → {target}…")
 
     def _set_download_status(self, text: str) -> None:
         self._download_status = text
@@ -569,7 +578,8 @@ class SettingsBackend(QObject):
             thread.deleteLater()
 
     def _download_done(self, ok: bool, message: str) -> None:
-        if ok and not self._map.value("draft"):
+        # The new model becomes the draft, unless one is set or it is the translator already.
+        if ok and not self._map.value("draft") and str(self._map.value("translator")) != "offline":
             self.set("draft", "offline")
         self._set_download_status(message)
 

@@ -19,7 +19,7 @@ ColumnLayout {
         helper: "Only this part of the window is read. Saved as fractions, so it survives resizes."
         SettingRow {
             label: "Area"
-            helper: "x, y, width, height as fractions of the window"
+            helper: "x, y, width, height as fractions of the window."
             Field { key: "roi"; placeholderText: "empty: the whole window"; implicitWidth: 220 }
         }
         AreaButtons { Layout.alignment: Qt.AlignRight }

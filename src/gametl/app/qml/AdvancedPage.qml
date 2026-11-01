@@ -18,9 +18,9 @@ ColumnLayout {
             Gauge { key: "change_threshold"; from: 0; to: 100; stepSize: 5; specialText: "off" }
         }
         SettingRow {
-            label: "Stable frames"
-            helper: "How many frames a line must hold still before it is translated."
-            Stepper { key: "stable_frames"; from: 1; to: 10 }
+            label: "Hold still for"
+            helper: "Frames a line must hold still before it is translated."
+            Stepper { key: "stable_frames"; from: 1; to: 10; suffix: " frames" }
         }
         SettingRow {
             label: "Keep a line for"
@@ -29,7 +29,7 @@ ColumnLayout {
         }
         SettingRow {
             label: "Read the whole window every"
-            helper: "With an area set, also read the rest of the window now and then."
+            helper: "In place with an area set: also read the rest of the window now and then."
             Stepper { key: "full_scan_every"; from: 0; to: 600; step: 10; suffix: " frames"; specialText: "never" }
         }
     }
@@ -58,7 +58,7 @@ ColumnLayout {
         }
         Caption {
             Layout.fillWidth: true
-            text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models and API keys. Then the app quits."
+            text: "Removing deletes the folder and the Credential Manager entries above, then the app quits."
         }
     }
 

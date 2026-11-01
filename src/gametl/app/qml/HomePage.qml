@@ -8,7 +8,10 @@ ColumnLayout {
     id: root
     readonly property bool idle: backend.status === "idle"
     // DeepL, the default, cannot start without a key: ask for it here, not three pages away.
-    readonly property bool needsDeeplKey: String(backend.settings.translator) === "deepl" && backend.deeplKeyStatus === "not set"
+    readonly property bool usesDeepl: String(backend.settings.translator) === "deepl" || String(backend.settings.draft) === "deepl"
+    readonly property bool needsDeeplKey: usesDeepl && backend.deeplKeyStatus === "not set"
+    // The subtitle settings below do nothing in place or with the whole window (see the Appearance page).
+    readonly property bool subtitleMode: String(backend.settings.render) === "subtitle" && String(backend.settings.roi) !== ""
     spacing: 2 * Theme.space
 
     Item { Layout.preferredHeight: 2 * Theme.space }
@@ -71,18 +74,21 @@ ColumnLayout {
         }
         SettingRow { label: "Game"; helper: "The window to read. Part of its title is enough."; WindowPicker {} }
         SettingRow {
+            visible: root.subtitleMode
             label: "Subtitle size"
             helper: "Learned from the game, or set your own."
             Stepper { key: "subtitle_font_px"; from: 0; to: 200; step: 2; suffix: " px"; specialText: "game's own" }
         }
         SettingRow {
+            visible: root.subtitleMode
             label: "Background"
-            helper: "A dark pill, a soft shadow, or bare text."
+            helper: "A dark pill, a soft shadow like the game's own text, or bare outlined text."
             Segmented { key: "subtitle_background"; options: ["Pill", "Shadow", "None"]; values: ["pill", "shadow", "none"] }
         }
         SettingRow {
+            visible: root.subtitleMode
             label: "Hide the original line"
-            helper: "Cover the game's own text under the translation."
+            helper: "Cover the game's own line under the translation."
             Toggle { key: "subtitle_hide_source" }
         }
     }

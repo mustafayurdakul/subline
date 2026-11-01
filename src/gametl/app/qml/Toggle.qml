@@ -16,7 +16,7 @@ C.Switch {
     padding: 0
     opacity: enabled ? 1 : Theme.disabledOpacity
 
-    Binding on checked { when: root.bound; value: root.bound ? Boolean(root.map[root.key]) : false }
+    Binding on checked { when: root.bound; value: Boolean(root.map[root.key]) }
     onToggled: if (bound) map[key] = checked
 
     indicator: Rectangle {

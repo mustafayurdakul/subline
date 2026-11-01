@@ -112,7 +112,7 @@ def test_invalid_pattern_or_hotkey_is_reported_and_blocks_start_and_save(tmp_pat
     backend.start()
     assert applied == [] and "(unclosed" in backend.problem
     backend.clearProblem()
-    backend.saveProfile("x")
+    assert backend.saveProfile("x") is False  # the popup stays open with the name
     assert "(unclosed" in backend.problem and ProfileStore(tmp_path).list() == []
     backend.settings.insert("ignore_patterns", "")
     backend.settings.insert("hotkey_toggle", "ctrl+")
@@ -341,11 +341,18 @@ def test_offline_download_can_run_again(qapp, tmp_path: Path, monkeypatch: pytes
     backend.downloadOffline()
     assert backend.downloading
     assert wait_until(lambda: not backend.downloading, tick=tick)
-    assert "offline translation ready" in backend.downloadStatus
+    assert backend.downloadStatus == "Offline translation ready (en-tr)."
+    assert backend.to_settings().draft == "deepl"  # a draft already set is kept
     backend.set("target_lang", "de")
+    assert backend.downloadStatus == ""  # it spoke of the old pair
     backend.downloadOffline()
     assert wait_until(lambda: not backend.downloading, tick=tick)
     assert pairs == [("en", "tr"), ("en", "de")]
+    # With the offline model as the translator, the download does not also make it the draft.
+    offline = backend_for(tmp_path, Settings(lang="en", target_lang="tr", translator="offline"))
+    offline.downloadOffline()
+    assert wait_until(lambda: not offline.downloading, tick=tick)
+    assert offline.to_settings().draft == ""
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:
