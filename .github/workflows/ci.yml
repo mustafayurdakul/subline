@@ -25,7 +25,6 @@ jobs:
         run: >
           uv run pytest -q
           --ignore=tests/test_overlay_window.py
-          --ignore=tests/test_selector.py
           --ignore=tests/test_hotkeys.py
 
   build:

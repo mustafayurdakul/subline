@@ -405,7 +405,7 @@ def test_status_and_text_for_the_header(tmp_path: Path) -> None:
 def test_the_pickers_list_what_the_app_accepts(tmp_path: Path) -> None:
     """The Advanced page's translator names are the ones a start accepts,
     and the Claude models are the ones with a known price, in that order."""
-    from gametl.app.controller import TRANSLATORS
+    from gametl.app.config import TRANSLATORS
     from gametl.translate.claude import PRICES_PER_MTOK
 
     backend = backend_for(tmp_path)

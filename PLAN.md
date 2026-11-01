@@ -1,11 +1,10 @@
 # Real-time In-Game Translation Overlay - Design Plan
 
-Status: historical design log of the first builds (2026-10-21 to
-2026-10-23, up to version 0.1.0), no longer kept up to date. Later
-decisions (DeepL as the default translator, the Qt Quick settings window
-with its Home page, the offline runtime downloaded on demand, the name
-Subline) are not recorded here; [README.md](README.md) describes the app
-as it is now.
+Status: design log. Sections 1-21 cover the first builds (2026-10-21 to
+2026-10-23, up to 0.1.0) and are historical; later sections record
+selected decisions only (others, such as DeepL as the default translator,
+the Qt Quick settings window and the name Subline, are not recorded).
+[README.md](README.md) describes the app as it is now.
 
 Written as: draft v0.2 (2026-10-21). Nothing built yet; this is the plan to agree on first.
 
@@ -1059,7 +1058,8 @@ with everything that only served it: the transcript
 the `chat_*` settings and options, and the screen read
 (`translate/screen.py`, the `read` hotkey, the `screen_*` settings and
 `SCREEN_API_KEY`), which drew only on the card. A 0.3.x profile saved in
-chat mode opens in subtitle mode, and a saved `read` hotkey is dropped.
+chat mode opens in subtitle mode, a saved `read` hotkey is dropped, and the
+`SCREEN_API_KEY` entry is deleted with the 0.2.x leftovers. Released as 0.3.2.
 What stays, because subtitle mode gains from it too: speaker names split
 off (`textutil.split_speaker`, both the "Name: words" and the name-line
 forms), the words alone translated and cached, the speaker sent to the

@@ -53,6 +53,9 @@ def test_subtitle_defaults_favour_a_steady_look() -> None:
     assert s.center_area is False  # free selection; Shift centres
     assert (s.subtitle_center_tolerance, s.subtitle_size_tolerance) == (10, 35)
     assert s.short_line_confidence == 0.9
+
+
+def test_old_profiles_are_upgraded() -> None:
     # A profile saved before these fields existed keeps working and gets the defaults.
     old = Settings.from_dict({"window_match": "Alan Wake 2", "subtitle_position": "source", "center_zone": True})
     assert old.subtitle_position == "source" and old.center_area is True  # center_zone: the name up to 0.1.8

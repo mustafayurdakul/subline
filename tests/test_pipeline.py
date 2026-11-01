@@ -113,11 +113,9 @@ class RecordingTranslator(UppercaseTranslator):
 
     def __init__(self) -> None:
         self.requests: list[list[str]] = []
-        self.speakers: list[list[str] | None] = []
 
     def translate(self, request: TranslationRequest) -> list[str]:
         self.requests.append(list(request.texts))
-        self.speakers.append(request.speakers)
         return super().translate(request)
 
 

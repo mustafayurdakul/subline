@@ -107,8 +107,9 @@ Credential Manager entries (`gametl/DEEPL_AUTH_KEY`,
 page, or `gametl-cli --remove-all-data`, deletes the folder and the
 entries. What versions up to 0.2.1 kept for their licence and trial (two
 more entries, `trial_used` in `config.json` and the registry key
-`HKEY_CURRENT_USER\Software\Subline`) is removed the first time 0.3 or
-later starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
+`HKEY_CURRENT_USER\Software\Subline`), and the screen-read key of 0.3.0
+and 0.3.1 (`gametl/SCREEN_API_KEY`), are removed the first time a later
+version starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
 which goes when it quits.
 
 ### From source
@@ -170,11 +171,11 @@ every control.
 
 Changes take effect as you make them, on the running overlay too: a typed
 value once the typing pauses, and the game window, game name, source
-language, glossary, tone notes and Claude model when you press Enter or
-leave the field. The area, the filters, the look and most of the timing
-reach a running overlay directly; a new window, game name, language,
-translator or capture rate restarts it (Claude's options do so only while
-Claude is in use).
+language, OCR language, glossary, tone notes and Claude model when you
+press Enter or leave the field. The area, the filters, the look and most
+of the timing reach a running overlay directly; a new window, game name,
+language, translator or draft, OCR on the GPU, capture rate or a cache
+setting restarts it (Claude's options do so only while Claude is in use).
 
 Next time, run Subline the same way. If the game of a saved profile is
 open, that profile loads and the overlay starts at once; otherwise the
@@ -328,7 +329,7 @@ Most settings have a command-line equivalent (the hotkeys do not);
 ## Command line
 
 In the packaged build, run these with `gametl-cli` (see
-[Packaged build](#packaged-build)); from source, with `uv run gametl`.
+[Portable build](#portable-build)); from source, with `uv run gametl`.
 
 `gametl` on its own runs the tray app with the profile of the game that is
 open, or the last one used (see [Getting started](#getting-started)).
@@ -422,8 +423,8 @@ tests/
 docs/         demo clip, renders of the settings pages (docs/ui)
 ```
 
-[PLAN.md](PLAN.md) is the design log of the first builds (up to 0.1.0):
-the early decisions and the measurements behind them. This README
+[PLAN.md](PLAN.md) is the design log: the early decisions and the
+measurements behind them, then selected later decisions. This README
 describes the app as it is now.
 
 ## Development
@@ -434,7 +435,7 @@ uv run ruff check src tests scripts
 uv run ruff format src tests scripts
 ```
 
-The overlay, selector and hotkey tests need an interactive desktop
+The overlay and hotkey-registration tests need an interactive desktop
 session; CI skips them.
 
 CI and the release build install with `uv sync --locked`: after a change
@@ -485,15 +486,16 @@ and `gametl-cli.exe` on one shared runtime; `--installer` also compiles
 lives; `pyproject.toml` reads it from there) and merge to `main`, and the
 workflow, seeing a version with no tag yet, builds the folder, checks its
 settings window with `gametl-cli.exe --check-ui`, creates the tag
-`v<version>` at the merge commit and attaches `gametl-v<version>-win64.zip`
-to its release. A merge whose version is already tagged builds nothing.
+`v<version>` at the merge commit and attaches `Subline-v<version>-setup.exe`
+and `gametl-v<version>-win64.zip` to its release. A merge whose version is already tagged builds nothing.
 Pushing a tag by hand (a dash, as in `v0.2.0-beta1`, makes a pre-release)
 or running the workflow from the Actions tab with a tag name does the
 same; with the tag left empty, the workflow builds without releasing and
-keeps the zip as a seven-day artifact. The tag must match `__version__`.
+keeps the installer and the zip as seven-day artifacts. The tag must match `__version__`.
 
 The releases of a private repository are visible to its collaborators
-only; for customers, publish the zip elsewhere. The executables are not
+only; to share builds publicly, make the repository public or publish
+the files elsewhere. The executables are not
 code-signed, so Windows warns about an unknown publisher until a signing
 step is added.
 
