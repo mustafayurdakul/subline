@@ -22,7 +22,7 @@ from ..geometry import RGB, Box
 from ..layout.colors import analyze_colors, bgr_to_rgb
 from ..layout.style import StyleMemory, ZoneStyle, line_height_of
 from ..ocr.base import OcrEngine, TextLine
-from ..overlay.paint import ChatCard, ChatLine, Drawable, RenderBlock
+from ..overlay.paint import CHAT_GLASS_SCALE, ChatCard, ChatLine, Drawable, RenderBlock
 from ..textutil import letter_count, split_speaker
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
 from ..tracking.filters import LineFilter
@@ -95,6 +95,9 @@ def change_score(last: np.ndarray, thumb: np.ndarray) -> float:
     return float(cv2.blur(cv2.absdiff(last, thumb), (3, 3)).max())
 
 
+GLASS_EVERY = 3  # frames between refreshes of the chat card's glass: about three a second at 10 fps
+
+
 def _tracking_fields(cfg: PipelineConfig) -> tuple:
     """What decides which region is read and which lines reach the tracker;
     a change in these starts the tracking afresh. The rest (the look, the
@@ -136,6 +139,11 @@ class PipelineThread(QThread):
         self._last_area: Box | None = None  # the area of the last frame, for the card between frames
         self._last_frame: Frame | None = None  # the frame last processed, for a screen read
         self._page: list[ChatLine] = []  # what a screen read put on the card, until cleared
+        # The card's glass: the frame at 1/8 and blurred, refreshed every few frames (a blur this
+        # heavy need not follow every frame, and each refresh repaints the whole overlay).
+        self._glass: np.ndarray | None = None
+        self._glass_version = 0
+        self._glass_frames = 0  # frames since the glass was last refreshed
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
         self._resize_reported: tuple[int, int] | None = None  # the frame size `resized` was last emitted for
@@ -344,11 +352,26 @@ class PipelineThread(QThread):
         self._held = {key: held for key, held in self._held.items() if key in live}
         area = self._last_area = self._area(frame)
         if self.cfg.render == "chat":
+            self._refresh_glass(frame)
             return self._chat_card(blocks, area)
         shown = [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
         if self._page:
+            self._refresh_glass(frame)
             shown.append(self._card(self._page, area, []))
         return shown
+
+    def _refresh_glass(self, frame: Frame) -> None:
+        """A new blurred thumbnail of the frame for the card's glass, every GLASS_EVERY frames."""
+        self._glass_frames += 1
+        if self._glass is not None and self._glass_frames < GLASS_EVERY:
+            return
+        self._glass_frames = 0
+        s = CHAT_GLASS_SCALE
+        small = cv2.resize(
+            frame.image, (max(1, frame.width // s), max(1, frame.height // s)), interpolation=cv2.INTER_AREA
+        )
+        self._glass = cv2.GaussianBlur(small, (0, 0), 1.5)
+        self._glass_version += 1
 
     def _chat_card(self, blocks: list[TextBlock], area: Box) -> list[Drawable]:
         """Chat mode: every subtitle block with a translation is fed to the
@@ -395,6 +418,8 @@ class PipelineThread(QThread):
             weight=cfg.subtitle_weight,
             alpha=cfg.subtitle_pill_alpha,
             covers=covers,
+            backdrop=self._glass,
+            backdrop_version=self._glass_version,
         )
 
     def _stamp(self, at: float, now: float) -> str:

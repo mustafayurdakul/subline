@@ -309,12 +309,15 @@ Most settings have a command-line equivalent (the hotkeys do not);
   corner sits above the area read when that is the lower part of the
   window, clear of the game's own subtitles, which **Hide the original
   line** can cover as in subtitle mode; the oldest lines are dropped when
-  the card would not fit. Each line carries the clock time it was said,
+  the card would not fit. The card is frosted glass: the game under it,
+  blurred and darkened by **Card opacity**, as the game's own subtitle box
+  does it. Each line carries the clock time it was said,
   `HH:MM:SS` (**Time stamps**, `--no-chat-timestamps` turns them off). The text
   is the subtitle size (held from the first line up), font and weight,
   white unless a colour is set, on a card of the pill's opacity. Turn
   speaker names on in the game: a capitalised
-  name before a colon ("Casey: ...") is taken as the speaker in subtitle
+  name before a colon ("Casey: ..."), or on a line of its own above the
+  words as Alan Wake 2 prints it, is taken as the speaker in subtitle
   and chat mode (not in place, where labels such as "Objective:" count and
   are translated whole; a few common English lead-ins are never taken as
   names), kept as it is while the words alone are translated and cached,

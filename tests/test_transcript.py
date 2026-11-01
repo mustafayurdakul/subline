@@ -21,6 +21,15 @@ def test_split_speaker_takes_a_name_before_the_colon() -> None:
     assert split_speaker("Warning: Low health") == ("", "Warning: Low health")
     assert split_speaker("The Dark Place Manuscript: page 3") == ("", "The Dark Place Manuscript: page 3")
     assert split_speaker("Casey:") == ("", "Casey:")
+    # The name on a line of its own above the words, no colon, as Alan Wake 2 prints it.
+    assert split_speaker("Casey\nAnd you didn't deserve it.") == ("Casey", "And you didn't deserve it.")
+    assert split_speaker("THORNTON\nLet the day shift handle it.") == ("THORNTON", "Let the day shift handle it.")
+    assert split_speaker('Saga Anderson\n"We\'re close."') == ("Saga Anderson", '"We\'re close."')
+    assert split_speaker("Alan\nCasey... and the stairs were gone.") == ("Alan", "Casey... and the stairs were gone.")
+    # A sentence wrapped after its first word, a name that is the whole line, a lead-in: not speakers.
+    assert split_speaker("The\nfire escape was gone.") == ("", "The\nfire escape was gone.")
+    assert split_speaker("Casey") == ("", "Casey")
+    assert split_speaker("Warning\nLow health") == ("", "Warning\nLow health")
     assert split_speaker("Where are you going?") == ("", "Where are you going?")
 
 

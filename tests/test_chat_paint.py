@@ -156,6 +156,30 @@ def test_the_card_the_names_and_the_bands_are_drawn(painter: BlockPainter) -> No
         assert (r, g, b) == CHAT_PALETTE[index]
 
 
+def test_the_card_is_frosted_glass_when_it_has_the_frame(painter: BlockPainter) -> None:
+    from gametl.overlay.paint import CHAT_GLASS_SCALE
+
+    # A frame thumbnail: red on the left half, green on the right (BGR), as the pipeline would blur it.
+    backdrop = np.zeros((HEIGHT // CHAT_GLASS_SCALE, WIDTH // CHAT_GLASS_SCALE, 3), dtype=np.uint8)
+    backdrop[:, : backdrop.shape[1] // 2] = (0, 0, 255)
+    backdrop[:, backdrop.shape[1] // 2 :] = (0, 255, 0)
+    glass = card(SAMPLE, alpha=255, backdrop=backdrop, width=0.9)
+    flat = card(SAMPLE, alpha=255)
+    rect = painter.place_chat(glass).card
+    image = paint_rgba(painter, glass)
+    left = image[rect.center().y(), rect.left() + 3]
+    right = image[rect.center().y(), rect.right() - 3]
+    assert left[3] == 255 and left[2] > left[1] + 40  # the scene shows through the tint: red on the left...
+    assert right[1] > right[2] + 40  # ...green on the right
+    assert image[rect.top(), rect.center().x(), :3].max() < 120  # no hairline on glass, the tint only
+    plain = paint_rgba(painter, flat)
+    assert tuple(plain[rect.center().y(), rect.left() + 3, :3]) == (16, 12, 12)  # the flat card, BGR
+    assert glass != flat and card(SAMPLE, backdrop=backdrop) == card(
+        SAMPLE, backdrop=backdrop * 0
+    )  # the array is not compared
+    assert card(SAMPLE, backdrop_version=1) != card(SAMPLE, backdrop_version=2)  # the version is
+
+
 def test_an_empty_card_draws_nothing_but_its_bands(painter: BlockPainter) -> None:
     assert paint_rgba(painter, ChatCard(AREA, zone=STRIP))[:, :, 3].max() == 0
     image = paint_rgba(painter, ChatCard(AREA, zone=STRIP, covers=[(300, 380, 500, 400)]))

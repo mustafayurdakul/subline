@@ -16,9 +16,10 @@ Styles:
 - "outline": outlined text only, in place.
 
 The chat card (ChatCard) is the transcript of chat mode: the last lines of
-dialogue on a translucent card in a corner, each with a bar in its
-speaker's colour, the name over the words and the time it was said at the
-right.
+dialogue on a card of frosted glass in a corner (the game under it,
+blurred and darkened, as the game's own subtitle box does it), each with a
+bar in its speaker's colour, the name over the words and the time it was
+said at the right.
 
 Line heights come from the font's own metrics (ascent plus descent), so
 descenders are never clipped.
@@ -30,8 +31,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import pairwise
 
+import numpy as np
 from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QPen
 
 from ..geometry import RGB, Box
 from ..layout.fit import TextLayout, fit_text, wrap_words
@@ -73,7 +75,9 @@ CHAT_PALETTE: tuple[RGB, ...] = (
     (255, 178, 120),  # peach
 )
 CHAT_CARD_RGB = (12, 12, 16)
-CHAT_BORDER_ALPHA = 28  # of a white hairline that lifts the card off a dark scene, at full card opacity
+CHAT_BORDER_ALPHA = 28  # of a white hairline that lifts a flat card off a dark scene, at full card opacity
+CHAT_GLASS_SCALE = 8  # the backdrop is the frame at 1/8, blurred: what the card's patch is drawn from
+CHAT_GLASS_TINT = 0.6  # of the card's alpha: how dark the glass is tinted over the blurred scene
 CHAT_CORNERS = ("bottom-left", "bottom-right", "top-left", "top-right")
 CHAT_NAME_SCALE = 0.85  # the name's font size, of the card's: a heading over the words
 CHAT_STAMP_SCALE = 0.55  # the time's font size, of the card's
@@ -144,6 +148,10 @@ class ChatCard:
     weight: str = "semibold"
     alpha: int = 230  # of the card
     covers: list[Box] = field(default_factory=list)
+    # The frame the card lies on, at 1/CHAT_GLASS_SCALE and blurred (BGR), for the glass; None
+    # draws a flat card. Left out of the comparison: `backdrop_version` says when it changed.
+    backdrop: np.ndarray | None = field(default=None, compare=False)
+    backdrop_version: int = 0
 
 
 Drawable = RenderBlock | ChatCard
@@ -201,6 +209,24 @@ def name_px(font_px: int) -> int:
 def stamp_px(font_px: int) -> int:
     """The time stamp's font size for a card of `font_px`."""
     return max(6, round(font_px * CHAT_STAMP_SCALE))
+
+
+def _glass(backdrop: np.ndarray | None, rect: QRect) -> QImage | None:
+    """The card's patch of the blurred frame, scaled up to the card: the
+    glass it is drawn on. None without a backdrop (the settings preview)."""
+    if backdrop is None or backdrop.size == 0:
+        return None
+    s = CHAT_GLASS_SCALE
+    height, width = backdrop.shape[:2]
+    x0, y0 = max(0, rect.left() // s), max(0, rect.top() // s)
+    x1, y1 = min(width, -(-rect.right() // s)), min(height, -(-rect.bottom() // s))  # ceilings
+    if x1 <= x0 or y1 <= y0:
+        return None
+    patch = np.ascontiguousarray(backdrop[y0:y1, x0:x1, ::-1])  # BGR -> RGB
+    image = QImage(patch.data, patch.shape[1], patch.shape[0], patch.strides[0], QImage.Format.Format_RGB888).copy()
+    return image.scaled(
+        rect.width(), rect.height(), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+    )
 
 
 def chat_room(card: ChatCard, margin: int) -> tuple[int, int]:
@@ -576,11 +602,23 @@ class BlockPainter:
             return
         placed = self.place_chat(card)
         alpha = max(0, min(255, int(card.alpha)))
-        p.setBrush(QColor(*CHAT_CARD_RGB, alpha))
-        p.drawRoundedRect(placed.card, placed.radius, placed.radius)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor(255, 255, 255, CHAT_BORDER_ALPHA * alpha // 255), 1))
-        p.drawRoundedRect(QRectF(placed.card).adjusted(0.5, 0.5, -0.5, -0.5), placed.radius, placed.radius)  # crisp
+        glass = _glass(card.backdrop, placed.card)
+        if glass is None:
+            p.setBrush(QColor(*CHAT_CARD_RGB, alpha))
+            p.drawRoundedRect(placed.card, placed.radius, placed.radius)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(255, 255, 255, CHAT_BORDER_ALPHA * alpha // 255), 1))
+            p.drawRoundedRect(QRectF(placed.card).adjusted(0.5, 0.5, -0.5, -0.5), placed.radius, placed.radius)
+        else:
+            # The blurred scene under the card, tinted dark: frosted glass, no edge of its own.
+            clip = QPainterPath()
+            clip.addRoundedRect(QRectF(placed.card), placed.radius, placed.radius)
+            p.save()
+            p.setClipPath(clip)
+            p.drawImage(placed.card, glass)
+            p.fillRect(placed.card, QColor(*CHAT_CARD_RGB, round(alpha * CHAT_GLASS_TINT)))
+            p.restore()
+            p.setPen(Qt.PenStyle.NoPen)
         stamp_font = self.font_at(stamp_px(card.font_px), "regular")
         name_font = self.font_at(name_px(card.font_px), "bold")
         text_font = self.font_at(card.font_px, card.weight)
