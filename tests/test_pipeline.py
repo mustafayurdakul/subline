@@ -129,6 +129,11 @@ def test_chat_mode_keeps_a_transcript_with_the_speakers() -> None:
     try:
         (card,) = process_until(thread, lambda r: bool(r))
         assert isinstance(card, ChatCard)
+        assert card.backdrop is not None and card.backdrop.shape == (HEIGHT // 8, WIDTH // 8, 3)  # the glass
+        version = card.backdrop_version
+        for _ in range(3):
+            (card,) = thread._process(frame())
+        assert card.backdrop_version == version + 1  # refreshed every third frame, not every frame
         (said,) = card.lines
         assert (said.speaker, said.text, said.speaker_index) == (
             "Casey",

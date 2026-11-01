@@ -309,7 +309,9 @@ Most settings have a command-line equivalent (the hotkeys do not);
   corner sits above the area read when that is the lower part of the
   window, clear of the game's own subtitles, which **Hide the original
   line** can cover as in subtitle mode; the oldest lines are dropped when
-  the card would not fit. Each line carries the clock time it was said,
+  the card would not fit. The card is frosted glass: the game under it,
+  blurred and darkened by **Card opacity**, as the game's own subtitle box
+  does it. Each line carries the clock time it was said,
   `HH:MM:SS` (**Time stamps**, `--no-chat-timestamps` turns them off). The text
   is the subtitle size (held from the first line up), font and weight,
   white unless a colour is set, on a card of the pill's opacity. Turn
