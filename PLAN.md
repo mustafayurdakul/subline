@@ -969,3 +969,84 @@ stored both in config.json and in Credential Manager (the earliest copy
 wins). The controller refuses to start when neither a valid key nor trial
 days remain; the Licence tab, `--activate` and `--license-status` manage
 the key. The commit authors were rewritten to Mustafa Yurdakul.
+
+## 25. Free software again (2026-10-31)
+
+Decision: the app is given away, not sold; donations may be asked for
+later. The end-user licence is replaced by the MIT licence, and everything
+the sale needed goes: `app/license.py` (keys, the three-hour trial and its
+three copies), `scripts/make_license.py`, the Licence page, `--activate`
+and `--license-status`, the `cryptography` dependency. The controller
+starts without a check; "Remove all data and quit" moves to the Advanced
+page. `cleanup.forget_trial()`, run at every start, removes what 0.2.x
+left behind (the `LICENSE_KEY` and `TRIAL_USED` entries, `trial_used` in
+config.json, the `Software\Subline` registry key). The installer no longer
+shows a licence page. Released as 0.3.0.
+
+## 26. Chat mode (2026-10-31)
+
+A third render mode, `chat`: instead of the line on screen, the overlay
+draws a transcript card with the last lines of dialogue ("Casey: ...").
+`tracking/transcript.py` turns the pipeline's sightings of translated
+blocks into utterances: a block's utterance follows its text (a reveal or
+an OCR correction replaces it), the next line at the same spot is a new
+one, a line lost and found again within five seconds is not doubled, and
+lines age out after `chat_seconds`. `overlay/paint.py` gets `ChatCard`,
+`ChatLine` and `place_chat`: a translucent card with a hairline border in
+a corner of the client area (above the area read at the bottom corners),
+a bar in a six-colour palette by order of first speaking beside each line,
+the name in white over the words (a first cut coloured the name and put
+the words beside it; the bar won among five rendered looks), every line at
+full strength (a first cut faded the older ones; dropped on request), the
+clock time each line was said small at the right (`chat_timestamps`);
+sizes follow the subtitle font size. Speaker
+names are parsed in every mode (`textutil.split_speaker`: one or two
+capitalised words before a colon): the words alone are translated and
+cached, the subtitle and in-place modes put the name back in front, and
+the service carries the speaker to the translator as
+`TranslationRequest.speakers` and into the context lines ("Casey: ..."),
+so DeepL reads it in its context and Claude beside the items. Settings
+`chat_lines`, `chat_seconds`, `chat_corner`, `chat_width` (live-applied);
+the Appearance page's Mode card moved to the top with the chat rows; the
+preview shows the whole frame in chat mode, the card above the strip.
+
+Review of the first cut (a design panel and a six-angle review, both run
+as workflows) found and fixed: a line ages out `chat_seconds` after it
+was *last on screen*, not after it was said (otherwise a line the game
+leaves up blinked back as the newest every `chat_seconds`), and a line
+still on screen after its time is not said again (`Transcript._taken`);
+`forget_blocks()` detaches utterances from the tracker's ids on a rescan,
+pause or area change, so a line is found again by its words instead of
+doubled; `PipelineThread._idle()` ages the card when the game stops
+redrawing (no frames); the same words from another speaker are another
+line; a wide name takes a row of its own and the oldest lines go when the
+card would not fit the room above the strip; the card's font size is held
+from its first line; names are split only in the zone modes (in place,
+labels such as "Objective:" are translated whole) and a short list of
+English lead-ins is never a name; the service keeps speakers only for the
+texts a request carries; DeepL sees the lines being translated, with their
+speakers, in its context; pre-translation caches the words without the
+name, as the overlay looks them up; the width range (20-70 %) and the
+corner are validated in one place.
+
+## 27. Chat context and screen read (2026-11-01)
+
+Chat mode is the mode for context: Claude now sees the last 30 lines with
+their speakers (`claude.CONTEXT_PAIRS`) and is told the items continue
+that conversation; the Appearance page says chat is best with Claude.
+DeepL stays the fast choice and sees the same lines in its context.
+
+Screen read (`translate/screen.py`, the `read` hotkey, Ctrl+Shift+D): the
+frame last processed goes as a PNG (long side at most 1568 px) to a
+vision model with one prompt, and the texts it returns (title and
+translation, paragraphs kept, unreadable parts marked) go on the chat
+card as entries with a plain bar and the time of the read, in every
+render mode; the hotkey pressed again clears them. Two readers behind one
+protocol: Claude through the Anthropic SDK (the Anthropic key,
+`screen_model` or the Claude model), and any OpenAI-compatible chat
+endpoint (`screen_base_url`, `screen_model`, the `SCREEN_API_KEY` entry;
+no key for a local server), which covers OpenAI, Gemini, Mistral,
+OpenRouter, Ollama and LM Studio. The controller runs the call on a
+thread (`_ScreenWorker`) and hands the page to the pipeline
+(`set_page`), which keeps the last frame for it (`last_frame`). One read
+at a time; the session must be running (the overlay draws the card).

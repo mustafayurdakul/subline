@@ -44,6 +44,24 @@ def test_cli_options_override_profile_only_when_given() -> None:
     assert settings_from_args(old_spelling, base).center_area is False
     assert settings_from_args(build_parser().parse_args([]), base).center_area is True
     assert build_parser().parse_args(["--check-ui"]).check_ui is True
+    chat = build_parser().parse_args(
+        [
+            "--render",
+            "chat",
+            "--chat-lines",
+            "6",
+            "--chat-seconds",
+            "0",
+            "--chat-corner",
+            "top-right",
+            "--chat-width",
+            "50",
+        ]
+    )
+    s = settings_from_args(chat, base)
+    assert (s.render, s.chat_lines, s.chat_seconds, s.chat_corner, s.chat_width) == ("chat", 6, 0, "top-right", 50)
+    assert s.chat_timestamps is True
+    assert settings_from_args(build_parser().parse_args(["--no-chat-timestamps"]), base).chat_timestamps is False
 
 
 def test_window_titles_are_none_without_a_desktop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,7 +82,7 @@ class FakeController(QObject):
 def test_a_start_of_its_own_that_fails_opens_the_settings(qapp) -> None:
     controller, opened = FakeController(), []
     show_settings_if_start_fails(controller, lambda: opened.append(True))
-    controller.start_failed.emit("trial over: a licence key is needed")
+    controller.start_failed.emit("deepl: no key saved")
     assert opened == [True]  # the reason is in the window's banner, not only in the tray's tooltip
     controller.start_failed.emit("no visible window matching 'Fake Game'")
     assert opened == [True]  # that start only: later ones were asked for by the user

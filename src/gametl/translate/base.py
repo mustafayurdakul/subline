@@ -18,6 +18,9 @@ class TranslationRequest:
     source_lang: str | None = None  # language code or name; None = let the model detect
     target_lang: str = "tr"
     context: list[tuple[str, str]] | None = None  # recent (source, translation) pairs, oldest first
+    # Who says each text ("" when unknown), one per text: a hint for the translator (register, gender,
+    # pronouns), never part of the text to translate. None when no line named a speaker.
+    speakers: list[str] | None = None
 
 
 class TranslationError(RuntimeError):

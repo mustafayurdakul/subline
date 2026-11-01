@@ -45,10 +45,16 @@ _SYSTEM_RULES = "\n".join(
         "(N lines in, N out), and keep numbers, units, symbols, placeholders and proper names unless the glossary "
         "says otherwise.",
         "Items may contain OCR errors (l/1, O/0, spacing): translate the intended text.",
-        '"context" holds recent lines with their translations, oldest first; use it only for consistency.',
+        '"context" holds the lines that came before, with their translations, oldest first: the items continue '
+        "that conversation, so translate them to read as its next lines (names, pronouns, register, running "
+        'jokes consistent with it). A "Name: " in front of a context line is its speaker, not part of the text.',
+        '"speakers", when present, names who says each item (same order, "" = unknown): translate the item only, '
+        "never the name, and let the speaker guide register and pronouns.",
         "Reply with JSON only, no notes.",
     ]
 )
+
+CONTEXT_PAIRS = 30  # the most recent (source, translation) pairs sent along; about a thousand tokens
 
 _PLAIN_FORMAT = (
     '\nReply exactly as {"items": ["<translation of item 0>", "<translation of item 1>", ...]}: '
@@ -154,8 +160,10 @@ class ClaudeTranslator:
         payload: dict[str, Any] = {
             "target_language": language_name(request.target_lang) or request.target_lang,
         }
-        if request.context:  # the last few pairs: enough for consistency, cheap in tokens
-            payload["context"] = [[source, target] for source, target in request.context[-10:]]
+        if request.context:  # the scene so far: the service keeps the last 30 lines
+            payload["context"] = [[source, target] for source, target in request.context[-CONTEXT_PAIRS:]]
+        if request.speakers and any(request.speakers):
+            payload["speakers"] = list(request.speakers)
         if self.structured:
             payload["items"] = [{"id": i, "text": t} for i, t in enumerate(request.texts)]
         else:

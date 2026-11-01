@@ -1,7 +1,7 @@
 # Third-party notices
 
-Subline (package and executables: gametl) is proprietary software (see
-LICENSE). It bundles the open-source components below, each of which stays
+Subline (package and executables: gametl) is free software under the MIT
+licence (see LICENSE). It bundles the open-source components below, each of which stays
 under its own licence. The full licence texts ship in the `licenses` folder
 of the packaged build, one subfolder per component (the Qt LGPL and GPL
 texts under `licenses/qt`). In the source tree, `licenses/` holds only the
@@ -24,8 +24,7 @@ packages.
 | [windows-capture](https://github.com/NiiightmareXD/windows-capture) | Windows Graphics Capture | MIT |
 | [anthropic](https://github.com/anthropics/anthropic-sdk-python) SDK | Claude translation | MIT |
 | [requests](https://requests.readthedocs.io/) | DeepL translation, downloads | Apache-2.0 |
-| [cryptography](https://cryptography.io/) (with OpenSSL) | licence-key signatures | Apache-2.0 or BSD-3-Clause; OpenSSL under Apache-2.0 |
-| [PyInstaller](https://pyinstaller.org/) | building the packaged folder (bootloader included in the build) | GPL-2.0 with the bootloader exception, which permits proprietary builds |
+| [PyInstaller](https://pyinstaller.org/) | building the packaged folder (bootloader included in the build) | GPL-2.0 with the bootloader exception, which keeps the packaged program under its own licence |
 | [Inno Setup](https://jrsoftware.org/isinfo.php) | the installer (`Subline-v<version>-setup.exe`; its setup stub is part of the file) | Inno Setup licence, which permits distributing the installers it makes |
 
 The components above bring these with them:
@@ -35,7 +34,6 @@ The components above bring these with them:
 | annotated-types | pydantic | MIT |
 | anyio | anthropic | MIT |
 | certifi | requests | MPL-2.0 |
-| cffi | cryptography | MIT-0 |
 | charset-normalizer | requests | MIT |
 | colorama | tqdm, colorlog | BSD-3-Clause |
 | [colorlog](https://github.com/borntyping/python-colorlog) | RapidOCR | MIT |
@@ -52,7 +50,6 @@ The components above bring these with them:
 | packaging | ONNX Runtime | Apache-2.0 or BSD-2-Clause |
 | protobuf | ONNX Runtime | BSD-3-Clause |
 | [pyclipper](https://github.com/fonttools/pyclipper) | RapidOCR | MIT (the Clipper library: Boost Software License 1.0) |
-| pycparser | cffi | BSD-3-Clause |
 | pydantic, pydantic-core | anthropic | MIT |
 | [PyYAML](https://pyyaml.org/) | RapidOCR, OmegaConf | MIT |
 | [Shapely](https://shapely.readthedocs.io/), with the GEOS library it carries | RapidOCR | BSD-3-Clause; GEOS: LGPL-2.1 (see below) |

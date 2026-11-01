@@ -8,9 +8,7 @@ the translation over the game in place of the original, about half a
 second after a line appears. The package and the executables are named
 `gametl`; the app presents itself as Subline.
 
-Copyright (c) 2026 Mustafa Yurdakul. Proprietary software: free to try for
-three hours of translation, then a licence key is required (see
-[Licensing](#licensing)).
+Free software under the MIT licence (see [Licensing](#licensing)).
 
 ![Alan Wake 2: the game's English subtitle above, the same moment with Subline's Turkish subtitle below](docs/demo.gif)
 
@@ -49,6 +47,17 @@ from a recording by an earlier build (see
   centred in the area.
   Long translations wrap at the same size, and lines shown together stack
   instead of overlapping.
+- **Or a chat transcript.** Chat mode keeps the last lines of dialogue on
+  a card in a corner, each with a bar in its speaker's colour, the name
+  over the words and the time it was said, and clears the card when the
+  conversation pauses. Turn speaker names on in the
+  game: the name in front of a line is kept as it is and the words alone
+  are translated, with the speaker passed to DeepL and Claude as a hint.
+- **Read the screen.** A hotkey sends the whole frame to a vision model
+  (Claude, or any OpenAI-compatible service: OpenAI, Gemini, Mistral, a
+  local Ollama) and puts every text worth reading on it, notes, letters,
+  signs, menus, translated onto the chat card. One call per press; the
+  frame leaves the computer only then.
 - **Three translators.** DeepL (the default: fast, strong for European
   languages, free tier), Claude (glossary, tone notes, any language), or
   an offline CTranslate2 model (no network; an optional download). DeepL
@@ -87,9 +96,7 @@ a desktop icon, and can start the app when it finishes. Windows SmartScreen
 may warn that the publisher is unknown: the installer is not code-signed.
 The OCR models (about 20 MB) download on first run into
 `%APPDATA%\gametl\models`; Korean, Cyrillic and Arabic text need one more
-model, which downloads the first time that OCR language is used. The app
-translates for three hours in all, then stops until a licence key is
-entered on the Licence page.
+model, which downloads the first time that OCR language is used.
 
 ### Portable build
 
@@ -105,20 +112,19 @@ output in the terminal (and `gametl-cli pretranslate ...` for scripts, see
 **Uninstall:** Settings > Apps > Subline (or delete the unzipped folder
 of the portable build). That removes the program only. Everything else
 Subline keeps lives in `%APPDATA%\gametl` (profiles, translation caches,
-downloaded models and runtime, `config.json`, the log), in four Windows
+downloaded models and runtime, `config.json`, the log) and in two Windows
 Credential Manager entries (`gametl/DEEPL_AUTH_KEY`,
-`gametl/ANTHROPIC_API_KEY`, `gametl/LICENSE_KEY`, `gametl/TRIAL_USED`) and
-in one registry value, `HKEY_CURRENT_USER\Software\Subline\trial`.
-**Remove all data and quit** on the Licence page, or
-`gametl-cli --remove-all-data`, deletes the folder and the first three
-entries. `gametl/TRIAL_USED` and the registry value, the trial time used
-so far, stay, so the trial does not start over. While it runs, Subline
-keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`), which goes when
-it quits.
+`gametl/ANTHROPIC_API_KEY`). **Remove all data and quit** on the Advanced
+page, or `gametl-cli --remove-all-data`, deletes the folder and the
+entries. What versions up to 0.2.1 kept for their licence and trial (two
+more entries, `trial_used` in `config.json` and the registry key
+`HKEY_CURRENT_USER\Software\Subline`) is removed the first time 0.3 or
+later starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
+which goes when it quits.
 
 ### From source
 
-Needs [uv](https://docs.astral.sh/uv/) and a licence for use beyond the trial.
+Needs [uv](https://docs.astral.sh/uv/).
 
 ```
 git clone git@github.com:mustafayurdakul/yurdakuls-gameclt.git
@@ -146,7 +152,7 @@ development install; the packaged app downloads it on demand instead.
    **Refresh** after launching the game), then press **Start**. While the
    overlay runs the button reads **Stop**, and the line under it says what
    the overlay is doing; while it is off, what to do next. A start that
-   fails (no matching window, a missing key, the trial over) says why in a
+   fails (no matching window, a missing key) says why in a
    banner at the top of the window. The other pages have the same button
    at the top right.
 4. The bottom quarter of the window is read by default. If the subtitles
@@ -169,9 +175,8 @@ key show only when Claude is the translator, the offline **Download** only
 when the offline model is the translator or the draft), **Appearance**
 (size, colour, font, weight, pill or shadow, placement, with a live
 preview drawn by the overlay's own painter, to scale for a 1080p game),
-**Hotkeys** (click a field and press the keys), **Licence** and
-**Advanced** (capture rate, timing, the translator by name, the data
-folder). The window follows the Windows display scaling, and Tab reaches
+**Hotkeys** (click a field and press the keys) and **Advanced** (capture
+rate, timing, the translator by name, the data on this computer). The window follows the Windows display scaling, and Tab reaches
 every control.
 
 Changes take effect as you make them, on the running overlay too: a typed
@@ -199,24 +204,13 @@ Default hotkeys (changeable on the Hotkeys page):
 | Ctrl+Shift+T | start / stop the overlay |
 | Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
 | Ctrl+Shift+R | rescan: forget tracked lines and read the screen afresh |
+| Ctrl+Shift+D | read the screen with the vision model onto the chat card; again clears it |
 | Ctrl+Shift+S | open settings |
 
 Pause and rescan are held only while the overlay runs, so the same keys
 work in other programs while Subline is idle. A hotkey needs Ctrl, Alt or
 Win; only F1-F24, Pause, Scroll Lock and Print Screen may stand alone or
 with Shift alone.
-
-### Licence key
-
-The Licence page shows how much of the trial is left: three hours of
-translation in all, counted while a session runs, with a countdown in the
-status line for the last fifteen minutes. The page also shows this
-computer's code (like `ABCD-1234-EF56-7890`, with a Copy button): a key is
-issued for one computer and works only there, so send the code when
-buying. Paste the key on the page and press **Activate**; it is kept in
-Windows Credential Manager. **Remove** deletes it from this computer,
-after asking. From the command line, `gametl-cli --activate KEY` stores a
-key and `gametl-cli --license-status` prints the state and the code.
 
 ## Translators
 
@@ -290,11 +284,12 @@ Most settings have a command-line equivalent (the hotkeys do not);
   both work; given a code they do not know, or a script such as
   `cyrillic`, DeepL and Claude detect the language themselves.
 - **Render** (Appearance page): `subtitle` draws every line in one style
-  centred in the selected area; `inplace` puts each translation on its own
-  OCR box in the game's own colours. In subtitle mode the font size and
-  the text colour are learned from the game's first lines and then held
-  for the session (set a size or a `#RRGGBB` colour to override), and the
-  text sits on a steady baseline at the bottom of the area (**Position**
+  centred in the selected area; `chat` keeps the last lines as a
+  transcript card; `inplace` puts each translation on its own OCR box in
+  the game's own colours. In subtitle mode the font size and the text
+  colour are learned from the game's first lines and then held for the
+  session (set a size or a `#RRGGBB` colour to override), and the text
+  sits on a steady baseline at the bottom of the area (**Position**
   `bottom`; `source` follows the game's own line; `center` centres it in
   the area). At `bottom` and `center`, lines on screen together, such as a
   speaker line and a prompt, stack in the game's order. The background is
@@ -302,6 +297,45 @@ Most settings have a command-line equivalent (the hotkeys do not);
   takes 0-255), a `shadow` like the game's own text, or `none`. **Hide the
   original line** covers the game's own text when the translation is drawn
   elsewhere; off by default.
+- **Chat mode** (Appearance page, **Render** `chat`): the card shows the
+  last **Lines kept** (`--chat-lines`, default 4) lines of dialogue,
+  oldest first, each with a bar in its speaker's fixed colour, the name
+  over the words and the time at the right; a line
+  leaves **Clear after** seconds (`--chat-seconds`, default 20; 0 keeps
+  it) after it was last on screen, so the card is gone between
+  conversations and a line the game leaves up stays. The card takes
+  **Card width** (`--chat-width`, default 38 %, 20-70) of the game window
+  in its **Corner** (`--chat-corner`, default `bottom-left`); a bottom
+  corner sits above the area read when that is the lower part of the
+  window, clear of the game's own subtitles, which **Hide the original
+  line** can cover as in subtitle mode; the oldest lines are dropped when
+  the card would not fit. Each line carries the clock time it was said,
+  `HH:MM:SS` (**Time stamps**, `--no-chat-timestamps` turns them off). The text
+  is the subtitle size (held from the first line up), font and weight,
+  white unless a colour is set, on a card of the pill's opacity. Turn
+  speaker names on in the game: a capitalised
+  name before a colon ("Casey: ...") is taken as the speaker in subtitle
+  and chat mode (not in place, where labels such as "Objective:" count and
+  are translated whole; a few common English lead-ins are never taken as
+  names), kept as it is while the words alone are translated and cached,
+  and passed to DeepL (in its context, with the lines being translated)
+  and Claude (beside the items) as a hint for register and pronouns. A
+  line that grows (a typewriter reveal) or is read differently by OCR
+  replaces its earlier version; the next line at the same spot, or the
+  same words from another speaker, is a new entry. Claude translates each
+  line in the light of the last 30, with their speakers, which is what
+  chat mode is for; DeepL is faster and sees the same lines as context.
+- **Screen read** (Translation page, hotkey **Read the screen**, default
+  Ctrl+Shift+D): the frame on screen goes to a vision model, which returns
+  every text a player would want translated (notes, letters, signs,
+  menus; HUD skipped; unreadable parts marked) as entries on the chat
+  card, in every render mode, each with a title in place of a speaker and
+  the time of the read; pressing the hotkey again clears them. **Model
+  service** is Claude (the Anthropic key; **Model** empty uses the Claude
+  model above) or OpenAI-compatible (**Base URL** up to `/v1`, the model's
+  name, and its key under API keys; a local Ollama or LM Studio needs no
+  key). The frame is sent as a PNG no wider than 1568 px. About $0.0003
+  a press on Claude Haiku, one to three seconds.
 - **Font and Weight** (Appearance page): any font installed on the
   computer (default Segoe UI) and a weight from Regular to Bold (default
   SemiBold). The preview on the page is painted by the overlay's own
@@ -411,7 +445,7 @@ needs no GPU, and a Direct3D window opening beside a game can make a
 display flicker). The pages are QML files under `app/qml/`, styled by hand
 (`Theme.qml` holds the colours and sizes); `app/settings_backend.py` is
 what they read and write: a property map with one entry per setting, plus
-the actions (start, select an area, save a key, activate a licence) that
+the actions (start, select an area, save a key, remove all data) that
 go to the tray as signals. The window is laid out at 96 dpi and scaled by
 the screen's display scaling; the overlay and the area selector work in
 physical pixels.
@@ -467,7 +501,8 @@ opencv-python-headless provides `cv2`); in an environment that had both,
   `--scale 1.5` renders as on a 150 % screen, `--profiles` adds the open
   Profiles popup and `--translator claude` shows the Claude card. The
   renders in `docs/ui` come from `preview_ui.py --full --profiles --out docs/ui`
-  and `--page appearance --full --background shadow --out docs/ui`.
+  and `--page appearance --full --background shadow --out docs/ui` (and
+  `--render chat` for the chat-mode page).
 - `gametl --check-ui` (or `python -m gametl.app.settings_window --check`)
   loads every page and popup offscreen and reports QML problems. CI and
   the release workflow run it on the frozen build too
@@ -477,9 +512,6 @@ opencv-python-headless provides `cv2`); in an environment that had both,
   frames the app would skip.
 - `scripts/bench_translate.py` measures Claude request latency per
   configuration (real API calls).
-- `scripts/make_license.py` issues licence keys (`--name`, `--email` and the
-  customer's `--machine` code); it needs the private
-  signing key, which is not in the repository.
 
 ## Releases
 
@@ -521,10 +553,7 @@ APIs.
 
 ## Licensing
 
-Subline (gametl) is proprietary software, copyright (c) 2026 Mustafa
-Yurdakul. It may be tried for three hours of translation, after which a
-licence key bought from the author, issued for one computer, is required;
-see [LICENSE](LICENSE) for the terms.
-The open-source components it bundles or downloads are listed with their
-licences in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Licence
-enquiries: mustafa@yurdakul.dev.
+Subline (gametl) is free software, copyright (c) 2026 Mustafa Yurdakul,
+under the [MIT licence](LICENSE). The open-source components it bundles
+or downloads are listed with their licences in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

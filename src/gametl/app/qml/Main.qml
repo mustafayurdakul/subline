@@ -24,8 +24,7 @@ Rectangle {
         { key: "translation", label: "Translation", subtitle: "Languages, translator and keys.", icon: Icons.translate, source: "TranslationPage.qml" },
         { key: "appearance", label: "Appearance", subtitle: "How the subtitles look.", icon: Icons.palette, source: "AppearancePage.qml" },
         { key: "hotkeys", label: "Hotkeys", subtitle: "Global shortcuts; press the keys to set one.", icon: Icons.keyboard, source: "HotkeysPage.qml" },
-        { key: "licence", label: "Licence", subtitle: "Trial, key and the data on this computer.", icon: Icons.key, source: "LicencePage.qml" },
-        { key: "advanced", label: "Advanced", subtitle: "Timing, filters and diagnostics.", icon: Icons.sliders, source: "AdvancedPage.qml" },
+        { key: "advanced", label: "Advanced", subtitle: "Timing, filters and the data on this computer.", icon: Icons.sliders, source: "AdvancedPage.qml" },
     ]
     readonly property var current: pages.find(function(p) { return p.key === root.page }) || pages[0]
 

@@ -181,6 +181,29 @@ def test_context_carries_recent_pairs() -> None:
         service.shutdown()
 
 
+def test_speakers_go_along_as_a_hint_and_name_the_context_lines() -> None:
+    translator = GatedTranslator()
+    translator.release.set()
+    service = TranslationService(translator, context_lines=4)
+    try:
+        service.submit(["Stay close.", "Where?"], ["Casey", ""])
+        assert wait_until(lambda: service.drain() > 0)
+        assert translator.requests[0].speakers == ["Casey", ""]
+        assert translator.requests[0].texts == ["Stay close.", "Where?"]  # the name never enters the text
+        service.submit(["Go."])  # nobody named: no speakers at all
+        assert wait_until(lambda: service.drain() > 0)
+        assert translator.requests[1].speakers is None
+        assert translator.requests[1].context == [("Casey: Stay close.", "STAY CLOSE."), ("Where?", "WHERE?")]
+        assert service.cache.get("Stay close.", "tr") == "STAY CLOSE."  # cached by the words alone
+        assert service.lookup("Go.", "Alan") == "GO."  # a cached line joins the context with its speaker
+        assert list(service._context.values())[-1] == ("Alan: Go.", "GO.")
+        assert service._speakers == {}  # nothing in flight keeps a name
+        service.submit(["Stay close."], ["Casey"])  # answered by the cache: no request, nothing kept
+        assert service._speakers == {}
+    finally:
+        service.shutdown()
+
+
 def test_failed_batch_cools_down_then_retries() -> None:
     translator = GatedTranslator()
     translator.fail = True

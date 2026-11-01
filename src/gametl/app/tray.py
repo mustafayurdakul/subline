@@ -19,14 +19,13 @@ from .config import ProfileStore, Settings, slug
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
 from .icon import make_icon
-from .license import license_status
 from .settings_backend import SettingsBackend
 from .settings_window import SettingsWindow
 
 # Hotkeys that act on a running overlay. Registered only while one runs: a
 # registered combination is taken from every other program, and idle these
 # would do nothing in exchange.
-SESSION_HOTKEYS = frozenset({"pause", "rescan"})
+SESSION_HOTKEYS = frozenset({"pause", "rescan", "read"})
 
 
 class SingleInstance(QObject):
@@ -139,7 +138,7 @@ class TrayApp(QObject):
 
         self.apply_hotkeys(settings)
         self._refresh_labels()
-        self._on_status(license_status(controller.secrets, store).text)
+        self._on_status("idle")
         self.tray.show()
 
     # -- actions ---------------------------------------------------------------
@@ -231,6 +230,7 @@ class TrayApp(QObject):
             "pause": self.toggle_pause,
             "rescan": self.controller.rescan,
             "select": self.select_area,
+            "read": self.controller.read_screen,
             "settings": self.open_settings,
         }
         if not self.controller.running:
@@ -294,7 +294,7 @@ class TrayApp(QObject):
         self.tray.setToolTip(f"{APP_NAME}\n{text}"[:127])
 
     def _on_start_failed(self, message: str) -> None:
-        """A start that did not begin (licence, no matching window, a missing
+        """A start that did not begin (no matching window, a missing
         key...). Home shows guidance rather than the status line while idle,
         so the reason goes to the banner above every page."""
         self._start_problem = message

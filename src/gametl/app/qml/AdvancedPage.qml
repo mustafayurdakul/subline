@@ -48,12 +48,25 @@ ColumnLayout {
     }
 
     Card {
-        title: "Diagnostics"
-        helper: "The log file is gametl.log in the data folder."
+        title: "Data on this computer"
+        helper: backend.dataDescription + "\nThe log file is gametl.log in the data folder."
         RowLayout {
             spacing: Theme.space
-            Label { text: backend.dataFolder; color: Theme.textSoft; font.pixelSize: Theme.sizeCaption; elide: Text.ElideMiddle; Layout.fillWidth: true }
             SecondaryButton { text: "Open data folder"; icon_: Icons.folder; onClicked: backend.openDataFolder() }
+            Item { Layout.fillWidth: true }
+            SecondaryButton { text: "Remove all data and quit"; icon_: Icons.trash; danger: true; onClicked: confirm.open() }
         }
+        Caption {
+            Layout.fillWidth: true
+            text: "Removing deletes the folder and the Credential Manager entries above: profiles, translation caches, downloaded models and API keys. Then the app quits."
+        }
+    }
+
+    Confirm {
+        id: confirm
+        title: "Remove all data and quit?"
+        text: "Every profile, translation cache, downloaded model and API key goes. This cannot be undone."
+        confirmText: "Remove and quit"
+        onConfirmed: backend.removeAllData()
     }
 }

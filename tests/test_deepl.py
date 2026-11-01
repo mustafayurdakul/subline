@@ -126,6 +126,12 @@ def test_recent_source_lines_go_along_as_context() -> None:
     assert session.calls[0]["json"]["context"] == "Hemingway is waiting at the lodge.\nHe said so."
     translator.translate(TranslationRequest(["Go."], target_lang="tr"))
     assert "context" not in session.calls[1]["json"]  # nothing seen yet: no context field at all
+    # The lines being translated go in the context with their speakers, after the earlier lines.
+    translator.translate(
+        TranslationRequest(["Go.", "Where?"], target_lang="tr", context=context[:1], speakers=["Casey", ""])
+    )
+    assert session.calls[2]["json"]["context"] == "Hemingway is waiting at the lodge.\nCasey: Go."
+    assert session.calls[2]["json"]["text"] == ["Go.", "Where?"]  # the name never enters the text
 
 
 def test_context_keeps_the_newest_lines_within_the_budget() -> None:

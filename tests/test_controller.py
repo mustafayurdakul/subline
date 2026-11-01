@@ -8,7 +8,6 @@ import os
 import threading
 import time
 import weakref
-from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +32,6 @@ from gametl.app.controller import (
     restart_fields,
 )
 from gametl.app.credentials import MemorySecretStore
-from gametl.app.license import TRIAL_SECONDS
 from gametl.capture.base import Frame
 from gametl.capture.windows import WindowInfo
 from gametl.ocr.base import OcrResult, TextLine
@@ -176,7 +174,7 @@ def settings(**overrides) -> Settings:
 
 
 def test_start_runs_on_a_thread_then_translations_reach_the_overlay(qapp, controller) -> None:
-    assert controller.start(settings()) is True
+    controller.start(settings())
     assert controller.starting and not controller.running  # the slow part is still on its thread
     wait_for(qapp, lambda: controller.running)
     assert not controller.starting
@@ -420,6 +418,59 @@ def test_stop_keeps_the_session_stats_and_a_second_stop_does_nothing(qapp, contr
     assert controller.messages == messages and controller.running_log == running_log
 
 
+def test_read_screen_puts_the_models_texts_on_the_card_and_clears_on_the_next_press(
+    qapp, controller, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gametl.translate.screen import ScreenText
+
+    class FakeReader:
+        name = "fake"
+        calls: list[tuple[int, str, str]] = []
+
+        def read(self, png: bytes, target_lang: str, game: str = "") -> list[ScreenText]:
+            FakeReader.calls.append((len(png), target_lang, game))
+            return [ScreenText("Note", "Kapı kilitli.")]
+
+    controller.read_screen()
+    assert controller.messages[-1] == "screen read: start the overlay first"
+    monkeypatch.setattr(controller_module, "build_screen_reader", lambda settings, secrets: FakeReader())
+    controller.start(settings(target_lang="tr", game="Fake Game"))
+    wait_for(qapp, lambda: controller.running and controller.worker.last_frame is not None)
+    controller.read_screen()
+    assert controller.messages[-1] == "reading the screen with fake..."
+    wait_for(qapp, lambda: bool(controller.worker.page))
+    (entry,) = controller.worker.page
+    assert (entry.speaker, entry.text, entry.speaker_index) == ("Note", "Kapı kilitli.", -1) and entry.stamp
+    assert FakeReader.calls[0][1:] == ("tr", "Fake Game") and FakeReader.calls[0][0] > 8
+    wait_for(qapp, lambda: controller._screen_worker is None)
+    assert controller.messages[-1] == "screen read: 1 text(s)"
+    controller.read_screen()  # a page shows: this press clears it
+    assert controller.worker.page == [] and controller.messages[-1] == "screen read cleared"
+
+
+def test_read_screen_reports_a_missing_key_and_a_failed_read(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gametl.translate.screen import ScreenReadError
+
+    controller.start(settings(screen_reader="openai", screen_model=""))
+    wait_for(qapp, lambda: controller.running and controller.worker.last_frame is not None)
+    controller.read_screen()
+    assert controller.messages[-1] == "Screen read: name the model on the Translation page"
+    controller.settings.screen_reader = "claude"
+    controller.read_screen()
+    assert controller.messages[-1] == "Screen read: add your Anthropic key on the Translation page"
+
+    class FailingReader:
+        name = "failing"
+
+        def read(self, png, target_lang, game=""):
+            raise ScreenReadError("HTTP 401: bad key")
+
+    monkeypatch.setattr(controller_module, "build_screen_reader", lambda settings, secrets: FailingReader())
+    controller.read_screen()
+    wait_for(qapp, lambda: controller._screen_worker is None)
+    assert controller.messages[-1] == "screen read failed: HTTP 401: bad key" and controller.worker.page == []
+
+
 def test_finished_start_threads_are_let_go(qapp, controller) -> None:
     threads = []
     for lang in ("de", "tr", "fr"):
@@ -428,44 +479,3 @@ def test_finished_start_threads_are_let_go(qapp, controller) -> None:
         wait_for(qapp, lambda lang=lang: controller.running and controller.settings.target_lang == lang)
     wait_for(qapp, lambda: not controller._start_workers)
     assert all(ref() is None for ref in threads)  # nothing keeps a finished start's thread object
-
-
-def test_trial_over_refuses_to_start(qapp, fakes, tmp_path) -> None:
-    secrets = MemorySecretStore()
-    secrets.set("TRIAL_USED", str(TRIAL_SECONDS))
-    c = OverlayController(ProfileStore(tmp_path), secrets)
-    messages: list[str] = []
-    failures: list[str] = []
-    c.status.connect(messages.append)
-    c.start_failed.connect(failures.append)  # the tray shows these in the window's banner
-    assert c.start(settings()) is False
-    assert messages == failures == ["trial over: a licence key is needed: enter one in Settings > Licence"]
-
-
-def test_the_trial_clock_counts_running_time_and_stops_the_session(qapp, controller) -> None:
-    controller.secrets.set("TRIAL_USED", str(TRIAL_SECONDS - 12 * 60))  # twelve minutes left
-    assert controller.start(settings()) is True
-    wait_for(qapp, lambda: controller.running)
-    assert controller._trial_timer.isActive()  # unlicensed: the session's time is counted
-    controller._trial_mark = time.monotonic() - 90  # as if a minute and a half had run
-    controller._trial_tick()
-    assert controller.running and int(controller.secrets.get("TRIAL_USED")) >= TRIAL_SECONDS - 12 * 60 + 90
-    assert controller.messages[-1] == "trial: 11 min left"  # inside the last quarter hour: counted down
-    controller._trial_mark = time.monotonic() - 20 * 60  # the rest of the trial
-    controller._trial_tick()
-    assert not controller.running and not controller._trial_timer.isActive()
-    assert controller.failures[-1] == "trial over: a licence key is needed: enter one in Settings > Licence"
-    assert controller.start(settings()) is False  # and it stays over
-
-
-def test_a_licensed_session_is_not_counted(qapp, controller, keypair, monkeypatch: pytest.MonkeyPatch) -> None:
-    from gametl.app.license import machine_code, make_key
-
-    pem, public = keypair
-    monkeypatch.setattr("gametl.app.license.PUBLIC_KEY_HEX", public)
-    controller.secrets.set("LICENSE_KEY", make_key(pem, "Ada", "ada@example.com", date.today(), machine_code()))
-    assert controller.start(settings()) is True
-    wait_for(qapp, lambda: controller.running)
-    assert not controller._trial_timer.isActive()
-    controller.stop()
-    assert controller.secrets.get("TRIAL_USED") in (None, "0")

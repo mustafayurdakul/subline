@@ -25,7 +25,7 @@ from .icon import make_icon
 from .preview import PROVIDER, PreviewImageProvider
 from .settings_backend import SettingsBackend, qml_dir
 
-PAGES = ["home", "game", "translation", "appearance", "hotkeys", "licence", "advanced"]  # as Main.qml's table
+PAGES = ["home", "game", "translation", "appearance", "hotkeys", "advanced"]  # as Main.qml's table
 WINDOW_SIZE = QSize(1000, 680)  # at 96 dpi, scaled to the screen; fixed, every page scrolls inside it
 # What the system adds around the window's client area at 96 dpi: the title bar and the borders.
 FRAME_ALLOWANCE = QSize(16, 40)

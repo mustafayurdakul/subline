@@ -33,7 +33,7 @@ def run_python(code: list[str]) -> subprocess.CompletedProcess:
 def test_every_page_loads_clean() -> None:
     result = run_python(["-m", "gametl.app.settings_window", "--check"])
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "7 pages loaded, 0 problems" in result.stdout, result.stdout
+    assert "6 pages loaded, 0 problems" in result.stdout, result.stdout
 
 
 # A copy of the pages where Dialog.qml also imports Controls without a name,

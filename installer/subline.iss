@@ -5,7 +5,7 @@
 ;
 ; A per-user install (no administrator prompt) into %LOCALAPPDATA%\Programs\Subline,
 ; a Start menu entry, an optional desktop icon, and an uninstaller that
-; removes the program files only: profiles, caches and the licence stay in
+; removes the program files only: profiles, caches and keys stay in
 ; %APPDATA%\gametl and the Credential Manager, as with the portable zip.
 
 #ifndef AppVersion
@@ -42,7 +42,6 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-LicenseFile=..\LICENSE
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}

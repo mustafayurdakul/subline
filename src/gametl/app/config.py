@@ -24,6 +24,7 @@ DEFAULT_HOTKEYS: dict[str, str] = {
     "pause": "ctrl+shift+p",  # hide translations, keep running
     "rescan": "ctrl+shift+r",  # forget tracked blocks and read the screen afresh
     "select": "ctrl+shift+a",  # drag-select the area to translate (e.g. the subtitle strip)
+    "read": "ctrl+shift+d",  # read the whole screen with a vision model, onto the chat card (again: clear)
     "settings": "ctrl+shift+s",  # open the settings window
 }
 
@@ -33,6 +34,7 @@ DEFAULT_HOTKEYS: dict[str, str] = {
 NO_LETTERS_PATTERN = r"^[\W\d_]*$"
 
 BOTTOM_STRIP = "0,0.75,1,0.25"  # the area most games' subtitles fall in: the bottom quarter
+CHAT_WIDTH_RANGE = (20, 70)  # % of the window the chat card may take (the Appearance page's slider agrees)
 
 
 REMOVED_FONTS = ("Source Sans 3", "Fira Sans", "Barlow Semi Condensed")  # bundled in 0.1.6 and 0.1.7
@@ -48,8 +50,9 @@ class Settings:
     roi: str = BOTTOM_STRIP
     # Keep a selected area symmetric about the client area's centre (Shift inverts while dragging).
     center_area: bool = False
-    # subtitle mode: with an area set, render translations in it with one fixed style
-    render: str = "subtitle"  # "subtitle" | "inplace" (per-block, at the OCR box)
+    # How translations are drawn: "subtitle", one fixed style in the area; "chat", the last lines of
+    # dialogue as a transcript card ("Casey: ...") in a corner of the window; "inplace", each on its OCR box.
+    render: str = "subtitle"
     subtitle_font_px: int = 0  # 0 = the game's own subtitle size, learned from the first lines and then held
     subtitle_color: str = ""  # "#RRGGBB"; empty = the game's own subtitle colour, sampled from the frame
     subtitle_background: str = "pill"  # "pill" | "shadow" (soft drop shadow, no box) | "none" (outlined text)
@@ -57,6 +60,18 @@ class Settings:
     subtitle_weight: str = "semibold"  # regular | medium | semibold | bold
     subtitle_position: str = "bottom"  # "bottom" of the area (steady) | "source" (where the game drew it) | "center"
     subtitle_hide_source: bool = False  # cover the original line when the subtitle is drawn elsewhere
+    # chat mode: the card keeps this many lines, drops a line this long after it arrived (0 = keeps it),
+    # sits in this corner (above the area read, for the bottom corners) and takes this share of the window width
+    chat_lines: int = 4
+    chat_seconds: int = 20
+    chat_corner: str = "bottom-left"  # "bottom-left" | "bottom-right" | "top-left" | "top-right"
+    chat_width: int = 38  # % of the window width
+    chat_timestamps: bool = True  # the time each line was said, in front of it
+    # screen read (the "read" hotkey): which vision model reads the frame; "claude" uses the Anthropic key and
+    # `screen_model` (empty = `model`); "openai" is any OpenAI-compatible endpoint with its own key
+    screen_reader: str = "claude"  # "claude" | "openai"
+    screen_model: str = ""
+    screen_base_url: str = "https://api.openai.com/v1"
     # HUD text sharing the area: subtitles are centred and one size; prompts and objectives are not.
     subtitle_center_tolerance: int = 10  # % of the area width a block's centre may be off the area's centre; 0 = off
     subtitle_size_tolerance: int = 35  # % a block's line height may differ from the learned subtitle size; 0 = off
@@ -138,6 +153,15 @@ class Settings:
     @property
     def effective_source_lang(self) -> str:
         return self.source_lang or self.lang
+
+
+def chat_width_share(percent: Any) -> float:
+    """The chat card's width as a share of the window, from the setting in per cent, kept to CHAT_WIDTH_RANGE."""
+    try:
+        value = int(percent)
+    except (TypeError, ValueError):
+        value = Settings.chat_width
+    return max(CHAT_WIDTH_RANGE[0], min(CHAT_WIDTH_RANGE[1], value)) / 100
 
 
 def slug(text: str) -> str:

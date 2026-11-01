@@ -112,6 +112,30 @@ def test_plain_mode_sends_positional_items_and_reads_string_lists() -> None:
     assert '{"items": ["<translation of item 0>"' in call["system"][0]["text"]
 
 
+def test_speakers_are_sent_beside_the_items_when_any_is_named() -> None:
+    client = StubClient(text_response('{"items": ["Yakın dur.", "Nerede?"]}'))
+    translator = ClaudeTranslator(client=client, source_lang="en")
+    translator.translate(TranslationRequest(["Stay close.", "Where?"], target_lang="tr", speakers=["Casey", ""]))
+    translator.translate(TranslationRequest(["Stay close.", "Where?"], target_lang="tr", speakers=["", ""]))
+    first, second = (json.loads(call["messages"][0]["content"]) for call in client.messages.created)
+    assert first["speakers"] == ["Casey", ""] and first["items"] == ["Stay close.", "Where?"]
+    assert "speakers" not in second
+    assert '"speakers"' in client.messages.created[0]["system"][0]["text"]  # the rule that explains them
+
+
+def test_the_context_is_the_last_thirty_pairs_and_the_rule_says_it_is_a_conversation() -> None:
+    from gametl.translate.claude import CONTEXT_PAIRS
+
+    client = StubClient(text_response('{"items": ["Git."]}'))
+    translator = ClaudeTranslator(client=client, source_lang="en")
+    context = [(f"line {i}", f"satır {i}") for i in range(40)]
+    translator.translate(TranslationRequest(["Go."], target_lang="tr", context=context))
+    (call,) = client.messages.created
+    payload = json.loads(call["messages"][0]["content"])
+    assert len(payload["context"]) == CONTEXT_PAIRS == 30 and payload["context"][-1] == ["line 39", "satır 39"]
+    assert "continue" in call["system"][0]["text"] and "conversation" in call["system"][0]["text"]
+
+
 def test_system_prompt_is_stable_across_calls() -> None:
     client = StubClient(response_with([(0, "x")]))
     translator = ClaudeTranslator(client=client, source_lang="en", structured=True)

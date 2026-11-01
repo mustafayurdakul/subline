@@ -10,28 +10,37 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
 from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
+from ..overlay.paint import CHAT_CORNERS, ChatLine
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
 from ..overlay.window import OverlayWindow
 from ..tracking.filters import LineFilter
 from ..translate.base import Translator
 from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
+from ..translate.screen import (
+    ClaudeScreenReader,
+    OpenAICompatibleScreenReader,
+    ScreenReader,
+    ScreenReadError,
+    ScreenText,
+    encode_frame,
+)
 from ..translate.service import TranslationService
-from .config import ProfileStore, Settings
+from .config import ProfileStore, Settings, chat_width_share
 from .credentials import (
     DEEPL_KEY,
+    SCREEN_KEY,
     SecretStore,
     WindowsCredentialStore,
     anthropic_api_key,
     has_anthropic_credentials,
     resolve_key,
 )
-from .license import license_status, record_trial_use, trial_text
 from .pipeline import PipelineConfig, PipelineThread
 
 # -- zones and colours -------------------------------------------------------------
@@ -118,6 +127,11 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
         subtitle_weight=settings.subtitle_weight,
         subtitle_position=settings.subtitle_position,
         subtitle_hide_source=settings.subtitle_hide_source,
+        chat_lines=max(1, int(settings.chat_lines)),
+        chat_seconds=max(0.0, float(settings.chat_seconds)),
+        chat_corner=settings.chat_corner if settings.chat_corner in CHAT_CORNERS else CHAT_CORNERS[0],
+        chat_width=chat_width_share(settings.chat_width),
+        chat_timestamps=settings.chat_timestamps,
         subtitle_center_tolerance=max(0, settings.subtitle_center_tolerance) / 100,
         subtitle_size_tolerance=max(0, settings.subtitle_size_tolerance) / 100,
         debug=settings.debug,
@@ -213,6 +227,39 @@ def build_claude_translator(settings: Settings, game: str, secrets: SecretStore)
     )
 
 
+def build_screen_reader(settings: Settings, secrets: SecretStore) -> ScreenReader:
+    """The vision model the "read" hotkey sends the frame to. Raises
+    StartError when its key is missing."""
+    if settings.screen_reader == "openai":
+        key = resolve_key(SCREEN_KEY, secrets)
+        if not settings.screen_model.strip():
+            raise StartError("Screen read: name the model on the Translation page")
+        return OpenAICompatibleScreenReader(settings.screen_base_url, settings.screen_model.strip(), key and key[0])
+    if not has_anthropic_credentials(secrets):
+        raise StartError("Screen read: add your Anthropic key on the Translation page")
+    return ClaudeScreenReader(settings.screen_model.strip() or settings.model, api_key=anthropic_api_key(secrets))
+
+
+class _ScreenWorker(QThread):
+    """One screen read on its own thread: the frame goes to the model and
+    the texts come back, without the UI waiting."""
+
+    done = Signal(list)  # list[ScreenText]
+    failed = Signal(str)
+
+    def __init__(self, reader: ScreenReader, png: bytes, target_lang: str, game: str) -> None:
+        super().__init__()
+        self.reader, self.png, self.target_lang, self.game = reader, png, target_lang, game
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self.reader.read(self.png, self.target_lang, self.game))
+        except ScreenReadError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # anything unforeseen still reaches the status line
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
 def _spread(values: Iterable[float]) -> str:
     ordered = sorted(values)
     return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
@@ -258,10 +305,6 @@ class Prepared:
     config: PipelineConfig
 
 
-TRIAL_TICK_MS = 60_000  # how often a running session's time is added to the trial
-TRIAL_WARNING_SECONDS = 15 * 60  # from here on the status line counts the trial down
-
-
 class _StartWorker(QThread):
     """Runs `OverlayController.prepare` away from the UI thread, so the tray
     and the settings window stay responsive while the window is waited for
@@ -305,8 +348,7 @@ class OverlayController(QObject):
     start() returns at once: the slow part (waiting for the window, building
     the translators, loading the OCR engine) runs on a thread, and the
     session begins when it is done. `running_changed(True)` or
-    `start_failed(message)` reports the outcome; a start the licence
-    refuses is reported as `start_failed` too."""
+    `start_failed(message)` reports the outcome."""
 
     status = Signal(str)
     running_changed = Signal(bool)
@@ -337,12 +379,7 @@ class OverlayController(QObject):
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
         self.last_stats = ""  # stats_text() of the last session, kept when it stops
-        # The trial counts time while a session runs: a minute at a time, and
-        # the rest when it stops, so a crash loses at most a minute.
-        self._trial_timer = QTimer(self)
-        self._trial_timer.setInterval(TRIAL_TICK_MS)
-        self._trial_timer.timeout.connect(self._trial_tick)
-        self._trial_mark: float | None = None  # when the running trial time was last recorded
+        self._screen_worker: _ScreenWorker | None = None  # the screen read under way, if any
 
     # -- state -------------------------------------------------------------
 
@@ -399,15 +436,9 @@ class OverlayController(QObject):
                 self._engines[(lang, gpu)] = engine
         return engine
 
-    def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> bool:
-        """Begin a session on the window `settings` (or `hwnd`) names. False
-        when the licence forbids it (reported at once as `start_failed`);
-        otherwise True, and the outcome arrives as `running_changed(True)`
-        or `start_failed(message)`."""
-        licence = license_status(self.secrets, self.store)
-        if not licence.may_run:
-            self._fail(f"{licence.text}: enter one in Settings > Licence")
-            return False
+    def start(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> None:
+        """Begin a session on the window `settings` (or `hwnd`) names; the
+        outcome arrives as `running_changed(True)` or `start_failed(message)`."""
         if self.running:
             self.stop()
         self._generation += 1
@@ -423,7 +454,6 @@ class OverlayController(QObject):
         target = f"window {hwnd:#x}" if hwnd else f"{settings.window_match!r}"
         self._say(f"starting on {target}...")
         worker.start()
-        return True
 
     def prepare(
         self,
@@ -517,32 +547,6 @@ class OverlayController(QObject):
             f"running on {self.title!r}: {prepared.settings.effective_source_lang} -> "
             f"{prepared.settings.target_lang} via {prepared.translator.name}"
         )
-        if not license_status(self.secrets, self.store).licensed:
-            self._trial_mark = time.monotonic()
-            self._trial_timer.start()
-
-    def _record_trial(self) -> int | None:
-        """Add the time run since the last record to the trial; the seconds
-        left, or None when nothing is being counted (licensed, not running)."""
-        if self._trial_mark is None:
-            return None
-        now = time.monotonic()
-        elapsed, self._trial_mark = now - self._trial_mark, now
-        if license_status(self.secrets, self.store).licensed:  # a key entered during the session
-            self._trial_mark = None
-            self._trial_timer.stop()
-            return None
-        return record_trial_use(self.secrets, self.store, elapsed)
-
-    def _trial_tick(self) -> None:
-        left = self._record_trial()
-        if left is None:
-            return
-        if left <= 0:
-            self.stop()
-            self._fail(f"{trial_text(0)}: enter one in Settings > Licence")
-        elif left <= TRIAL_WARNING_SECONDS:
-            self._say(trial_text(left))
 
     def _on_start_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
@@ -609,9 +613,6 @@ class OverlayController(QObject):
             worker.wait(3000)
         if worker is not None or self.service is not None:
             self.last_stats = self.stats_text()  # the session's numbers, before they are let go
-        self._record_trial()
-        self._trial_mark = None
-        self._trial_timer.stop()
         self._release()
         self.running_changed.emit(False)
         self.paused_changed.emit(False)
@@ -668,6 +669,52 @@ class OverlayController(QObject):
         if self.worker is not None:
             self.worker.rescan()
             self._say("rescanning")
+
+    # -- screen read ----------------------------------------------------------
+
+    def read_screen(self) -> None:
+        """The "read" hotkey: send the frame on screen to the vision model
+        and put what it reads on the card; pressed again while a page
+        shows, clear it. Needs a running session (the overlay to draw on)."""
+        worker = self.worker
+        if worker is None or self.settings is None:
+            self._say("screen read: start the overlay first")
+            return
+        if worker.page:
+            worker.set_page([])
+            self._say("screen read cleared")
+            return
+        if self._screen_worker is not None:
+            return  # one at a time
+        frame = worker.last_frame
+        if frame is None:
+            self._say("screen read: no frame yet")
+            return
+        try:
+            reader = build_screen_reader(self.settings, self.secrets)
+            png = encode_frame(frame.image)
+        except (StartError, ScreenReadError) as exc:
+            self._say(str(exc))
+            return
+        self._say(f"reading the screen with {reader.name}...")
+        self._screen_worker = _ScreenWorker(reader, png, self.settings.target_lang, self.settings.game or self.title)
+        self._screen_worker.done.connect(self._on_screen_read)
+        self._screen_worker.failed.connect(self._on_screen_failed)
+        self._screen_worker.finished.connect(self._on_screen_worker_finished)
+        self._screen_worker.start()
+
+    def _on_screen_read(self, texts: list[ScreenText]) -> None:
+        if self.worker is None:
+            return
+        stamp = time.strftime("%H:%M:%S") if self.settings is not None and self.settings.chat_timestamps else ""
+        self.worker.set_page([ChatLine(t.title, t.text, -1, stamp) for t in texts])
+        self._say(f"screen read: {len(texts)} text(s)" if texts else "screen read: nothing to translate")
+
+    def _on_screen_failed(self, message: str) -> None:
+        self._say(f"screen read failed: {message}")
+
+    def _on_screen_worker_finished(self) -> None:
+        self._screen_worker = None
 
     # -- area selection ------------------------------------------------------
 

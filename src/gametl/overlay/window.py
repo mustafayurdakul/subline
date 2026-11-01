@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..capture.windows import foreground_window, is_minimized, is_window, window_rect
 from ..geometry import Box
-from .paint import BlockPainter, RenderBlock
+from .paint import BlockPainter, Drawable
 
 _user32 = ctypes.windll.user32
 _GWL_EXSTYLE = -20
@@ -67,7 +67,7 @@ class OverlayWindow(QWidget):
         self.painter = BlockPainter(font_family)
         self.paint_errors = 0
 
-        self._blocks: list[RenderBlock] = []
+        self._blocks: list[Drawable] = []
         self._target_rect: Box | None = None
 
         self._timer = QTimer(self)
@@ -133,10 +133,11 @@ class OverlayWindow(QWidget):
     # -- content ---------------------------------------------------------------
 
     @Slot(list)
-    def set_blocks(self, blocks: list[RenderBlock]) -> None:
-        """The pipeline sends the blocks after every captured frame, mostly
-        the same ones again: repaint only when they change, since a repaint
-        pushes the whole translucent window to the screen."""
+    def set_blocks(self, blocks: list[Drawable]) -> None:
+        """The pipeline sends the blocks (and chat mode's card) after every
+        captured frame, mostly the same ones again: repaint only when they
+        change, since a repaint pushes the whole translucent window to the
+        screen."""
         blocks = list(blocks)
         if blocks == self._blocks:
             return
