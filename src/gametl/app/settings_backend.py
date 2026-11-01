@@ -28,8 +28,8 @@ from PySide6.QtQml import QQmlPropertyMap
 from .. import APP_NAME, __version__
 from ..translate.claude import PRICES_PER_MTOK
 from .cleanup import describe_data
-from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
-from .controller import TRANSLATORS, parse_color
+from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, TRANSLATORS, ProfileStore, Settings, slug
+from .controller import parse_color
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_WIN, NAMED_KEYS, parse_combo
 

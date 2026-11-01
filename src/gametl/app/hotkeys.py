@@ -24,6 +24,9 @@ NAMED_KEYS = {
 # fmt: on
 
 
+_USER32 = None
+
+
 def _user32():
     """user32, bound on first use: importing this module (for `parse_combo`)
     must not need Windows."""
@@ -37,12 +40,9 @@ def _user32():
     return _USER32
 
 
-_USER32 = None
-
-
 def parse_combo(combo: str) -> tuple[int, int]:
     """'ctrl+shift+t' -> (modifier flags, virtual-key code). Raises ValueError."""
-    parts = [p.strip().lower() for p in combo.replace(" ", "").split("+") if p.strip()]
+    parts = [p for p in "".join(combo.lower().split()).split("+") if p]
     if not parts:
         raise ValueError("empty hotkey")
     mods = 0

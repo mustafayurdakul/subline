@@ -39,7 +39,7 @@ class PipelineConfig:
     full_scan_every: int = 0
     stable_frames: int = 1  # confirming frames before translating
     max_missing: int = 3  # frames a block survives without being seen
-    style: str = "auto"  # in-place style: auto | patch | pill | outline; auto = patch unless the background is busy
+    style: str = "auto"  # in-place style: auto | patch | pill | outline; auto = patch unless busy or low contrast
     line_filter: LineFilter | None = None  # ignore zones and patterns
     # subtitle mode (needs a roi): one fixed style, centred in the zone
     render: str = "subtitle"  # "subtitle" | "inplace"
@@ -281,9 +281,9 @@ class PipelineThread(QThread):
 
     def _spoken(self, block: TextBlock) -> tuple[str, str]:
         """(speaker, words) of a block: the name a game prints before a line
-        is split off in subtitle mode, where the lines are subtitles; in
-        place every block counts, labels included, and is translated whole."""
-        return ("", block.text) if self.cfg.render == "inplace" else split_speaker(block.text)
+        is split off in subtitle mode, where the lines are subtitles;
+        elsewhere every block counts, labels included, and is translated whole."""
+        return split_speaker(block.text) if self.subtitle_mode else ("", block.text)
 
     def track_frame(self, frame: Frame) -> tuple[list[TextBlock], list[TextLine]]:
         """OCR the frame and fold the lines into the tracked blocks. Returns
@@ -433,7 +433,7 @@ class PipelineThread(QThread):
         lines = block.translation.split("\n")
         speaker, _ = self._spoken(block)
         if speaker:
-            lines[0] = f"{speaker}: {lines[0]}"  # the name stays in front, as the game printed it
+            lines[0] = f"{speaker}: {lines[0]}"  # the name goes back in front, untranslated
         # Lines that appear in the same place share one size, colour and style.
         bg, fg = memory.colors(block.bbox) or block.colors or ((0, 0, 0), (255, 255, 255))
         if self.subtitle_mode:

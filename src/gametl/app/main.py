@@ -20,7 +20,7 @@ import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from gametl.app.config import ProfileStore, Settings, slug
+from gametl.app.config import DRAFTS, TRANSLATORS, ProfileStore, Settings, app_dir, slug
 
 if TYPE_CHECKING:  # imported where it runs: Qt loads only when a window or an overlay is wanted
     from gametl.app.controller import OverlayController
@@ -70,10 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     lang.add_argument("--ocr-gpu", action="store_true", default=None, help="run OCR on the GPU (DirectML)")
 
     tr = p.add_argument_group("translation")
-    tr.add_argument("--translator", choices=["claude", "deepl", "offline", "uppercase", "echo", "verbose"])
-    tr.add_argument(
-        "--draft", choices=["none", "offline", "deepl"], help="fast draft shown until the translator answers"
-    )
+    tr.add_argument("--translator", choices=TRANSLATORS)
+    tr.add_argument("--draft", choices=["none", *DRAFTS[1:]], help="fast draft shown until the translator answers")
     tr.add_argument("--model", help=f"default {Settings.model}")
     tr.add_argument("--effort", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"])
@@ -106,7 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     look.add_argument("--subtitle-weight", choices=["regular", "medium", "semibold", "bold"])
     look.add_argument(
-        "--subtitle-position", choices=["bottom", "source", "center"], help="default bottom (steady baseline)"
+        "--subtitle-position",
+        choices=["bottom", "source", "center"],
+        help=f"default {Settings.subtitle_position} (steady baseline)",
     )
     look.add_argument(
         "--subtitle-center-tolerance",
@@ -256,8 +256,6 @@ def utf8_console() -> None:
     import faulthandler
 
     if sys.stdout is None or sys.stderr is None:
-        from gametl.app.config import app_dir
-
         log_dir = app_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "gametl.log"
@@ -310,12 +308,12 @@ def show_settings_if_start_fails(controller: OverlayController, open_settings: C
 
 
 def main(argv: list[str] | None = None) -> int:
-    utf8_console()
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "pretranslate":  # one executable, two tools: `gametl pretranslate ...`
         from gametl.app.pretranslate import main as pretranslate_main
 
-        return pretranslate_main(argv[1:])
+        return pretranslate_main(argv[1:])  # sets up the console itself
+    utf8_console()
     args = build_parser().parse_args(argv)
     if args.check_ui:
         from gametl.app.settings_window import check
@@ -387,13 +385,14 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     controller = OverlayController(store)
-    forget_trial(store, controller.secrets)  # what 0.2.x left behind
+    forget_trial(store, controller.secrets)  # what versions up to 0.2.1 left behind
     controller.status.connect(lambda s: print(s, flush=True))
 
     tray_mode = args.tray or (not settings.window_match and hwnd is None)
     start_now = bool(settings.window_match or hwnd)
     instance = None
 
+    plain = not (args.profile or args.window or hwnd)  # `gametl` with no game named
     if tray_mode:
         from gametl import APP_NAME
         from gametl.app.tray import SingleInstance, TrayApp
@@ -402,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         if not instance.claim(lambda: tray.open_settings()):
             print(f"{APP_NAME} is already running: its settings window was brought up")
             return 0
-        if not (args.profile or args.window or hwnd):
+        if plain:
             # Plain `gametl`: carry on with the game that is open, or the one played last.
             # Only a game found running starts at once; otherwise the settings show its profile.
             remembered = store.remembered_profile(open_window_titles())
@@ -413,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
                     store.last_profile = profile_name
         tray = TrayApp(app, controller, store, settings, profile_name)
         if start_now:
-            if not (args.profile or args.window or hwnd):
+            if plain:
                 # Started on its own, with no window open: a failure must not go unseen (no key, no window...).
                 show_settings_if_start_fails(controller, tray.open_settings)
             controller.start(settings, hwnd, wait=args.wait)

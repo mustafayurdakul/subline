@@ -33,6 +33,10 @@ DEFAULT_HOTKEYS: dict[str, str] = {
 NO_LETTERS_PATTERN = r"^[\W\d_]*$"
 
 BOTTOM_STRIP = "0,0.75,1,0.25"  # the area most games' subtitles fall in: the bottom quarter
+# The translators a start accepts (the last three translate nothing: for trying the pipeline
+# without a key or a network) and the drafts that may run in front of them.
+TRANSLATORS = ("deepl", "claude", "offline", "uppercase", "verbose", "echo")
+DRAFTS = ("", "offline", "deepl")
 
 
 REMOVED_FONTS = ("Source Sans 3", "Fira Sans", "Barlow Semi Condensed")  # bundled in 0.1.6 and 0.1.7
@@ -103,11 +107,12 @@ class Settings:
 
     @classmethod
     def from_dict(cls, data: dict) -> Settings:
+        data = data or {}
         known = {f.name for f in dataclasses.fields(cls)}
-        kwargs = {k: v for k, v in (data or {}).items() if k in known}
-        if "subtitle_weight" not in kwargs and (data or {}).get("subtitle_bold"):
+        kwargs = {k: v for k, v in data.items() if k in known}
+        if "subtitle_weight" not in kwargs and data.get("subtitle_bold"):
             kwargs["subtitle_weight"] = "bold"  # profiles from before weights had a bold switch
-        if "center_area" not in kwargs and "center_zone" in (data or {}):
+        if "center_area" not in kwargs and "center_zone" in data:
             kwargs["center_area"] = bool(data["center_zone"])  # its name up to 0.1.8
         if kwargs.get("font") in REMOVED_FONTS:
             kwargs["font"] = cls.font  # 0.1.6 and 0.1.7 shipped these; now only installed fonts are offered

@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.resume:
         job = BatchJob.load(Path(args.resume))
         game = job.game or Path(args.resume).stem.split(".")[0]  # job files from before 0.1.4 carry no game
-        cache = TranslationCache(store.cache_path(game, job.target_lang, "claude"))
+        cache = TranslationCache(store.cache_path(game, job.target_lang, ClaudeTranslator.name))
         ended, added, failed = wait_for_batch(job, cache, args.wait, client=anthropic_client(), say=say)
         if not ended:
             say("batch still running; run --resume again later")

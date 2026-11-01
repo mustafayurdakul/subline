@@ -22,7 +22,7 @@ from ..translate.base import Translator
 from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
 from ..translate.service import TranslationService
-from .config import ProfileStore, Settings
+from .config import DRAFTS, TRANSLATORS, ProfileStore, Settings
 from .credentials import (
     DEEPL_KEY,
     SecretStore,
@@ -127,13 +127,12 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
 # -- translators ---------------------------------------------------------------------
 
 
-class StartError(RuntimeError):
+class StartError(Exception):
     """A start that cannot go ahead, with a message fit for the status line."""
 
 
-# Translators for trying the pipeline without a key or a network.
+# The translators that translate nothing, for trying the pipeline without a key or a network.
 _DUMMY_TRANSLATORS = {"uppercase": UppercaseTranslator, "verbose": VerboseTranslator, "echo": EchoTranslator}
-TRANSLATORS = ("deepl", "claude", "offline", *_DUMMY_TRANSLATORS)
 
 
 def translator_name(settings: Settings) -> str:
@@ -141,13 +140,20 @@ def translator_name(settings: Settings) -> str:
     return settings.translator.strip().lower()
 
 
+def draft_name(settings: Settings) -> str:
+    """The draft `settings` names, read the same way ("" for none)."""
+    return settings.draft.strip().lower()
+
+
 def check_translator(settings: Settings, secrets: SecretStore) -> None:
-    """Refuse at once, before any waiting or loading, a translator that does
-    not exist or has no key to work with. Raises StartError."""
+    """Refuse at once, before any waiting or loading, a translator or draft
+    that does not exist or has no key to work with. Raises StartError."""
     name = translator_name(settings)
     if name not in TRANSLATORS:
         raise StartError(f"unknown translator {settings.translator!r}")
-    if "deepl" in (name, settings.draft) and resolve_key(DEEPL_KEY, secrets) is None:
+    if draft_name(settings) not in DRAFTS:
+        raise StartError(f"unknown draft {settings.draft!r}")
+    if "deepl" in (name, draft_name(settings)) and resolve_key(DEEPL_KEY, secrets) is None:
         raise StartError("Add your DeepL key on the Translation page")
     if name == "claude" and not has_anthropic_credentials(secrets):
         raise StartError("Add your Anthropic key on the Translation page")
@@ -168,13 +174,12 @@ def build_deepl_translator(secrets: SecretStore) -> Translator:
 
 
 def build_draft_translator(settings: Settings, store: ProfileStore, secrets: SecretStore) -> Translator | None:
-    if not settings.draft or settings.draft == translator_name(settings):
+    draft = draft_name(settings)
+    if not draft or draft == translator_name(settings):
         return None
-    if settings.draft == "offline":
+    if draft == "offline":
         return build_offline_translator(settings, store)
-    if settings.draft == "deepl":
-        return build_deepl_translator(secrets)
-    return None
+    return build_deepl_translator(secrets)  # check_translator has refused any other name
 
 
 def build_translator(settings: Settings, game: str, store: ProfileStore, secrets: SecretStore) -> Translator:
@@ -212,11 +217,6 @@ def build_claude_translator(settings: Settings, game: str, secrets: SecretStore)
     )
 
 
-def _spread(values: Iterable[float]) -> str:
-    ordered = sorted(values)
-    return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
-
-
 # Settings a running session cannot take up on the fly: a change in one of
 # them restarts the session. Everything else (the area, the filters, the
 # timing, the look) reaches the pipeline and the overlay as they run.
@@ -233,7 +233,7 @@ CLAUDE_FIELDS = frozenset({"model", "effort", "thinking", "structured", "tone", 
 
 def restart_fields(settings: Settings) -> frozenset[str]:
     """The SESSION_FIELDS whose change restarts a session run with `settings`."""
-    if "claude" in (translator_name(settings), settings.draft):
+    if translator_name(settings) == "claude":  # a draft is never Claude
         return SESSION_FIELDS
     return SESSION_FIELDS - CLAUDE_FIELDS
 
@@ -249,7 +249,6 @@ class Prepared:
     hwnd: int
     title: str
     settings: Settings
-    game: str
     translator: Translator
     draft: Translator | None
     cache: TranslationCache
@@ -412,7 +411,7 @@ class OverlayController(QObject):
         hwnd: int | None,
         wait: float,
         say: Callable[[str], None],
-        generation: int = 0,
+        generation: int,
     ) -> Prepared:
         """The slow, thread-safe part of start(): find the window (waiting up
         to `wait` seconds), build the translators, read the translation
@@ -431,8 +430,6 @@ class OverlayController(QObject):
         try:
             translator = build_translator(settings, game, self.store, self.secrets)
             draft = build_draft_translator(settings, self.store, self.secrets)
-        except StartError:
-            raise
         except (OSError, ValueError, RuntimeError, ImportError) as exc:
             raise StartError(f"translator setup failed: {exc}") from exc
         for candidate in (translator, draft):
@@ -451,23 +448,23 @@ class OverlayController(QObject):
             engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3], say)
         except Exception as exc:
             raise StartError(f"OCR engine failed to load: {type(exc).__name__}: {exc}") from exc
-        return Prepared(generation, hwnd, title, settings, game, translator, draft, cache, engine, config)
+        return Prepared(generation, hwnd, title, settings, translator, draft, cache, engine, config)
 
     def _on_start_worker_finished(self) -> None:
         """A start thread has ended (its result, queued before, has arrived):
         the last reference to it goes, and with it the thread object."""
         self._start_workers.discard(self.sender())  # type: ignore[arg-type]
 
-    def _settled(self) -> None:
+    def _end_starting(self) -> None:
         """The start in progress has reached its outcome, whichever it is."""
         if self._starting:
             self._starting = False
             self.starting_changed.emit(False)
 
     def _on_prepared(self, prepared: Prepared) -> None:
-        if prepared.generation != self._generation or self.running:
+        if prepared.generation != self._generation:
             return  # a later start() or stop() superseded this one
-        self._settled()
+        self._end_starting()
         try:
             self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
             self.translator, self.cache = prepared.translator, prepared.cache
@@ -502,7 +499,7 @@ class OverlayController(QObject):
     def _on_start_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
             return
-        self._settled()
+        self._end_starting()
         self._fail(message)
 
     def _fail(self, message: str) -> None:
@@ -557,12 +554,12 @@ class OverlayController(QObject):
         if not (self.running or self.starting):
             return
         self._generation += 1
-        self._settled()
+        self._end_starting()
         worker = self.worker
         if worker is not None:
             worker.stop()
             worker.wait(3000)
-        if worker is not None or self.service is not None:
+        if worker is not None:  # the service comes and goes with it
             self.last_stats = self.stats_text()  # the session's numbers, before they are let go
         self._release()
         self.running_changed.emit(False)
@@ -714,3 +711,9 @@ class OverlayController(QObject):
                 f"{totals['cache_write']} cache write over {calls} calls{cost_text}"
             )
         return "\n".join(parts)
+
+
+def _spread(values: Iterable[float]) -> str:
+    """Median, low and high of a set of timings, for stats_text."""
+    ordered = sorted(values)
+    return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
