@@ -72,10 +72,11 @@ CHAT_PALETTE: tuple[RGB, ...] = (
     (255, 178, 120),  # peach
 )
 CHAT_CARD_RGB = (12, 12, 16)
-CHAT_BORDER_COLOR = QColor(255, 255, 255, 28)  # a hairline that lifts the card off a dark scene
+CHAT_BORDER_ALPHA = 28  # of a white hairline that lifts the card off a dark scene, at full card opacity
 CHAT_CORNERS = ("bottom-left", "bottom-right", "top-left", "top-right")
 _CHAT_FADE_STEP = 0.3  # opacity each older line loses on the newest
 _CHAT_FADE_FLOOR = 0.4
+_CHAT_SHADOW_BELOW = 128  # a card fainter than this no longer carries its text: the text gets a shadow
 
 
 @dataclass(slots=True)
@@ -146,8 +147,9 @@ Drawable = RenderBlock | ChatCard
 @dataclass(slots=True)
 class ChatEntry:
     """One line of the card as laid out: the name's rectangle (empty without a
-    speaker), the words' rectangle with the rows they wrap to, and how
-    bright the line is (1 for the newest)."""
+    speaker; a row of its own when the name is wide), the words' rectangle
+    with the rows they wrap to, and how bright the line is (1 for the
+    newest)."""
 
     line: ChatLine
     name: QRect
@@ -185,20 +187,24 @@ def _is_subtitle(block: RenderBlock) -> bool:
     return not block.outline and bool(block.lines) and block.style == "subtitle" and block.zone is not None
 
 
+def chat_room(card: ChatCard, margin: int) -> tuple[int, int]:
+    """The top and bottom edges a card may span: `margin` in from the area's
+    edges, and above the zone when it lies in the lower half of the area
+    (the subtitle strip), so the card never covers the game's own lines."""
+    _, ay0, _, ay1 = card.area
+    bottom = ay1 - margin
+    if card.zone is not None and card.zone[1] > (ay0 + ay1) / 2:
+        bottom = card.zone[1] - margin // 2
+    return ay0 + margin, bottom
+
+
 def chat_card_rect(card: ChatCard, width: int, height: int, margin: int) -> QRect:
-    """Where a card `width` x `height` goes: `margin` in from the corner's
-    edges; at a bottom corner above the zone when the zone lies in the lower
-    half of the area (the subtitle strip), else at the area's bottom. A card
-    taller than the room keeps its top edge in view."""
-    ax0, ay0, ax1, ay1 = card.area
+    """Where a card `width` x `height` goes: in its corner of the room (see
+    chat_room). A card taller than the room keeps its top edge in view."""
+    ax0, _, ax1, _ = card.area
+    top, bottom = chat_room(card, margin)
     x = ax0 + margin if card.corner.endswith("left") else ax1 - margin - width
-    if card.corner.startswith("top"):
-        y = ay0 + margin
-    else:
-        bottom = ay1 - margin
-        if card.zone is not None and card.zone[1] > (ay0 + ay1) / 2:
-            bottom = card.zone[1] - margin // 2
-        y = max(ay0 + margin, bottom - height)
+    y = top if card.corner.startswith("top") else max(top, bottom - height)
     return QRect(x, y, width, height)
 
 
@@ -375,37 +381,46 @@ class BlockPainter:
 
     def place_chat(self, card: ChatCard) -> ChatPlacement:
         """Lay the card out: each line a row of the speaker's name and the
-        words wrapped beside it, stacked oldest first, padded and placed in
-        the corner."""
+        words wrapped beside it (under it, when the name takes more than
+        half the width), stacked oldest first, padded and placed in the
+        corner. The oldest lines go when the card would not fit the room."""
         px = card.font_px
         line_h = px * self.spacing_ratio(card.weight)
         pad, gap, radius, margin = round(px * 0.55), round(px * 0.3), round(px * 0.4), px
         ax0, _, ax1, _ = card.area
-        width = min(ax1 - ax0 - 2 * margin, max(8 * px, round((ax1 - ax0) * card.width)))
+        width = min(ax1 - ax0 - 2 * margin, max(5 * px, round((ax1 - ax0) * card.width)))
         inner = width - 2 * pad
         measure = self.measurer(card.weight)
         names = self.metrics_at(px, "bold")
-        laid: list[tuple[ChatLine, int, list[str]]] = []
+        laid: list[tuple[ChatLine, int, list[str]]] = []  # (line, the name's width or 0 for a row of its own, rows)
         for line in card.lines:
             name_w = names.horizontalAdvance(line.speaker + ":") + round(px * 0.3) if line.speaker else 0
-            rows = wrap_words(line.text, max(px, inner - name_w), lambda s: measure(s, px))
+            if name_w > inner // 2:
+                name_w = 0
+            rows = wrap_words(line.text, inner - name_w, lambda s: measure(s, px))
             laid.append((line, name_w, rows))
-        height = 2 * pad + sum(len(rows) * line_h for _, _, rows in laid) + gap * max(0, len(laid) - 1)
-        rect = chat_card_rect(card, width, int(height) + 1, margin)
+
+        def rows_of(entry: tuple[ChatLine, int, list[str]]) -> int:
+            line, name_w, rows = entry
+            return len(rows) + (1 if line.speaker and not name_w else 0)
+
+        def height_of(entries: list[tuple[ChatLine, int, list[str]]]) -> int:
+            return int(2 * pad + sum(rows_of(e) for e in entries) * line_h + gap * max(0, len(entries) - 1)) + 1
+
+        room_top, room_bottom = chat_room(card, margin)
+        while len(laid) > 1 and height_of(laid) > room_bottom - room_top:
+            del laid[0]  # the oldest line goes first; the newest is never dropped
+        rect = chat_card_rect(card, width, height_of(laid), margin)
         entries: list[ChatEntry] = []
         top = float(rect.top() + pad)
         for i, (line, name_w, rows) in enumerate(laid):  # oldest at the top, the newest last and brightest
             x, y = rect.left() + pad, int(top)
-            entries.append(
-                ChatEntry(
-                    line,
-                    QRect(x, y, name_w, int(line_h) + 1) if name_w else QRect(),
-                    QRect(x + name_w, y, inner - name_w, int(len(rows) * line_h) + 1),
-                    rows,
-                    chat_opacity(len(laid) - 1 - i),
-                )
-            )
-            top += len(rows) * line_h + gap
+            own_row = bool(line.speaker) and not name_w
+            name = QRect(x, y, inner if own_row else name_w, int(line_h) + 1) if line.speaker else QRect()
+            text_y = y + int(line_h) if own_row else y
+            text = QRect(x + name_w, text_y, inner - name_w, int(len(rows) * line_h) + 1)
+            entries.append(ChatEntry(line, name, text, rows, chat_opacity(len(laid) - 1 - i)))
+            top += rows_of((line, name_w, rows)) * line_h + gap
         return ChatPlacement(rect, entries, line_h, radius)
 
     def place_subtitles(self, blocks: list[RenderBlock]) -> dict[int, SubtitlePlacement]:
@@ -541,27 +556,22 @@ class BlockPainter:
         p.setBrush(QColor(*CHAT_CARD_RGB, alpha))
         p.drawRoundedRect(placed.card, placed.radius, placed.radius)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(CHAT_BORDER_COLOR, 1))
-        p.drawRoundedRect(placed.card.adjusted(0, 0, -1, -1), placed.radius, placed.radius)
+        p.setPen(QPen(QColor(255, 255, 255, CHAT_BORDER_ALPHA * alpha // 255), 1))
+        p.drawRoundedRect(QRectF(placed.card).adjusted(0.5, 0.5, -0.5, -0.5), placed.radius, placed.radius)  # crisp
         name_font = self.font_at(card.font_px, "bold")
         text_font = self.font_at(card.font_px, card.weight)
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        decoration = "shadow" if alpha < _CHAT_SHADOW_BELOW else "none"  # a faint card needs the text to carry itself
         for entry in placed.entries:
             if entry.line.speaker:
                 color = QColor(*CHAT_PALETTE[entry.line.speaker_index % len(CHAT_PALETTE)])
                 color.setAlphaF(entry.opacity)
-                p.setFont(name_font)
-                p.setPen(color)
-                p.drawText(entry.name, flags, entry.line.speaker + ":")
+                self._draw_lines(
+                    p, [entry.line.speaker + ":"], entry.name, placed.line_height, color, decoration, name_font, flags
+                )
             color = QColor(*card.fg)
             color.setAlphaF(entry.opacity)
-            p.setFont(text_font)
-            p.setPen(color)
-            top = float(entry.text.top())
-            for row in entry.rows:
-                rect = QRect(entry.text.left(), int(top), entry.text.width(), int(placed.line_height) + 1)
-                p.drawText(rect, flags, row)
-                top += placed.line_height
+            self._draw_lines(p, entry.rows, entry.text, placed.line_height, color, decoration, text_font, flags)
 
     def _draw_lines(
         self,
@@ -572,12 +582,12 @@ class BlockPainter:
         fg: QColor,
         decoration: str,
         font: QFont,
+        flags: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter,
     ) -> None:
-        """Draw `lines` in `font` top to bottom, each centred in a row
-        `line_h` tall, with an outline, a drop shadow or nothing behind the
-        text."""
+        """Draw `lines` in `font` top to bottom, each in a row `line_h` tall
+        (centred, unless `flags` say otherwise), with an outline, a drop
+        shadow or nothing behind the text."""
         p.setFont(font)
-        flags = Qt.AlignmentFlag.AlignCenter
         top = float(area.top())
         for line in lines:
             rect = QRect(area.left(), int(top), area.width(), int(line_h) + 1)

@@ -52,7 +52,10 @@ Rectangle {
     }
 
     Rectangle {
-        anchors.right: parent.right
+        // Out of the chat card's way: the tag moves left when the card takes the top-right corner.
+        readonly property bool cardHere: root.chat && String(backend.settings.chat_corner) === "top-right"
+        anchors.right: cardHere ? undefined : parent.right
+        anchors.left: cardHere ? parent.left : undefined
         anchors.top: parent.top
         anchors.margins: 10
         width: previewTag.implicitWidth + 16

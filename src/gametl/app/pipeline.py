@@ -131,7 +131,8 @@ class PipelineThread(QThread):
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
         self._held: dict[tuple[int, str], tuple[int, int]] = {}  # (block id, text) -> (font px, anchor y) while shown
         self._transcript = Transcript(self.cfg.chat_lines, self.cfg.chat_seconds)  # chat mode's lines
-        self._chat_px = 32  # the card's font size: the zone's learned size, from the last line fed to the card
+        self._chat_px = 32  # the card's font size: the zone's learned size when its first line went up, then held
+        self._last_area: Box | None = None  # the area of the last frame, for the card between frames
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
         self._resize_reported: tuple[int, int] | None = None  # the frame size `resized` was last emitted for
@@ -177,6 +178,7 @@ class PipelineThread(QThread):
                         if cap.closed:
                             self.status.emit("capture closed: target window gone")
                             break
+                        self._idle()
                         continue
                     if self._reset:
                         self._reset = False
@@ -194,8 +196,17 @@ class PipelineThread(QThread):
             self.status.emit(f"pipeline error: {type(exc).__name__}: {exc}")
             raise
 
+    def _idle(self) -> None:
+        """No new frame (the game stopped redrawing): chat mode's lines still
+        age, and the card follows."""
+        if self.cfg.render != "chat" or self.paused or self._last_area is None:
+            return
+        if self._transcript.prune(time.monotonic()):
+            self.blocks_ready.emit(self._chat_card([], self._last_area))
+
     def _forget_blocks(self, reset_style: bool) -> None:
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
+        self._transcript.forget_blocks()
         self._held.clear()
         self._last_thumb = None
         if reset_style:
@@ -277,11 +288,25 @@ class PipelineThread(QThread):
 
     def _settled(self) -> bool:
         """No tracked block is waiting for another sighting."""
-        cfg = self.cfg
         return all(
-            b.pending_text is None and b.stable_frames >= cfg.stable_frames and b.missing_frames == 0
+            b.pending_text is None and b.stable_frames >= self._needed(b) and b.missing_frames == 0
             for b in self._tracker.blocks
         )
+
+    def _needed(self, block: TextBlock) -> int:
+        """Confirming sightings before the block's words are translated: a
+        fragment of a few letters rarely survives a second look, so it needs
+        more than a whole line."""
+        needed = self.cfg.stable_frames
+        if letter_count(self._spoken(block)[1]) < self.cfg.short_text_letters:
+            needed = max(needed, self.cfg.short_text_frames)
+        return needed
+
+    def _spoken(self, block: TextBlock) -> tuple[str, str]:
+        """(speaker, words) of a block: the name a game prints before a line
+        is split off in the zone modes, where the lines are subtitles; in
+        place every block counts, labels included, and is translated whole."""
+        return ("", block.text) if self.cfg.render == "inplace" else split_speaker(block.text)
 
     def track_frame(self, frame: Frame) -> tuple[list[TextBlock], list[TextLine]]:
         """OCR the frame and fold the lines into the tracked blocks. Returns
@@ -298,27 +323,34 @@ class PipelineThread(QThread):
         self._translate_ready(blocks, frame)
         live = {(b.id, b.text) for b in blocks}
         self._held = {key: held for key, held in self._held.items() if key in live}
-        area = self._area(frame)
+        area = self._last_area = self._area(frame)
         if self.cfg.render == "chat":
             return self._chat_card(blocks, area)
         return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
 
     def _chat_card(self, blocks: list[TextBlock], area: Box) -> list[Drawable]:
         """Chat mode: every subtitle block with a translation is fed to the
-        transcript, and the card shows what it holds; with hide_source the
-        live source lines are covered too."""
+        transcript, and the card shows what it holds; with hide_source every
+        live subtitle line is covered, translated or not yet."""
         cfg = self.cfg
         now = time.monotonic()
         covers: list[Box] = []
         for block in blocks:
-            if block.translation is None or not self.is_subtitle(block):
+            if not self.is_subtitle(block):
                 continue
-            speaker, spoken = split_speaker(block.text)
-            self._transcript.observe(block.id, speaker, spoken, block.translation, now)
-            learned = self.style_memory.font_px(block.bbox, max(1, len(block.line_texts)))
-            self._chat_px = cfg.subtitle_font_px or self.zone_style.font_px(learned)
             if cfg.subtitle_hide_source:
                 covers.append(block.bbox)
+            if block.translation is None:
+                continue
+            if cfg.subtitle_font_px:
+                self._chat_px = cfg.subtitle_font_px
+            elif not self._transcript:
+                # The first line up sets the card's size, held until the card empties: the zone's
+                # running median must not re-lay the card out every frame while it learns.
+                learned = self.style_memory.font_px(block.bbox, max(1, len(block.line_texts)))
+                self._chat_px = self.zone_style.font_px(learned)
+            speaker, spoken = self._spoken(block)
+            self._transcript.observe(block.id, speaker, spoken, block.translation, now)
         self._transcript.prune(now)
         if not self._transcript and not covers:
             return []
@@ -402,10 +434,8 @@ class PipelineThread(QThread):
             if not self.is_subtitle(block):
                 continue
             # Only the words are translated and cached; the speaker's name goes along as a hint.
-            speaker, spoken = split_speaker(block.text)
-            needed = self.cfg.stable_frames
-            if letter_count(spoken) < self.cfg.short_text_letters:
-                needed = max(needed, self.cfg.short_text_frames)  # a fragment rarely survives a second look
+            speaker, spoken = self._spoken(block)
+            needed = self._needed(block)
             if block.stable_frames < needed:
                 if block.stable_frames >= needed - 1 and block.translation is None:
                     misses.append((spoken, speaker))
@@ -472,7 +502,7 @@ class PipelineThread(QThread):
         n_lines = max(1, len(block.line_texts))
         memory = self.style_memory
         lines = block.translation.split("\n")
-        speaker, _ = split_speaker(block.text)
+        speaker, _ = self._spoken(block)
         if speaker:
             lines[0] = f"{speaker}: {lines[0]}"  # the name stays in front, as the game printed it
         # Lines that appear in the same place share one size, colour and style.

@@ -20,7 +20,7 @@ import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from gametl.app.config import ProfileStore, Settings, slug
+from gametl.app.config import CHAT_WIDTH_RANGE, ProfileStore, Settings, slug
 
 if TYPE_CHECKING:  # imported where it runs: Qt loads only when a window or an overlay is wanted
     from gametl.app.controller import OverlayController
@@ -95,10 +95,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--chat-seconds",
         type=int,
         metavar="S",
-        help=f"chat: a line leaves this long after it was said; 0 = never (default {Settings.chat_seconds})",
+        help=f"chat: a line leaves this long after it was last on screen; 0 = never (default {Settings.chat_seconds})",
     )
-    look.add_argument("--chat-corner", choices=["bottom-left", "bottom-right", "top-left", "top-right"])
-    look.add_argument("--chat-width", type=int, metavar="%", help=f"chat: card width (default {Settings.chat_width})")
+    look.add_argument(
+        "--chat-corner",
+        choices=["bottom-left", "bottom-right", "top-left", "top-right"],
+        help=f"chat: the card's corner; a bottom corner sits above the area read (default {Settings.chat_corner})",
+    )
+    look.add_argument(
+        "--chat-width",
+        type=int,
+        metavar="%",
+        help=f"chat: card width, {CHAT_WIDTH_RANGE[0]}-{CHAT_WIDTH_RANGE[1]} (default {Settings.chat_width})",
+    )
     look.add_argument(
         "--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size"
     )

@@ -113,8 +113,9 @@ def main() -> int:
                 view.resize(width, max(height, int(view.rootObject().property("fullHeight"))))
                 settle()
             suffix = ""
-            if page == "appearance":
-                suffix = "".join(f"-{v}" for v in (args.background, args.render) if v not in ("pill", "subtitle"))
+            if page == "appearance":  # the background is only seen in subtitle mode
+                shown = (args.render,) if args.render == "chat" else (args.background, args.render)
+                suffix = "".join(f"-{v}" for v in shown if v not in ("pill", "subtitle"))
             if not save(view, page + suffix):
                 return 2
         if args.profiles:

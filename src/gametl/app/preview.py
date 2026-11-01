@@ -15,8 +15,8 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtQuick import QQuickImageProvider
 
-from ..overlay.paint import BlockPainter, ChatCard, ChatLine, Drawable, RenderBlock
-from .config import Settings
+from ..overlay.paint import CHAT_CORNERS, BlockPainter, ChatCard, ChatLine, Drawable, RenderBlock
+from .config import Settings, chat_width_share
 from .controller import parse_color
 from .settings_backend import SettingsBackend
 
@@ -78,8 +78,8 @@ def preview_blocks(settings: Settings, width: int, height: int, painter: BlockPa
             area=(0, 0, width, height),
             lines=[ChatLine(name, text, speakers[name]) for name, text in shown],
             zone=zone,
-            corner=settings.chat_corner,
-            width=max(10, min(100, int(settings.chat_width))) / 100,
+            corner=settings.chat_corner if settings.chat_corner in CHAT_CORNERS else CHAT_CORNERS[0],
+            width=chat_width_share(settings.chat_width),
             font_px=font_px,
             fg=colour or (255, 255, 255),
             weight=settings.subtitle_weight,

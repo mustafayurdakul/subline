@@ -33,6 +33,7 @@ DEFAULT_HOTKEYS: dict[str, str] = {
 NO_LETTERS_PATTERN = r"^[\W\d_]*$"
 
 BOTTOM_STRIP = "0,0.75,1,0.25"  # the area most games' subtitles fall in: the bottom quarter
+CHAT_WIDTH_RANGE = (20, 70)  # % of the window the chat card may take (the Appearance page's slider agrees)
 
 
 REMOVED_FONTS = ("Source Sans 3", "Fira Sans", "Barlow Semi Condensed")  # bundled in 0.1.6 and 0.1.7
@@ -145,6 +146,15 @@ class Settings:
     @property
     def effective_source_lang(self) -> str:
         return self.source_lang or self.lang
+
+
+def chat_width_share(percent: Any) -> float:
+    """The chat card's width as a share of the window, from the setting in per cent, kept to CHAT_WIDTH_RANGE."""
+    try:
+        value = int(percent)
+    except (TypeError, ValueError):
+        value = Settings.chat_width
+    return max(CHAT_WIDTH_RANGE[0], min(CHAT_WIDTH_RANGE[1], value)) / 100
 
 
 def slug(text: str) -> str:

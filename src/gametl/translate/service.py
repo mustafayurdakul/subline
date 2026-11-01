@@ -24,6 +24,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
+from ..textutil import normalize_text
 from .base import TranslationRequest, Translator
 from .cache import TranslationCache, numeric_template
 
@@ -40,6 +41,12 @@ class BatchResult:
 def _said_by(speaker: str, text: str) -> str:
     """A line as the context shows it: with its speaker in front, when one was named."""
     return f"{speaker}: {text}" if speaker else text
+
+
+def _said(speakers: dict[str, str], texts: list[str]) -> list[str] | None:
+    """Who says each of `texts` (by normalised text), or None when nobody is named."""
+    said = [speakers.get(normalize_text(text), "") for text in texts]
+    return said if any(said) else None
 
 
 def _unexpired(until: dict[str, float], now: float) -> dict[str, float]:
@@ -137,7 +144,7 @@ class TranslationService:
         # carries its speaker ("Casey: Go.") so the translator sees who said what; the texts sent
         # never do (see `speakers` in submit).
         self._context: OrderedDict[str, tuple[str, str]] = OrderedDict()
-        self._speakers: dict[str, str] = {}  # key -> who says it, for the texts in flight
+        self._speakers: dict[str, str] = {}  # key -> who says it, for the texts a final request carries
         self._arrived: set[str] = set()  # keys whose final answer just came in: their next lookup is no cache hit
         self._futures: list[Future[BatchResult]] = []
         self.stats = {"requests": 0, "items": 0, "translated": 0, "errors": 0, "cache_hits": 0, "drafts": 0}
@@ -181,11 +188,11 @@ class TranslationService:
         started."""
         todo: dict[str, str] = {}  # key -> text: each text once
         said: dict[str, str] = {}  # key -> speaker, where one is named
-        for i, text in enumerate(texts):
+        for text, speaker in zip(texts, speakers or [""] * len(texts), strict=True):
             key = self.cache.key(text)
             todo.setdefault(key, text)
-            if speakers and speakers[i]:
-                said[key] = speakers[i]
+            if speaker:
+                said[key] = speaker
         todo.pop("", None)
         # What the cache answers (exactly, by number swap or fuzzily) lookup()
         # shows at once; a request would only spend characters, delay the line
@@ -196,7 +203,6 @@ class TranslationService:
         batch: list[str] = []
         draft_batch: list[str] = []
         with self._lock:
-            self._speakers.update(said)
             # Cooldowns that have passed are of no further use.
             self._failed_until = _unexpired(self._failed_until, now)
             self._draft_failed_until = _unexpired(self._draft_failed_until, now)
@@ -216,20 +222,17 @@ class TranslationService:
                 if numbers:
                     self._inflight_templates.add(template)
                 batch.append(text)
+                if key in said:
+                    self._speakers[key] = said[key]  # until the answer is in and remembered with its name
             # One request per tier. The draft goes without context: speed over consistency.
             if draft_batch:
-                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, [], self._said(draft_batch)))
+                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, [], _said(said, draft_batch)))
             if batch:
                 self.stats["requests"] += 1
                 self.stats["items"] += len(batch)
                 context = list(self._context.values())
-                self._futures.append(self._pool.submit(self._run, "final", batch, context, self._said(batch)))
+                self._futures.append(self._pool.submit(self._run, "final", batch, context, _said(said, batch)))
         return bool(draft_batch or batch)
-
-    def _said(self, texts: list[str]) -> list[str] | None:
-        """Who says each of `texts`, or None when nobody is named. Call with the lock held."""
-        speakers = [self._speakers.get(self.cache.key(text), "") for text in texts]
-        return speakers if any(speakers) else None
 
     def _final_due(self, key: str, now: float) -> bool:
         """Whether a final request for `key` may start now. Call with the lock held."""

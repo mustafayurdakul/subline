@@ -45,7 +45,8 @@ _SYSTEM_RULES = "\n".join(
         "(N lines in, N out), and keep numbers, units, symbols, placeholders and proper names unless the glossary "
         "says otherwise.",
         "Items may contain OCR errors (l/1, O/0, spacing): translate the intended text.",
-        '"context" holds recent lines with their translations, oldest first; use it only for consistency.',
+        '"context" holds recent lines with their translations, oldest first; use it only for consistency. '
+        'A "Name: " in front of a context line is its speaker, not part of the text.',
         '"speakers", when present, names who says each item (same order, "" = unknown): translate the item only, '
         "never the name, and let the speaker guide register and pronouns.",
         "Reply with JSON only, no notes.",

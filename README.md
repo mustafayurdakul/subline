@@ -292,21 +292,28 @@ Most settings have a command-line equivalent (the hotkeys do not);
   original line** covers the game's own text when the translation is drawn
   elsewhere; off by default.
 - **Chat mode** (Appearance page, **Render** `chat`): the card shows the
-  last **Lines kept** (default 4) lines of dialogue, oldest first, each
-  with its speaker's name in a fixed colour; a line leaves **Clear after**
-  seconds (default 20; 0 keeps it) after it was said, so the card is gone
-  between conversations. The card takes **Card width** (default 38 %) of
-  the game window in its **Corner** (default bottom left); at a bottom
-  corner it sits above the area read, so it never covers the game's own
-  subtitles, which **Hide the original line** can cover as in subtitle
-  mode. The text is the subtitle size, font and weight, white unless a
-  colour is set, on a card of the pill's opacity. Turn speaker names on in
-  the game: a capitalised name before a colon ("Casey: ...") is taken as
-  the speaker in every mode, kept as it is while the words alone are
-  translated and cached, and passed to DeepL (in its context) and Claude
-  (beside the items) as a hint for register and pronouns. A line that
-  grows (a typewriter reveal) or is read differently by OCR replaces its
-  earlier version; the next line at the same spot is a new entry.
+  last **Lines kept** (`--chat-lines`, default 4) lines of dialogue,
+  oldest first, each with its speaker's name in a fixed colour; a line
+  leaves **Clear after** seconds (`--chat-seconds`, default 20; 0 keeps
+  it) after it was last on screen, so the card is gone between
+  conversations and a line the game leaves up stays. The card takes
+  **Card width** (`--chat-width`, default 38 %, 20-70) of the game window
+  in its **Corner** (`--chat-corner`, default `bottom-left`); a bottom
+  corner sits above the area read when that is the lower part of the
+  window, clear of the game's own subtitles, which **Hide the original
+  line** can cover as in subtitle mode; the oldest lines are dropped when
+  the card would not fit. The text is the subtitle size (held from the
+  first line up), font and weight, white unless a colour is set, on a card
+  of the pill's opacity. Turn speaker names on in the game: a capitalised
+  name before a colon ("Casey: ...") is taken as the speaker in subtitle
+  and chat mode (not in place, where labels such as "Objective:" count and
+  are translated whole; a few common English lead-ins are never taken as
+  names), kept as it is while the words alone are translated and cached,
+  and passed to DeepL (in its context, with the lines being translated)
+  and Claude (beside the items) as a hint for register and pronouns. A
+  line that grows (a typewriter reveal) or is read differently by OCR
+  replaces its earlier version; the next line at the same spot, or the
+  same words from another speaker, is a new entry.
 - **Font and Weight** (Appearance page): any font installed on the
   computer (default Segoe UI) and a weight from Regular to Bold (default
   SemiBold). The preview on the page is painted by the overlay's own

@@ -148,9 +148,61 @@ def test_chat_mode_keeps_a_transcript_with_the_speakers() -> None:
         thread.update_config(replace(thread.cfg, subtitle_hide_source=True))
         (card,) = thread._process(frame())
         assert card.covers == [(300, 620, 700, 660)]  # the live source line is hidden under a band
-        thread.update_config(replace(thread.cfg, subtitle_hide_source=False, chat_seconds=0.001))
-        time.sleep(0.01)
-        assert thread._process(frame()) == []  # every line aged out: nothing is drawn
+        thread.update_config(replace(thread.cfg, subtitle_hide_source=False, chat_seconds=0.01))
+        time.sleep(0.02)
+        (card,) = thread._process(frame())
+        assert [ln.text for ln in card.lines] == ["GO."]  # the line still on screen stays, however old; the other went
+        engine.lines = []
+        time.sleep(0.02)
+        assert process_until(thread, lambda r: r == []) == []  # off screen and past its time: nothing is drawn
+    finally:
+        thread.service.shutdown()
+
+
+def test_a_rescan_or_a_pause_does_not_say_a_line_twice() -> None:
+    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="chat", change_threshold=0)
+    try:
+        process_until(thread, lambda r: bool(r))
+        for _ in range(3):
+            thread._process(frame())
+        thread._forget_blocks(reset_style=True)  # what rescan, unpause and a changed area do
+        (card,) = process_until(thread, lambda r: thread._tracker.blocks and thread._tracker.blocks[0].translation)
+        assert [ln.text for ln in card.lines] == ["STAY CLOSE."]  # found again by its words, not said again
+        assert thread._transcript.utterances[0].block_id == thread._tracker.blocks[0].id  # and followed anew
+    finally:
+        thread.service.shutdown()
+
+
+def test_the_card_ages_on_a_still_screen_and_a_mode_switch_clears_it() -> None:
+    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="chat", change_threshold=0, chat_seconds=0.2)
+    emitted: list[list] = []
+    thread.blocks_ready.connect(emitted.append)
+    try:
+        process_until(thread, lambda r: bool(r))
+        engine.lines = []  # the line goes; the game then stops redrawing
+        process_until(thread, lambda r: not thread._tracker.blocks)
+        assert len(thread._transcript) == 1  # just gone: still within its time
+        time.sleep(0.25)
+        thread._idle()  # no frame arrives: the loop ticks the transcript instead
+        assert emitted[-1] == []  # the card went without a frame
+        engine.lines = [line("Casey: Stay close.", 300, 20, 700, 60)]
+        process_until(thread, lambda r: bool(r))
+        thread.update_config(replace(thread.cfg, render="subtitle"))
+        thread._process(frame())
+        assert len(thread._transcript) == 0  # another mode: the transcript starts afresh
+    finally:
+        thread.service.shutdown()
+
+
+def test_in_place_mode_translates_a_label_whole() -> None:
+    engine = FakeEngine([line("Objective: Find the key", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="inplace", change_threshold=0)
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        assert block.lines == ["OBJECTIVE: FIND THE KEY"]  # a label, not a speaker: nothing split off
+        assert thread.service.cache.get("Objective: Find the key", "tr") is not None
     finally:
         thread.service.shutdown()
 

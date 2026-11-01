@@ -198,6 +198,8 @@ def test_speakers_go_along_as_a_hint_and_name_the_context_lines() -> None:
         assert service.lookup("Go.", "Alan") == "GO."  # a cached line joins the context with its speaker
         assert list(service._context.values())[-1] == ("Alan: Go.", "GO.")
         assert service._speakers == {}  # nothing in flight keeps a name
+        service.submit(["Stay close."], ["Casey"])  # answered by the cache: no request, nothing kept
+        assert service._speakers == {}
     finally:
         service.shutdown()
 

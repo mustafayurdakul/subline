@@ -15,6 +15,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
 from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
+from ..overlay.paint import CHAT_CORNERS
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
 from ..overlay.window import OverlayWindow
 from ..tracking.filters import LineFilter
@@ -22,7 +23,7 @@ from ..translate.base import Translator
 from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
 from ..translate.service import TranslationService
-from .config import ProfileStore, Settings
+from .config import ProfileStore, Settings, chat_width_share
 from .credentials import (
     DEEPL_KEY,
     SecretStore,
@@ -119,8 +120,8 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
         subtitle_hide_source=settings.subtitle_hide_source,
         chat_lines=max(1, int(settings.chat_lines)),
         chat_seconds=max(0.0, float(settings.chat_seconds)),
-        chat_corner=settings.chat_corner,
-        chat_width=max(10, min(100, int(settings.chat_width))) / 100,
+        chat_corner=settings.chat_corner if settings.chat_corner in CHAT_CORNERS else CHAT_CORNERS[0],
+        chat_width=chat_width_share(settings.chat_width),
         subtitle_center_tolerance=max(0, settings.subtitle_center_tolerance) / 100,
         subtitle_size_tolerance=max(0, settings.subtitle_size_tolerance) / 100,
         debug=settings.debug,

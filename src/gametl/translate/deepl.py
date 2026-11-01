@@ -10,6 +10,9 @@ go to the free endpoint.
 Each request carries the recent source lines as DeepL's `context`: text it
 reads but does not translate, so a name that was a person two lines ago
 stays a person ("Hemingway", not the bird) and pronouns follow the scene.
+The lines being translated go in it too, with their speakers in front
+("Casey: ..."), when the game names them: the name never enters the text,
+but tells DeepL who is talking.
 """
 
 from __future__ import annotations
@@ -110,7 +113,8 @@ class DeepLTranslator:
         source = deepl_code(request.source_lang)
         if source:
             body["source_lang"] = source
-        context = context_text(request.context)
+        said = [(f"{s}: {t}", "") for s, t in zip(request.speakers or [], texts, strict=False) if s]
+        context = context_text([*(request.context or []), *said])
         if context:
             body["context"] = context
         try:

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..textutil import split_speaker
 from .base import TranslationRequest
 from .cache import TranslationCache
 from .claude import ClaudeTranslator
@@ -53,6 +54,32 @@ def load_lines(path: Path | str) -> list[str]:
             seen.add(cleaned.casefold())
             lines.append(cleaned)
     return lines
+
+
+def spoken(lines: list[str]) -> tuple[list[str], dict[str, str]]:
+    """The words of `lines` without their speaker names, each once, and who
+    says which (by the words). The overlay translates and caches the words
+    alone (a line "Casey: Stay close." is looked up as "Stay close."), so
+    the script must be cached the same way for its lines to be found."""
+    words: list[str] = []
+    speakers: dict[str, str] = {}
+    seen: set[str] = set()
+    for line in lines:
+        speaker, text = split_speaker(line)
+        if text.casefold() in seen:
+            continue
+        seen.add(text.casefold())
+        words.append(text)
+        if speaker:
+            speakers[text] = speaker
+    return words, speakers
+
+
+def _request(
+    chunk: list[str], speakers: dict[str, str], translator: ClaudeTranslator, target: str
+) -> TranslationRequest:
+    said = [speakers.get(text, "") for text in chunk]
+    return TranslationRequest(chunk, translator.source_lang, target, speakers=said if any(said) else None)
 
 
 def _load_srt(text: str) -> list[str]:
@@ -120,12 +147,13 @@ def pretranslate_sync(
 ) -> int:
     """Translate `lines` not yet in `cache` through the normal API. Returns
     the number of lines added."""
-    todo = uncached(lines, cache, target_lang)
+    words, speakers = spoken(lines)
+    todo = uncached(words, cache, target_lang)
     say(f"{len(lines)} lines, {len(todo)} to translate")
     added = 0
     chunks = chunked(todo, chunk_size)
     for i, chunk in enumerate(chunks):
-        results = translator.translate(TranslationRequest(chunk, translator.source_lang, target_lang))
+        results = translator.translate(_request(chunk, speakers, translator, target_lang))
         for source, translated in zip(chunk, results, strict=True):
             if translated:
                 cache.put(source, target_lang, translated)
@@ -157,7 +185,11 @@ class BatchJob:
 
 
 def build_batch_requests(
-    lines: list[str], translator: ClaudeTranslator, target_lang: str, chunk_size: int = 20
+    lines: list[str],
+    translator: ClaudeTranslator,
+    target_lang: str,
+    chunk_size: int = 20,
+    speakers: dict[str, str] | None = None,
 ) -> tuple[list[dict], dict[str, list[str]]]:
     """Batches API request dicts (plain-JSON reply mode) and the chunk map."""
     requests: list[dict] = []
@@ -165,7 +197,7 @@ def build_batch_requests(
     for i, chunk in enumerate(chunked(lines, chunk_size)):
         custom_id = f"chunk-{i:05d}"
         chunks[custom_id] = chunk
-        request = TranslationRequest(chunk, translator.source_lang, target_lang)
+        request = _request(chunk, speakers or {}, translator, target_lang)
         requests.append({"custom_id": custom_id, "params": translator.request_params(request)})
     return requests, chunks
 
@@ -184,10 +216,11 @@ def submit_batch(
     Credential Manager is used) unless another `client` is given."""
     if translator.structured:
         raise ValueError("batch pre-translation needs the plain-JSON reply mode (structured=False)")
-    todo = uncached(lines, cache, target_lang)
+    words, speakers = spoken(lines)
+    todo = uncached(words, cache, target_lang)
     if not todo:
         return None
-    requests, chunks = build_batch_requests(todo, translator, target_lang, chunk_size)
+    requests, chunks = build_batch_requests(todo, translator, target_lang, chunk_size, speakers)
     if client is None:
         client = translator.client
     batch = client.messages.batches.create(requests=requests)

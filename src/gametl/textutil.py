@@ -9,9 +9,43 @@ _WS = re.compile(r"\s+")
 _DIGITS = re.compile(r"\d+")
 # A speaker name in front of a line, as games print it with speaker names on:
 # one or two capitalised or upper-case words (Casey, Dr. Darling, SAGA
-# ANDERSON) and a colon, then the words spoken. Never a lower-case word: "Note:
+# ANDERSON) and a colon, then the words spoken. Never a lower-case word: "note:
 # the door is locked" is a sentence, not a speaker.
 _SPEAKER = re.compile(r"^\s*((?:[A-Z][A-Za-z'’.\-]*)(?: (?:[A-Z][A-Za-z'’.\-]*))?)\s*[:：]\s+(\S.*)$", re.DOTALL)
+# Capitalised words a game writes before a colon that name no one: HUD and
+# tutorial lead-ins, which stay in the text and are translated with it.
+_LEAD_INS = frozenset(
+    [
+        "note",
+        "notes",
+        "warning",
+        "caution",
+        "objective",
+        "objectives",
+        "mission",
+        "quest",
+        "task",
+        "goal",
+        "hint",
+        "tip",
+        "tips",
+        "press",
+        "hold",
+        "remember",
+        "new",
+        "chapter",
+        "part",
+        "level",
+        "act",
+        "day",
+        "error",
+        "loading",
+        "tutorial",
+        "controls",
+        "reward",
+        "unlocked",
+    ]
+)
 
 
 def normalize_text(s: str) -> str:
@@ -28,7 +62,7 @@ def split_speaker(text: str) -> tuple[str, str]:
     or ("", text) when no speaker is named. A line break after the name
     counts as the space ("CASEY:\nGo." reads "CASEY: Go.")."""
     match = _SPEAKER.match(text)
-    if match is None:
+    if match is None or match.group(1).split()[0].casefold() in _LEAD_INS:
         return "", text
     return match.group(1), match.group(2)
 

@@ -27,13 +27,13 @@ ColumnLayout {
         SettingRow {
             visible: root.chat
             label: "Clear after"
-            helper: "A line leaves the card this long after it was said, so the screen is clear between conversations."
+            helper: "A line leaves the card this long after it was last on screen, so the screen is clear between conversations."
             Stepper { key: "chat_seconds"; from: 0; to: 120; step: 5; suffix: " s"; specialText: "never" }
         }
         SettingRow {
             visible: root.chat
             label: "Corner"
-            helper: "At the bottom, the card sits above the area read, so it never covers the game's own subtitles."
+            helper: "A bottom corner sits above the area read when that is the lower part of the window, clear of the game's own subtitles."
             Segmented { key: "chat_corner"; options: ["Bottom left", "Bottom right", "Top left", "Top right"]; values: ["bottom-left", "bottom-right", "top-left", "top-right"] }
         }
         SettingRow {

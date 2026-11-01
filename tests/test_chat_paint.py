@@ -101,6 +101,35 @@ def test_long_lines_wrap_to_the_card(painter: BlockPainter) -> None:
     assert placed.card.height() > painter.place_chat(card([("Alan", "Short.")])).card.height()
 
 
+def test_a_wide_name_takes_a_row_of_its_own(painter: BlockPainter) -> None:
+    placed = painter.place_chat(card([("Commander Shepard Vakarian", "We should go now.")], width=0.3))
+    (entry,) = placed.entries
+    assert entry.name.width() == entry.text.width() > 0  # the name spans the card, the words start under it
+    assert entry.text.top() >= entry.name.top() + int(placed.line_height)
+    assert entry.text.right() <= placed.card.right() and entry.name.right() <= placed.card.right()
+    assert placed.card.bottom() >= entry.text.bottom()
+
+
+def test_the_oldest_lines_go_when_the_card_would_not_fit(painter: BlockPainter) -> None:
+    many = [(("Alan", "Casey")[i % 2], f"Line number {i} of a long conversation that goes on.") for i in range(12)]
+    placed = painter.place_chat(card(many, corner="bottom-left"))
+    assert placed.card.top() >= 20 and placed.card.bottom() < STRIP[1]  # fits between the margin and the strip
+    assert 0 < len(placed.entries) < 12
+    assert [e.line.text for e in placed.entries] == [text for _, text in many[-len(placed.entries) :]]  # newest kept
+    assert placed.entries[-1].opacity == 1.0
+
+
+def test_a_faint_card_loses_its_border_and_shadows_its_text(painter: BlockPainter) -> None:
+    full = paint_rgba(painter, card(SAMPLE, alpha=255))
+    faint = paint_rgba(painter, card(SAMPLE, alpha=0))
+    rect = painter.place_chat(card(SAMPLE)).card
+    assert full[rect.top(), rect.center().x(), 3] > 0  # the hairline on the full card
+    assert faint[rect.top(), rect.center().x(), 3] == 0  # none on the invisible one
+    assert faint[rect.center().y(), rect.center().x(), 3] == 0  # and no fill
+    text = painter.place_chat(card(SAMPLE)).entries[-1].text
+    assert faint[text.top() : text.bottom(), text.left() : text.right(), 3].max() > 0  # the text still shows
+
+
 def test_the_card_the_names_and_the_bands_are_drawn(painter: BlockPainter) -> None:
     drawn = card(SAMPLE, alpha=200, covers=[(300, 380, 500, 400)])
     placed = painter.place_chat(drawn)

@@ -1006,3 +1006,22 @@ so DeepL reads it in its context and Claude beside the items. Settings
 `chat_lines`, `chat_seconds`, `chat_corner`, `chat_width` (live-applied);
 the Appearance page's Mode card moved to the top with the chat rows; the
 preview shows the whole frame in chat mode, the card above the strip.
+
+Review of the first cut (a design panel and a six-angle review, both run
+as workflows) found and fixed: a line ages out `chat_seconds` after it
+was *last on screen*, not after it was said (otherwise a line the game
+leaves up blinked back as the newest every `chat_seconds`), and a line
+still on screen after its time is not said again (`Transcript._taken`);
+`forget_blocks()` detaches utterances from the tracker's ids on a rescan,
+pause or area change, so a line is found again by its words instead of
+doubled; `PipelineThread._idle()` ages the card when the game stops
+redrawing (no frames); the same words from another speaker are another
+line; a wide name takes a row of its own and the oldest lines go when the
+card would not fit the room above the strip; the card's font size is held
+from its first line; names are split only in the zone modes (in place,
+labels such as "Objective:" are translated whole) and a short list of
+English lead-ins is never a name; the service keeps speakers only for the
+texts a request carries; DeepL sees the lines being translated, with their
+speakers, in its context; pre-translation caches the words without the
+name, as the overlay looks them up; the width range (20-70 %) and the
+corner are validated in one place.

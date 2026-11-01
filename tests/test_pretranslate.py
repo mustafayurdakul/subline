@@ -79,11 +79,14 @@ def test_pretranslate_sync_fills_cache_and_skips_known(tmp_path: Path) -> None:
     translator = ClaudeTranslator(client=client, source_lang="en")
     cache = TranslationCache(tmp_path / "c.json")
     cache.put("Known line", "tr", "Bilinen")
-    added = pretranslate_sync(["Known line", "Stay close.", "Open the door."], translator, cache, "tr", chunk_size=1)
+    lines = ["Known line", "CASEY: Stay close.", "Open the door.", "Alan: Open the door."]
+    added = pretranslate_sync(lines, translator, cache, "tr", chunk_size=1)
     assert added == 2
     assert len(client.messages.created) == 2
-    assert cache.get("stay close.", "tr") == "STAY CLOSE."
+    assert cache.get("stay close.", "tr") == "STAY CLOSE."  # the words alone, as the overlay looks them up
     assert TranslationCache(tmp_path / "c.json").get("Open the door.", "tr") == "OPEN THE DOOR."
+    payload = json.loads(client.messages.created[0]["messages"][0]["content"])
+    assert payload == {**payload, "items": ["Stay close."], "speakers": ["CASEY"]}  # the name goes as a hint
 
 
 class StubBatches:
