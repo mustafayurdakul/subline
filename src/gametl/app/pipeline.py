@@ -1,8 +1,7 @@
 """The capture -> OCR -> track -> translate loop, on its own thread.
 
-Emits what the overlay should draw after every processed frame: render
-blocks, or in chat mode the transcript card. The UI thread never waits on
-OCR or translation.
+Emits a list of RenderBlocks for the overlay after every processed frame.
+The UI thread never waits on OCR or translation.
 """
 
 from __future__ import annotations
@@ -22,11 +21,10 @@ from ..geometry import RGB, Box
 from ..layout.colors import analyze_colors, bgr_to_rgb
 from ..layout.style import StyleMemory, ZoneStyle, line_height_of
 from ..ocr.base import OcrEngine, TextLine
-from ..overlay.paint import CHAT_GLASS_SCALE, ChatCard, ChatLine, Drawable, RenderBlock
+from ..overlay.paint import RenderBlock
 from ..textutil import letter_count, split_speaker
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
 from ..tracking.filters import LineFilter
-from ..tracking.transcript import Transcript
 from ..translate.service import TranslationService
 
 
@@ -43,8 +41,8 @@ class PipelineConfig:
     max_missing: int = 3  # frames a block survives without being seen
     style: str = "auto"  # in-place style: auto | patch | pill | outline; auto = patch unless the background is busy
     line_filter: LineFilter | None = None  # ignore zones and patterns
-    # subtitle and chat modes (need a roi): one fixed style for the zone's lines
-    render: str = "subtitle"  # "subtitle" | "chat" | "inplace"
+    # subtitle mode (needs a roi): one fixed style, centred in the zone
+    render: str = "subtitle"  # "subtitle" | "inplace"
     subtitle_font_px: int = 0  # 0 = the zone's learned line height (locked after a few lines)
     subtitle_color: RGB | None = None  # None = the game's own subtitle colour, sampled
     subtitle_background: str = "pill"  # "pill" | "shadow" | "none"
@@ -52,12 +50,6 @@ class PipelineConfig:
     subtitle_weight: str = "semibold"
     subtitle_position: str = "bottom"  # "bottom" | "source" | "center"
     subtitle_hide_source: bool = False
-    # chat mode: the transcript card (see tracking/transcript.py and overlay/paint.py)
-    chat_lines: int = 4
-    chat_seconds: float = 20.0  # 0 = lines never age out
-    chat_corner: str = "bottom-left"
-    chat_width: float = 0.38  # share of the area's width
-    chat_timestamps: bool = True
     # Which blocks in the zone are subtitles rather than HUD text: centred in the
     # zone (within a fraction of its width) and about the learned line height.
     subtitle_center_tolerance: float = 0.10  # 0 = off
@@ -95,9 +87,6 @@ def change_score(last: np.ndarray, thumb: np.ndarray) -> float:
     return float(cv2.blur(cv2.absdiff(last, thumb), (3, 3)).max())
 
 
-GLASS_EVERY = 3  # frames between refreshes of the chat card's glass: about three a second at 10 fps
-
-
 def _tracking_fields(cfg: PipelineConfig) -> tuple:
     """What decides which region is read and which lines reach the tracker;
     a change in these starts the tracking afresh. The rest (the look, the
@@ -106,7 +95,7 @@ def _tracking_fields(cfg: PipelineConfig) -> tuple:
 
 
 class PipelineThread(QThread):
-    blocks_ready = Signal(list)  # list[Drawable]
+    blocks_ready = Signal(list)  # list[RenderBlock]
     status = Signal(str)
     resized = Signal()  # the frames no longer have cfg.frame_size: the boxes need working out again
 
@@ -134,16 +123,6 @@ class PipelineThread(QThread):
         self._next_cfg: PipelineConfig | None = None  # handed over by update_config, taken up on this thread
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
         self._held: dict[tuple[int, str], tuple[int, int]] = {}  # (block id, text) -> (font px, anchor y) while shown
-        self._transcript = Transcript(self.cfg.chat_lines, self.cfg.chat_seconds)  # chat mode's lines
-        self._chat_px = 32  # the card's font size: the zone's learned size when its first line went up, then held
-        self._last_area: Box | None = None  # the area of the last frame, for the card between frames
-        self._last_frame: Frame | None = None  # the frame last processed, for a screen read
-        self._page: list[ChatLine] = []  # what a screen read put on the card, until cleared
-        # The card's glass: the frame at 1/8 and blurred, refreshed every few frames (a blur this
-        # heavy need not follow every frame, and each refresh repaints the whole overlay).
-        self._glass: np.ndarray | None = None
-        self._glass_version = 0
-        self._glass_frames = 0  # frames since the glass was last refreshed
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
         self._resize_reported: tuple[int, int] | None = None  # the frame size `resized` was last emitted for
@@ -160,30 +139,12 @@ class PipelineThread(QThread):
         The blocks are kept unless what is read or how it is tracked changed."""
         self._next_cfg = cfg
 
-    @property
-    def last_frame(self) -> Frame | None:
-        """The frame last processed (None before the first)."""
-        return self._last_frame
-
-    @property
-    def page(self) -> list[ChatLine]:
-        """What a screen read put on the card."""
-        return list(self._page)
-
-    def set_page(self, lines: list[ChatLine]) -> None:
-        """Show `lines` (a screen read's texts) on the card under the
-        transcript, in every mode, until cleared with an empty list."""
-        self._page = list(lines)
-
     def _adopt_config(self) -> None:
         cfg, self._next_cfg = self._next_cfg, None
         if cfg is None:
             return
         old, self.cfg = self.cfg, cfg
         self._tracker.max_missing = cfg.max_missing
-        self._transcript.lines, self._transcript.seconds = cfg.chat_lines, cfg.chat_seconds
-        if cfg.render != old.render:
-            self._transcript.clear()  # chat mode starts with what is said from now on
         if cfg.subtitle_font_px != old.subtitle_font_px:
             self._held.clear()  # a shown line's held size came from the old setting
         if _tracking_fields(cfg) != _tracking_fields(old):
@@ -204,7 +165,6 @@ class PipelineThread(QThread):
                         if cap.closed:
                             self.status.emit("capture closed: target window gone")
                             break
-                        self._idle()
                         continue
                     if self._reset:
                         self._reset = False
@@ -222,17 +182,8 @@ class PipelineThread(QThread):
             self.status.emit(f"pipeline error: {type(exc).__name__}: {exc}")
             raise
 
-    def _idle(self) -> None:
-        """No new frame (the game stopped redrawing): chat mode's lines still
-        age, and the card follows."""
-        if self.cfg.render != "chat" or self.paused or self._last_area is None:
-            return
-        if self._transcript.prune(time.monotonic()):
-            self.blocks_ready.emit(self._chat_card([], self._last_area))
-
     def _forget_blocks(self, reset_style: bool) -> None:
         self._tracker = BlockTracker(max_missing=self.cfg.max_missing)
-        self._transcript.forget_blocks()
         self._held.clear()
         self._last_thumb = None
         if reset_style:
@@ -240,12 +191,11 @@ class PipelineThread(QThread):
             self.zone_style = ZoneStyle()
         self.blocks_ready.emit([])
 
-    def _process(self, frame: Frame) -> list[Drawable]:
+    def _process(self, frame: Frame) -> list[RenderBlock]:
         """One frame: OCR and tracking (unless the frame is unchanged), then
         translations and what to draw."""
         self._adopt_config()
         self._check_size(frame)
-        self._last_frame = frame
         cfg = self.cfg
         if self.unchanged(frame):
             self.skipped += 1
@@ -263,7 +213,7 @@ class PipelineThread(QThread):
                 )
             if cfg.dump_dir:
                 self._dump(frame, lines, blocks)
-        render: list[Drawable] = self.render_blocks(blocks, frame)
+        render = self.render_blocks(blocks, frame)
         if cfg.debug:
             render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
         return render
@@ -331,7 +281,7 @@ class PipelineThread(QThread):
 
     def _spoken(self, block: TextBlock) -> tuple[str, str]:
         """(speaker, words) of a block: the name a game prints before a line
-        is split off in the zone modes, where the lines are subtitles; in
+        is split off in subtitle mode, where the lines are subtitles; in
         place every block counts, labels included, and is translated whole."""
         return ("", block.text) if self.cfg.render == "inplace" else split_speaker(block.text)
 
@@ -344,97 +294,20 @@ class PipelineThread(QThread):
             lines = self.cfg.line_filter.apply(lines)
         return self._tracker.update(lines, scanned), lines
 
-    def render_blocks(self, blocks: list[TextBlock], frame: Frame) -> list[Drawable]:
+    def render_blocks(self, blocks: list[TextBlock], frame: Frame) -> list[RenderBlock]:
         """Fill in the translations that are ready (queueing the rest) and
         return what the overlay should draw for them."""
         self._translate_ready(blocks, frame)
         live = {(b.id, b.text) for b in blocks}
         self._held = {key: held for key, held in self._held.items() if key in live}
-        area = self._last_area = self._area(frame)
-        if self.cfg.render == "chat":
-            self._refresh_glass(frame)
-            return self._chat_card(blocks, area)
-        shown = [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
-        if self._page:
-            self._refresh_glass(frame)
-            shown.append(self._card(self._page, area, []))
-        return shown
-
-    def _refresh_glass(self, frame: Frame) -> None:
-        """A new blurred thumbnail of the frame for the card's glass, every GLASS_EVERY frames."""
-        self._glass_frames += 1
-        if self._glass is not None and self._glass_frames < GLASS_EVERY:
-            return
-        self._glass_frames = 0
-        s = CHAT_GLASS_SCALE
-        small = cv2.resize(
-            frame.image, (max(1, frame.width // s), max(1, frame.height // s)), interpolation=cv2.INTER_AREA
-        )
-        self._glass = cv2.GaussianBlur(small, (0, 0), 1.5)
-        self._glass_version += 1
-
-    def _chat_card(self, blocks: list[TextBlock], area: Box) -> list[Drawable]:
-        """Chat mode: every subtitle block with a translation is fed to the
-        transcript, and the card shows what it holds; with hide_source every
-        live subtitle line is covered, translated or not yet."""
-        cfg = self.cfg
-        now = time.monotonic()
-        covers: list[Box] = []
-        for block in blocks:
-            if not self.is_subtitle(block):
-                continue
-            if cfg.subtitle_hide_source:
-                covers.append(block.bbox)
-            if block.translation is None:
-                continue
-            if cfg.subtitle_font_px:
-                self._chat_px = cfg.subtitle_font_px
-            elif not self._transcript:
-                # The first line up sets the card's size, held until the card empties: the zone's
-                # running median must not re-lay the card out every frame while it learns.
-                learned = self.style_memory.font_px(block.bbox, max(1, len(block.line_texts)))
-                self._chat_px = self.zone_style.font_px(learned)
-            speaker, spoken = self._spoken(block)
-            self._transcript.observe(block.id, speaker, spoken, block.translation, now)
-        self._transcript.prune(now)
-        if not self._transcript and not self._page and not covers:
-            return []
-        lines = [
-            ChatLine(u.speaker, u.text, self._transcript.speaker_index(u.speaker), self._stamp(u.at, now))
-            for u in self._transcript.utterances
-        ]
-        return [self._card(lines + self._page, area, covers)]
-
-    def _card(self, lines: list[ChatLine], area: Box, covers: list[Box]) -> ChatCard:
-        cfg = self.cfg
-        return ChatCard(
-            area=area,
-            lines=lines,
-            zone=cfg.roi,
-            corner=cfg.chat_corner,
-            width=cfg.chat_width,
-            font_px=self._chat_px,
-            fg=cfg.subtitle_color or (255, 255, 255),  # the card is dark: white, unless a colour is set
-            weight=cfg.subtitle_weight,
-            alpha=cfg.subtitle_pill_alpha,
-            covers=covers,
-            backdrop=self._glass,
-            backdrop_version=self._glass_version,
-        )
-
-    def _stamp(self, at: float, now: float) -> str:
-        """The clock time a line first seen `at` (monotonic) was said, as the card shows it; "" when off."""
-        if not self.cfg.chat_timestamps:
-            return ""
-        return time.strftime("%H:%M:%S", time.localtime(time.time() - (now - at)))
+        area = self._area(frame)
+        return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
 
     # -- subtitle zone ------------------------------------------------------------
 
     @property
     def subtitle_mode(self) -> bool:
-        """Subtitle and chat modes with an area set: only the zone's lines
-        that look like subtitles count, and they share one learned style."""
-        return self.cfg.render in ("subtitle", "chat") and self.cfg.roi is not None
+        return self.cfg.render == "subtitle" and self.cfg.roi is not None
 
     def _centered(self, block: TextBlock) -> bool:
         """The block's centre lies within the tolerance of the zone's centre."""

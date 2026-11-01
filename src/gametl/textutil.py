@@ -1,4 +1,4 @@
-"""Text helpers shared by tracking, translation and the chat transcript."""
+"""Text helpers shared by tracking, translation and the speaker split."""
 
 from __future__ import annotations
 

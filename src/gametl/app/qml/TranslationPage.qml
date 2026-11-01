@@ -5,7 +5,6 @@ import "Icons.js" as Icons
 ColumnLayout {
     id: root
     readonly property string translator: String(backend.settings.translator)
-    readonly property string screenReader: String(backend.settings.screen_reader)
     spacing: 2 * Theme.space
 
     Card {
@@ -57,29 +56,7 @@ ColumnLayout {
         title: "API keys"
         helper: "Kept in Windows Credential Manager, never in a profile. Save blanks the field."
         SettingRow { label: "DeepL key"; helper: backend.deeplKeyStatus; KeyEntry { name: "DEEPL_AUTH_KEY" } }
-        SettingRow { visible: root.translator === "claude" || root.screenReader === "claude"; label: "Anthropic key"; helper: backend.anthropicKeyStatus; KeyEntry { name: "ANTHROPIC_API_KEY" } }
-        SettingRow { visible: root.screenReader === "openai"; label: "Screen read key"; helper: backend.screenKeyStatus; KeyEntry { name: "SCREEN_API_KEY" } }
-    }
-
-    Card {
-        title: "Screen read"
-        helper: "The Read the screen hotkey sends the whole frame to a vision model, which translates every text worth reading (notes, letters, signs, menus) onto the chat card; pressed again, it clears them. The frame leaves this computer."
-        SettingRow {
-            label: "Model service"
-            helper: "Claude uses the Anthropic key. OpenAI-compatible is any chat endpoint that takes an image: OpenAI, Gemini, Mistral, OpenRouter, a local Ollama or LM Studio."
-            Segmented { key: "screen_reader"; options: ["Claude", "OpenAI-compatible"]; values: ["claude", "openai"] }
-        }
-        SettingRow {
-            label: "Model"
-            helper: root.screenReader === "claude" ? "Empty: the Claude model above." : "As the service names it: gpt-5-mini, gemini-2.5-flash, qwen3-vl..."
-            Field { key: "screen_model"; live: false; placeholderText: root.screenReader === "claude" ? String(backend.settings.model) : "model name"; implicitWidth: 220 }
-        }
-        SettingRow {
-            visible: root.screenReader === "openai"
-            label: "Base URL"
-            helper: "Up to and including /v1."
-            Field { key: "screen_base_url"; live: false; placeholderText: "https://api.openai.com/v1"; implicitWidth: 300 }
-        }
+        SettingRow { visible: root.translator === "claude"; label: "Anthropic key"; helper: backend.anthropicKeyStatus; KeyEntry { name: "ANTHROPIC_API_KEY" } }
     }
 
     // Claude is the second choice: its settings show only when it is the translator.

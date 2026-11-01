@@ -57,10 +57,6 @@ class FakeController(QObject):
         self.running = self.starting = self.paused = False
         self.applied: list[Settings] = []
         self.closed = 0
-        self.reads = 0
-
-    def read_screen(self) -> None:
-        self.reads += 1
 
     def run(self, running: bool) -> None:
         self.running = running

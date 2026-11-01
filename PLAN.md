@@ -1050,3 +1050,19 @@ OpenRouter, Ollama and LM Studio. The controller runs the call on a
 thread (`_ScreenWorker`) and hands the page to the pipeline
 (`set_page`), which keeps the last frame for it (`last_frame`). One read
 at a time; the session must be running (the overlay draws the card).
+
+## 28. Chat mode and screen read removed (2026-11-01)
+
+Tried in the game, chat mode did not work as wanted, and it goes again
+with everything that only served it: the transcript
+(`tracking/transcript.py`), the chat card and its glass, the time stamps,
+the `chat_*` settings and options, and the screen read
+(`translate/screen.py`, the `read` hotkey, the `screen_*` settings and
+`SCREEN_API_KEY`), which drew only on the card. A 0.3.x profile saved in
+chat mode opens in subtitle mode, and a saved `read` hotkey is dropped.
+What stays, because subtitle mode gains from it too: speaker names split
+off (`textutil.split_speaker`, both the "Name: words" and the name-line
+forms), the words alone translated and cached, the speaker sent to the
+translators as a hint and kept in the context, pre-translation caching
+the same way, and Claude's 30-line context.
+

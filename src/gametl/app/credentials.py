@@ -18,7 +18,6 @@ from typing import Protocol
 
 DEEPL_KEY = "DEEPL_AUTH_KEY"
 ANTHROPIC_KEY = "ANTHROPIC_API_KEY"
-SCREEN_KEY = "SCREEN_API_KEY"  # the OpenAI-compatible screen reader's key
 
 
 class SecretStore(Protocol):

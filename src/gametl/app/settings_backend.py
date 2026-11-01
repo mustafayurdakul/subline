@@ -30,7 +30,7 @@ from ..translate.claude import PRICES_PER_MTOK
 from .cleanup import describe_data
 from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, ProfileStore, Settings, slug
 from .controller import TRANSLATORS, parse_color
-from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SCREEN_KEY, SecretStore, WindowsCredentialStore, key_status
+from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
 from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_WIN, NAMED_KEYS, parse_combo
 
 # fmt: off
@@ -44,11 +44,9 @@ HOTKEY_LABELS = {
     "pause": "Pause / resume",
     "rescan": "Rescan screen",
     "select": "Select area to translate",
-    "read": "Read the screen (AI), again clears it",
     "settings": "Open settings",
 }
 LIST_FIELDS = ("ignore_zones", "ignore_patterns")  # one entry per line in the window
-KEY_NAMES = (DEEPL_KEY, ANTHROPIC_KEY, SCREEN_KEY)  # the secrets the pages may save and clear
 # The languages a translation can be asked for (DeepL's targets), shown by name.
 TARGET_LANGUAGES = [
     ("tr", "Turkish"), ("en", "English"), ("de", "German"), ("fr", "French"), ("es", "Spanish"), ("it", "Italian"),
@@ -500,25 +498,21 @@ class SettingsBackend(QObject):
     def _anthropic_key_status(self) -> str:
         return key_status(ANTHROPIC_KEY, self.secrets)
 
-    def _screen_key_status(self) -> str:
-        return key_status(SCREEN_KEY, self.secrets)
-
     deeplKeyStatus = Property(str, _deepl_key_status, notify=keyStatusChanged)
     anthropicKeyStatus = Property(str, _anthropic_key_status, notify=keyStatusChanged)
-    screenKeyStatus = Property(str, _screen_key_status, notify=keyStatusChanged)
 
     @Slot(str, str)
     def saveKey(self, name: str, value: str) -> None:
         """Store a key; the field that held it is blanked by the page."""
         value = value.strip()
-        if name not in KEY_NAMES or not value:
+        if name not in (DEEPL_KEY, ANTHROPIC_KEY) or not value:
             return
         self.secrets.set(name, value)
         self.keyStatusChanged.emit()
 
     @Slot(str)
     def clearKey(self, name: str) -> None:
-        if name in KEY_NAMES:
+        if name in (DEEPL_KEY, ANTHROPIC_KEY):
             self.secrets.delete(name)
             self.keyStatusChanged.emit()
 

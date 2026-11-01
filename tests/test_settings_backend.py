@@ -206,10 +206,8 @@ def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch
     assert secrets.get(DEEPL_KEY) == "abc:fx"
     assert backend.deeplKeyStatus == "set (memory)"
     assert "abc:fx" not in str(backend.to_settings().to_dict())
-    backend.saveKey("SCREEN_API_KEY", "sk-screen")
-    assert secrets.get("SCREEN_API_KEY") == "sk-screen" and backend.screenKeyStatus != "not set"
     backend.saveKey("SOMETHING_ELSE", "x")
-    assert secrets.get("SOMETHING_ELSE") is None  # only the known keys
+    assert secrets.get("SOMETHING_ELSE") is None  # only the two known keys
     backend.clearKey(DEEPL_KEY)
     assert secrets.get(DEEPL_KEY) is None and backend.deeplKeyStatus == "not set"
 
@@ -310,36 +308,6 @@ def test_the_preview_shows_size_and_hiding_as_in_a_1080p_game(qapp) -> None:
     hidden = render_preview(Settings(subtitle_background="none", subtitle_hide_source=True), 960, 270)
     assert shown != hidden
     assert hidden.pixelColor(480, 135).alpha() > shown.pixelColor(480, 135).alpha()  # the band, opaque
-
-
-def test_the_preview_shows_the_chat_card_above_the_strip(qapp, tmp_path: Path) -> None:
-    from PySide6.QtCore import QSize
-
-    from gametl.app.preview import CHAT_LINES, PreviewImageProvider, preview_blocks, render_preview
-    from gametl.overlay.paint import BlockPainter, ChatCard
-
-    painter = BlockPainter()
-    settings = Settings(render="chat", chat_lines=2, subtitle_font_px=40, subtitle_hide_source=True)
-    game_line, card = preview_blocks(settings, 960, 540, painter)
-    assert isinstance(card, ChatCard) and card.area == (0, 0, 960, 540) and card.zone == (0, 405, 960, 540)
-    assert [(ln.stamp, ln.speaker, ln.text) for ln in card.lines] == CHAT_LINES[-2:]  # as many lines as kept
-    assert all(
-        ln.stamp == ""
-        for ln in preview_blocks(Settings(render="chat", chat_timestamps=False), 960, 540, painter)[1].lines
-    )
-    assert card.font_px == game_line.font_px == 20  # to scale, like the subtitle
-    assert card.covers == [game_line.bbox] and game_line.bbox[1] > 405  # the game's line, in the strip, hidden
-    placed = painter.place_chat(card)
-    assert placed.card.bottom() < 405 and placed.card.left() > 0  # above the strip, in from the left edge
-    image = render_preview(settings, 960, 540)
-    assert image.pixelColor(placed.card.center()).alpha() > 0  # the card is drawn
-    # The provider sizes a chat preview as a whole frame when the page has not said.
-    size = QSize()
-    image = PreviewImageProvider(backend_for(tmp_path)).requestImage("1", size, QSize(680, -1))
-    assert (image.width(), image.height()) == (680, 170)  # subtitle mode: the strip
-    backend = backend_for(tmp_path, Settings(render="chat"))
-    image = PreviewImageProvider(backend).requestImage("1", size, QSize(680, -1))
-    assert (image.width(), image.height()) == (680, round(680 * 9 / 16))  # chat mode: the whole frame
 
 
 def test_colour_swatch_shows_what_the_overlay_draws(tmp_path: Path) -> None:
