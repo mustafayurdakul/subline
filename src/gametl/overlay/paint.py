@@ -55,6 +55,7 @@ _REFERENCE_SIZES = (12, 16, 24, 32, 48, 100)  # font sizes the line-height ratio
 # Subtitle positions that ignore the source line, so blocks shown at once would share one spot: they are stacked.
 _STACKED = ("bottom", "center")
 _STACK_GAP = 4  # pixels between the pills of stacked subtitles
+_PADDING = 3  # pixels round a box: the least the in-place background reaches past the text
 
 
 @dataclass(slots=True)
@@ -63,10 +64,10 @@ class RenderBlock:
 
     bbox: Box
     lines: list[str] = field(default_factory=list)
-    bg: RGB = (0, 0, 0)
+    bg: RGB = (0, 0, 0)  # the sampled background, for the in-place patch and outline styles
     fg: RGB = (255, 255, 255)
     style: str = "patch"  # "patch" | "pill" | "outline" | "subtitle"
-    font_px: int = 0  # base font size, set by every producer of text (style memory); unused by debug outlines
+    font_px: int = 0  # base font size from the producer (style memory, zone style or settings); unused by outlines
     room_below: int = 0  # free pixels the box may grow into
     room_above: int = 0
     outline: bool = False  # debug: draw the box outline only
@@ -94,7 +95,7 @@ class SubtitlePlacement:
 def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: str, margin: int = 12) -> QRect:
     """Where a subtitle of `text_w` x `text_h` goes inside `zone`: centred
     horizontally; vertically on the source line, at the bottom, or in the
-    middle; always kept inside the zone."""
+    middle; kept inside the zone when it fits, else top-aligned at the margin."""
     zx0, zy0, zx1, zy1 = zone
     x = (zx0 + zx1) // 2 - text_w // 2
     if position == "bottom":
@@ -159,19 +160,21 @@ class BlockPainter:
     """Lays out and paints render blocks with one font family, caching
     fonts, metrics and layouts."""
 
-    def __init__(self, font_family: str = "Segoe UI", padding: int = 3) -> None:
+    def __init__(self, font_family: str = "Segoe UI") -> None:
         self.font_family = font_family
-        self.padding = padding
         self._fonts: dict[tuple[int, str], tuple[QFont, QFontMetrics]] = {}  # by (pixel size, weight)
         self._spacing: dict[str, float] = {}  # line height / font pixel size, per weight
         self._layouts: dict[tuple, TextLayout] = {}
 
-    def set_font(self, family: str) -> None:
-        if family != self.font_family:
-            self.font_family = family
-            self._fonts.clear()
-            self._spacing.clear()
-            self._layouts.clear()
+    def set_font(self, family: str) -> bool:
+        """Use `family` from now on; True when that is a change (the caches go)."""
+        if family == self.font_family:
+            return False
+        self.font_family = family
+        self._fonts.clear()
+        self._spacing.clear()
+        self._layouts.clear()
+        return True
 
     # -- fonts and layout ----------------------------------------------------------
 
@@ -214,7 +217,7 @@ class BlockPainter:
 
     def _pads(self, bbox: Box) -> tuple[int, int]:
         """(horizontal, vertical) padding around a box: the sides get more on tall text."""
-        return max(self.padding, int(0.2 * (bbox[3] - bbox[1]))), self.padding
+        return max(_PADDING, int(0.2 * (bbox[3] - bbox[1]))), _PADDING
 
     def layout_for(self, block: RenderBlock) -> TextLayout:
         """In-place layout: wrapped and sized for the block's box plus the
@@ -273,9 +276,8 @@ class BlockPainter:
         anchor = block.anchor_y if block.anchor_y is not None else (y0 + y1) // 2
         text = subtitle_rect(block.zone, anchor, text_w, layout.height, block.position, margin)
         # The pill clears the descenders below and the ascenders above by the font's own measure.
-        pill = text.adjusted(
-            -font_px // 2, -max(2, metrics.descent() // 2), font_px // 2, max(2, metrics.descent() // 2)
-        )
+        side, edge = layout.font_px // 2, max(2, metrics.descent() // 2)
+        pill = text.adjusted(-side, -edge, side, edge)
         return SubtitlePlacement(layout, text, pill, source)
 
     def place_subtitles(self, blocks: list[RenderBlock]) -> dict[int, SubtitlePlacement]:

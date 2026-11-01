@@ -38,6 +38,9 @@ _user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
 _user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
 
 
+_POLL_MS = 33  # ~30 Hz: the overlay follows a dragged or resized game window without visible lag
+
+
 class OverlayWindow(QWidget):
     target_lost = Signal()
 
@@ -47,7 +50,6 @@ class OverlayWindow(QWidget):
         hide_when_unfocused: bool = True,
         exclude_from_capture: bool = True,
         font_family: str = "Segoe UI",
-        poll_ms: int = 33,
     ) -> None:
         super().__init__(
             None,
@@ -58,8 +60,7 @@ class OverlayWindow(QWidget):
             | Qt.WindowType.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # translucency also drops the system background
 
         self.target_hwnd = target_hwnd
         self.hide_when_unfocused = hide_when_unfocused
@@ -72,7 +73,6 @@ class OverlayWindow(QWidget):
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._follow)
-        self._poll_ms = poll_ms
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -80,7 +80,7 @@ class OverlayWindow(QWidget):
         self._follow()
         self.show()
         self._apply_native_styles()
-        self._timer.start(self._poll_ms)
+        self._timer.start(_POLL_MS)
 
     def _apply_native_styles(self) -> None:
         """Make sure the Win32 extended styles say click-through, no
@@ -103,8 +103,7 @@ class OverlayWindow(QWidget):
         if exclude_from_capture != self.exclude_from_capture:
             self.exclude_from_capture = exclude_from_capture
             self._set_capture_affinity()
-        if font_family != self.painter.font_family:
-            self.painter.set_font(font_family)
+        if self.painter.set_font(font_family):
             self.update()
 
     def ex_style(self) -> int:

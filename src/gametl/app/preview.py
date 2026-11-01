@@ -60,7 +60,7 @@ def preview_blocks(settings: Settings, width: int, height: int, painter: BlockPa
         zone=zone,
         position=settings.subtitle_position,
         background=settings.subtitle_background,
-        pill_alpha=max(0, min(255, int(settings.subtitle_pill_alpha))),
+        pill_alpha=settings.subtitle_pill_alpha,  # the painter clamps it
         weight=settings.subtitle_weight,
         hide_source=settings.subtitle_hide_source,
     )

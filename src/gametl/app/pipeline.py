@@ -361,6 +361,10 @@ class PipelineThread(QThread):
         misses: list[tuple[str, str]] = []  # (words, speaker)
         for block in blocks:
             if not self.is_subtitle(block):
+                if self.subtitle_mode and block.colors is None and self._centered(block):
+                    # Centred but another size: the game may have changed its subtitle size. Its
+                    # height must still reach the zone style, or the lock never moves to it.
+                    self._sample_colors(block, frame)
                 continue
             # Only the words are translated and cached; the speaker's name goes along as a hint.
             speaker, spoken = self._spoken(block)
@@ -389,7 +393,7 @@ class PipelineThread(QThread):
         block.colors = (sample.bg, sample.fg)
         block.busy = sample.busy
         block.contrast = sample.contrast
-        self.style_memory.observe(block.bbox, max(1, len(block.line_texts)), sample.bg, sample.fg, sample.busy)
+        self.style_memory.observe(block.bbox, len(block.line_texts), sample.bg, sample.fg, sample.busy)
         if self.subtitle_mode and self._centered(block):
             self.zone_style.observe(line_height_of(block.bbox, len(block.line_texts)), sample.fg)
 
@@ -428,7 +432,7 @@ class PipelineThread(QThread):
 
     def _to_render(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> RenderBlock:
         assert block.translation is not None
-        n_lines = max(1, len(block.line_texts))
+        n_lines = len(block.line_texts)
         memory = self.style_memory
         lines = block.translation.split("\n")
         speaker, _ = self._spoken(block)
@@ -451,7 +455,6 @@ class PipelineThread(QThread):
             return RenderBlock(
                 bbox=block.bbox,
                 lines=lines,
-                bg=bgr_to_rgb(bg),
                 fg=text_rgb,
                 style="subtitle",
                 font_px=font_px,
