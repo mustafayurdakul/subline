@@ -74,7 +74,8 @@ CHAT_PALETTE: tuple[RGB, ...] = (
 CHAT_CARD_RGB = (12, 12, 16)
 CHAT_BORDER_ALPHA = 28  # of a white hairline that lifts the card off a dark scene, at full card opacity
 CHAT_CORNERS = ("bottom-left", "bottom-right", "top-left", "top-right")
-CHAT_STAMP_ALPHA = 150  # the time a line was said: muted beside the name
+CHAT_STAMP_ALPHA = 110  # the time a line was said: small and faint beside the name, never louder than it
+CHAT_STAMP_SCALE = 0.7  # of the card's font size
 _CHAT_SHADOW_BELOW = 128  # a card fainter than this no longer carries its text: the text gets a shadow
 
 
@@ -184,6 +185,11 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
 def _is_subtitle(block: RenderBlock) -> bool:
     """A block drawn in the subtitle style, placed in its zone."""
     return not block.outline and bool(block.lines) and block.style == "subtitle" and block.zone is not None
+
+
+def stamp_px(font_px: int) -> int:
+    """The time stamp's font size for a card of `font_px`."""
+    return max(6, round(font_px * CHAT_STAMP_SCALE))
 
 
 def chat_room(card: ChatCard, margin: int) -> tuple[int, int]:
@@ -387,11 +393,11 @@ class BlockPainter:
         inner = width - 2 * pad
         measure = self.measurer(card.weight)
         names = self.metrics_at(px, "bold")
-        stamps = self.metrics_at(px, "regular")
+        stamps = self.metrics_at(stamp_px(px), "regular")
         # (line, the stamp's width, the name's width or 0 for a row of its own, rows)
         laid: list[tuple[ChatLine, int, int, list[str]]] = []
         for line in card.lines:
-            stamp_w = stamps.horizontalAdvance(line.stamp) + round(px * 0.4) if line.stamp else 0
+            stamp_w = stamps.horizontalAdvance(line.stamp) + round(px * 0.35) if line.stamp else 0
             name_w = names.horizontalAdvance(line.speaker + ":") + round(px * 0.3) if line.speaker else 0
             if stamp_w + name_w > inner // 2:
                 name_w = 0
@@ -558,7 +564,7 @@ class BlockPainter:
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(QColor(255, 255, 255, CHAT_BORDER_ALPHA * alpha // 255), 1))
         p.drawRoundedRect(QRectF(placed.card).adjusted(0.5, 0.5, -0.5, -0.5), placed.radius, placed.radius)  # crisp
-        stamp_font = self.font_at(card.font_px, "regular")
+        stamp_font = self.font_at(stamp_px(card.font_px), "regular")
         name_font = self.font_at(card.font_px, "bold")
         text_font = self.font_at(card.font_px, card.weight)
         flags = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
