@@ -23,6 +23,18 @@ class TranslationRequest:
     speakers: list[str] | None = None
 
 
+CONTEXT_LINES = 30  # recent (source, translation) pairs a translator is given: about a thousand tokens
+
+
+def quiet(_line: str) -> None:
+    """The progress callback that reports nothing."""
+
+
+def speakers_or_none(speakers: list[str]) -> list[str] | None:
+    """`speakers` for a TranslationRequest: None when nobody is named."""
+    return speakers if any(speakers) else None
+
+
 class TranslationError(RuntimeError):
     """A whole batch failed (network, API error, refusal, malformed output).
     `retry_after` is how many seconds the backend should be left alone (a

@@ -22,7 +22,7 @@ from ..layout.colors import analyze_colors, bgr_to_rgb
 from ..layout.style import StyleMemory, ZoneStyle, line_height_of
 from ..ocr.base import OcrEngine, TextLine
 from ..overlay.paint import RenderBlock
-from ..textutil import letter_count, split_speaker
+from ..textutil import letter_count, said_by, split_speaker
 from ..tracking.blocks import BlockTracker, TextBlock, intersects
 from ..tracking.filters import LineFilter
 from ..translate.service import TranslationService
@@ -433,7 +433,7 @@ class PipelineThread(QThread):
         lines = block.translation.split("\n")
         speaker, _ = self._spoken(block)
         if speaker:
-            lines[0] = f"{speaker}: {lines[0]}"  # the name goes back in front, untranslated
+            lines[0] = said_by(speaker, lines[0])  # the name goes back in front, untranslated
         # Lines that appear in the same place share one size, colour and style.
         bg, fg = memory.colors(block.bbox) or block.colors or ((0, 0, 0), (255, 255, 255))
         if self.subtitle_mode:

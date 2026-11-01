@@ -3,7 +3,7 @@ their translation the moment OCR reads them.
 
 Input: a text file (one line per entry), an .srt subtitle file, a JSON file
 (list of strings, or any object whose string values are the lines), or a
-CSV (a "text"/"source"/"line" column, else the first column).
+CSV (a "text"/"source"/"line"/"string" column, else the first column).
 
 Two ways to run it: synchronously through the normal API in chunks, or
 through the Message Batches API (half price, results within minutes to an
@@ -22,10 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from ..textutil import split_speaker
-from .base import TranslationRequest
+from .base import TranslationError, TranslationRequest, quiet, speakers_or_none
 from .cache import TranslationCache
 from .claude import ClaudeTranslator
-from .offline import quiet
 
 _SRT_TIMING = re.compile(r"^\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+")
 _TAGS = re.compile(r"<[^>]+>|\{[^}]+\}")
@@ -58,9 +57,10 @@ def load_lines(path: Path | str) -> list[str]:
 
 def spoken(lines: list[str]) -> tuple[list[str], dict[str, str]]:
     """The words of `lines` without their speaker names, each once, and who
-    says which (by the words). The overlay translates and caches the words
-    alone (a line "Casey: Stay close." is looked up as "Stay close."), so
-    the script must be cached the same way for its lines to be found."""
+    says which (by the words). In subtitle mode the overlay translates and
+    caches the words alone (a line "Casey: Stay close." is looked up as
+    "Stay close."), so the script must be cached the same way for its lines
+    to be found."""
     words: list[str] = []
     speakers: dict[str, str] = {}
     seen: set[str] = set()
@@ -78,8 +78,8 @@ def spoken(lines: list[str]) -> tuple[list[str], dict[str, str]]:
 def _request(
     chunk: list[str], speakers: dict[str, str], translator: ClaudeTranslator, target: str
 ) -> TranslationRequest:
-    said = [speakers.get(text, "") for text in chunk]
-    return TranslationRequest(chunk, translator.source_lang, target, speakers=said if any(said) else None)
+    named = speakers_or_none([speakers.get(text, "") for text in chunk])
+    return TranslationRequest(chunk, translator.source_lang, target, speakers=named)
 
 
 def _load_srt(text: str) -> list[str]:
@@ -146,14 +146,18 @@ def pretranslate_sync(
     say: Callable[[str], None] = quiet,
 ) -> int:
     """Translate `lines` not yet in `cache` through the normal API. Returns
-    the number of lines added."""
+    the number of lines added; a chunk that fails is reported and skipped."""
     words, speakers = spoken(lines)
     todo = uncached(words, cache, target_lang)
     say(f"{len(lines)} lines, {len(todo)} to translate")
     added = 0
     chunks = chunked(todo, chunk_size)
     for i, chunk in enumerate(chunks):
-        results = translator.translate(_request(chunk, speakers, translator, target_lang))
+        try:
+            results = translator.translate(_request(chunk, speakers, translator, target_lang))
+        except TranslationError as exc:  # this chunk only: the rest still go
+            say(f"chunk {i + 1}/{len(chunks)} failed: {exc}")
+            continue
         for source, translated in zip(chunk, results, strict=True):
             if translated:
                 cache.put(source, target_lang, translated)
@@ -262,8 +266,8 @@ def collect_batch(
             continue
         message = result.result.message
         try:
-            parsed = ClaudeTranslator._parse_text_json(message, len(sources))
-        except Exception as exc:  # malformed reply for this chunk only
+            parsed = ClaudeTranslator.parse_text_json(message, len(sources))
+        except TranslationError as exc:  # malformed reply for this chunk only
             failed += 1
             say(f"{result.custom_id}: unreadable reply ({exc})")
             continue

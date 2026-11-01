@@ -38,7 +38,7 @@ ColumnLayout {
         title: "Translation"
         SettingRow {
             label: "Write the cache every"
-            Stepper { key: "autosave_seconds"; from: 0; to: 120; step: 5; suffix: " s"; specialText: "at exit" }
+            Stepper { key: "autosave_seconds"; from: 0; to: 120; step: 5; suffix: " s"; specialText: "at once" }
         }
         SettingRow {
             label: "Translator by name"

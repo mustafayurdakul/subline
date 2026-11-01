@@ -24,8 +24,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
-from ..textutil import normalize_text
-from .base import TranslationRequest, Translator
+from ..textutil import said_by
+from .base import CONTEXT_LINES, TranslationRequest, Translator, speakers_or_none
 from .cache import TranslationCache, numeric_template
 
 
@@ -38,20 +38,9 @@ class BatchResult:
     elapsed_ms: float
 
 
-def _said_by(speaker: str, text: str) -> str:
-    """A line as the context shows it: with its speaker in front, when one was named."""
-    return f"{speaker}: {text}" if speaker else text
-
-
-def _said(speakers: dict[str, str], texts: list[str]) -> list[str] | None:
-    """Who says each of `texts` (by normalised text), or None when nobody is named."""
-    said = [speakers.get(normalize_text(text), "") for text in texts]
-    return said if any(said) else None
-
-
 def _unexpired(until: dict[str, float], now: float) -> dict[str, float]:
     """The cooldowns in `until` (key -> monotonic time) that have not passed."""
-    return {key: t for key, t in until.items() if t > now} if until else until
+    return {key: t for key, t in until.items() if t > now}
 
 
 class _DaemonPool:
@@ -102,7 +91,7 @@ class TranslationService:
         target_lang: str = "tr",
         source_lang: str | None = None,
         workers: int = 2,
-        context_lines: int = 30,  # recent (source, translation) pairs handed to the translator as context
+        context_lines: int = CONTEXT_LINES,  # recent (source, translation) pairs handed to the translator
         retry_cooldown: float = 3.0,
         on_status: Callable[[str], None] | None = None,
         draft_translator: Translator | None = None,
@@ -137,6 +126,7 @@ class TranslationService:
         # Draft tier, the same way.
         self._drafts: dict[str, str] = {}  # key -> draft translation (memory only, oldest first)
         self._draft_inflight: set[str] = set()
+        self._draft_inflight_templates: set[str] = set()
         self._draft_failed_until: dict[str, float] = {}
         self._draft_backoff_until = 0.0
         self._last_save = time.monotonic()
@@ -166,7 +156,7 @@ class TranslationService:
                     self._arrived.discard(key)
                 else:
                     self.stats["cache_hits"] += 1
-                self._remember(key, _said_by(speaker, text), hit)  # a line shown from the cache is in the scene too
+                self._remember(key, said_by(speaker, text), hit)  # a line shown from the cache is in the scene too
         return hit
 
     def lookup_best(self, text: str, speaker: str = "") -> tuple[str, bool] | None:
@@ -187,12 +177,12 @@ class TranslationService:
         the context, never into the text. Returns True when any request was
         started."""
         todo: dict[str, str] = {}  # key -> text: each text once
-        said: dict[str, str] = {}  # key -> speaker, where one is named
+        speaker_by_key: dict[str, str] = {}  # where one is named
         for text, speaker in zip(texts, speakers or [""] * len(texts), strict=True):
             key = self.cache.key(text)
             todo.setdefault(key, text)
             if speaker:
-                said[key] = speaker
+                speaker_by_key[key] = speaker
         todo.pop("", None)
         # What the cache answers (exactly, by number swap or fuzzily) lookup()
         # shows at once; a request would only spend characters, delay the line
@@ -208,31 +198,41 @@ class TranslationService:
             self._draft_failed_until = _unexpired(self._draft_failed_until, now)
             # Per text: does it need a draft request, a final request, both, or neither?
             for key, text in todo.items():
-                if self._draft_due(key, now):
-                    self._draft_inflight.add(key)
-                    draft_batch.append(text)
-                if not self._final_due(key, now):
-                    continue
                 # A ticking counter: the same text with other numbers is already
                 # on its way; its answer will serve this one by number swap.
                 template, numbers = numeric_template(key)
+                in_flight = template in self._inflight_templates or template in self._draft_inflight_templates
+                ticking = bool(numbers) and in_flight
+                if self._draft_due(key, now) and not ticking:
+                    self._draft_inflight.add(key)
+                    if numbers:
+                        self._draft_inflight_templates.add(template)
+                    draft_batch.append(text)
+                if not self._final_due(key, now):
+                    continue
                 if numbers and template in self._inflight_templates:
                     continue
                 self._inflight.add(key)
                 if numbers:
                     self._inflight_templates.add(template)
                 batch.append(text)
-                if key in said:
-                    self._speakers[key] = said[key]  # until the answer is in and remembered with its name
+                if key in speaker_by_key:
+                    self._speakers[key] = speaker_by_key[key]  # until the answer is in and remembered with its name
             # One request per tier. The draft goes without context: speed over consistency.
             if draft_batch:
-                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, [], _said(said, draft_batch)))
+                speakers_for = self._speakers_for(speaker_by_key, draft_batch)
+                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, [], speakers_for))
             if batch:
                 self.stats["requests"] += 1
                 self.stats["items"] += len(batch)
                 context = list(self._context.values())
-                self._futures.append(self._pool.submit(self._run, "final", batch, context, _said(said, batch)))
+                speakers_for = self._speakers_for(speaker_by_key, batch)
+                self._futures.append(self._pool.submit(self._run, "final", batch, context, speakers_for))
         return bool(draft_batch or batch)
+
+    def _speakers_for(self, speaker_by_key: dict[str, str], texts: list[str]) -> list[str] | None:
+        """Who says each of `texts`, or None when nobody is named."""
+        return speakers_or_none([speaker_by_key.get(self.cache.key(text), "") for text in texts])
 
     def _final_due(self, key: str, now: float) -> bool:
         """Whether a final request for `key` may start now. Call with the lock held."""
@@ -273,13 +273,16 @@ class TranslationService:
                 self._absorb_draft(batch)
             else:
                 translated += self._absorb_final(batch)
-        self.stats["translated"] += translated
+        with self._lock:
+            self.stats["translated"] += translated
         # On every call, not only when something arrived: a translation that
         # came in just after a save must not wait for the next one to reach the disk.
         self._autosave()
         return translated
 
     def _autosave(self, force: bool = False) -> None:
+        """Save the cache when `autosave_seconds` have passed (0: on every drain; a save with
+        nothing new costs nothing)."""
         now = time.monotonic()
         if force or now - self._last_save >= self.autosave_seconds:
             try:
@@ -294,6 +297,7 @@ class TranslationService:
             for text, result in zip(batch.texts, batch.results, strict=True):
                 key = self.cache.key(text)
                 self._draft_inflight.discard(key)
+                self._draft_inflight_templates.discard(numeric_template(key)[0])
                 if not result:
                     if batch.error is None:  # this item only; a failed request holds back the tier below
                         self._draft_failed_until[key] = now + self.retry_cooldown
@@ -324,7 +328,7 @@ class TranslationService:
                     self.cache.put(text, self.target_lang, result)
                     self._drafts.pop(key, None)
                     self._arrived.add(key)
-                    self._remember(key, _said_by(speaker, text), result)
+                    self._remember(key, said_by(speaker, text), result)
                     translated += 1
                 elif batch.error is None:  # this item only; a failed request holds back the tier below
                     self._failed_until[key] = now + self.retry_cooldown
@@ -335,7 +339,8 @@ class TranslationService:
         if batch.error is None:
             self._log(f"translated {len(batch.texts)} item(s) in {batch.elapsed_ms:.0f} ms")
         else:
-            self.stats["errors"] += 1
+            with self._lock:
+                self.stats["errors"] += 1
             self._report(f"translation failed ({len(batch.texts)} items): {batch.error}")
         return translated
 

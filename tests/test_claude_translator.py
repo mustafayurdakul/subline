@@ -124,7 +124,7 @@ def test_speakers_are_sent_beside_the_items_when_any_is_named() -> None:
 
 
 def test_the_context_is_the_last_thirty_pairs_and_the_rule_says_it_is_a_conversation() -> None:
-    from gametl.translate.claude import CONTEXT_PAIRS
+    from gametl.translate.base import CONTEXT_LINES
 
     client = StubClient(text_response('{"items": ["Git."]}'))
     translator = ClaudeTranslator(client=client, source_lang="en")
@@ -132,7 +132,7 @@ def test_the_context_is_the_last_thirty_pairs_and_the_rule_says_it_is_a_conversa
     translator.translate(TranslationRequest(["Go."], target_lang="tr", context=context))
     (call,) = client.messages.created
     payload = json.loads(call["messages"][0]["content"])
-    assert len(payload["context"]) == CONTEXT_PAIRS == 30 and payload["context"][-1] == ["line 39", "satır 39"]
+    assert len(payload["context"]) == CONTEXT_LINES == 30 and payload["context"][-1] == ["line 39", "satır 39"]
     assert "continue" in call["system"][0]["text"] and "conversation" in call["system"][0]["text"]
 
 

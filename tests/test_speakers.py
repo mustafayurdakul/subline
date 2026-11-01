@@ -7,7 +7,7 @@ from __future__ import annotations
 from gametl.textutil import split_speaker
 
 
-def test_split_speaker_takes_a_name_before_the_colon() -> None:
+def test_split_speaker() -> None:
     assert split_speaker("Casey: Where are you going?") == ("Casey", "Where are you going?")
     assert split_speaker("Dr. Darling: It works.") == ("Dr. Darling", "It works.")
     assert split_speaker("SAGA ANDERSON: Stay close.") == ("SAGA ANDERSON", "Stay close.")
@@ -27,5 +27,7 @@ def test_split_speaker_takes_a_name_before_the_colon() -> None:
     # A sentence wrapped after its first word, a name that is the whole line, a lead-in: not speakers.
     assert split_speaker("The\nfire escape was gone.") == ("", "The\nfire escape was gone.")
     assert split_speaker("Casey") == ("", "Casey")
+    assert split_speaker("Wait.\nDon't go.") == ("", "Wait.\nDon't go.")  # a short sentence, not a name
+    assert split_speaker("Mr. Wake.\nYou're late.") == ("", "Mr. Wake.\nYou're late.")
     assert split_speaker("Warning\nLow health") == ("", "Warning\nLow health")
     assert split_speaker("Where are you going?") == ("", "Where are you going?")
