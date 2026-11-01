@@ -25,7 +25,7 @@ from .settings_window import SettingsWindow
 # Hotkeys that act on a running overlay. Registered only while one runs: a
 # registered combination is taken from every other program, and idle these
 # would do nothing in exchange.
-SESSION_HOTKEYS = frozenset({"pause", "rescan"})
+SESSION_HOTKEYS = frozenset({"pause", "rescan", "read"})
 
 
 class SingleInstance(QObject):
@@ -230,6 +230,7 @@ class TrayApp(QObject):
             "pause": self.toggle_pause,
             "rescan": self.controller.rescan,
             "select": self.select_area,
+            "read": self.controller.read_screen,
             "settings": self.open_settings,
         }
         if not self.controller.running:

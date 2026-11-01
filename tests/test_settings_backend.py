@@ -206,8 +206,10 @@ def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch
     assert secrets.get(DEEPL_KEY) == "abc:fx"
     assert backend.deeplKeyStatus == "set (memory)"
     assert "abc:fx" not in str(backend.to_settings().to_dict())
+    backend.saveKey("SCREEN_API_KEY", "sk-screen")
+    assert secrets.get("SCREEN_API_KEY") == "sk-screen" and backend.screenKeyStatus != "not set"
     backend.saveKey("SOMETHING_ELSE", "x")
-    assert secrets.get("SOMETHING_ELSE") is None  # only the two known keys
+    assert secrets.get("SOMETHING_ELSE") is None  # only the known keys
     backend.clearKey(DEEPL_KEY)
     assert secrets.get(DEEPL_KEY) is None and backend.deeplKeyStatus == "not set"
 

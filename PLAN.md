@@ -1028,3 +1028,25 @@ texts a request carries; DeepL sees the lines being translated, with their
 speakers, in its context; pre-translation caches the words without the
 name, as the overlay looks them up; the width range (20-70 %) and the
 corner are validated in one place.
+
+## 27. Chat context and screen read (2026-11-01)
+
+Chat mode is the mode for context: Claude now sees the last 30 lines with
+their speakers (`claude.CONTEXT_PAIRS`) and is told the items continue
+that conversation; the Appearance page says chat is best with Claude.
+DeepL stays the fast choice and sees the same lines in its context.
+
+Screen read (`translate/screen.py`, the `read` hotkey, Ctrl+Shift+D): the
+frame last processed goes as a PNG (long side at most 1568 px) to a
+vision model with one prompt, and the texts it returns (title and
+translation, paragraphs kept, unreadable parts marked) go on the chat
+card as entries with a plain bar and the time of the read, in every
+render mode; the hotkey pressed again clears them. Two readers behind one
+protocol: Claude through the Anthropic SDK (the Anthropic key,
+`screen_model` or the Claude model), and any OpenAI-compatible chat
+endpoint (`screen_base_url`, `screen_model`, the `SCREEN_API_KEY` entry;
+no key for a local server), which covers OpenAI, Gemini, Mistral,
+OpenRouter, Ollama and LM Studio. The controller runs the call on a
+thread (`_ScreenWorker`) and hands the page to the pipeline
+(`set_page`), which keeps the last frame for it (`last_frame`). One read
+at a time; the session must be running (the overlay draws the card).

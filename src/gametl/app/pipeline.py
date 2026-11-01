@@ -134,6 +134,8 @@ class PipelineThread(QThread):
         self._transcript = Transcript(self.cfg.chat_lines, self.cfg.chat_seconds)  # chat mode's lines
         self._chat_px = 32  # the card's font size: the zone's learned size when its first line went up, then held
         self._last_area: Box | None = None  # the area of the last frame, for the card between frames
+        self._last_frame: Frame | None = None  # the frame last processed, for a screen read
+        self._page: list[ChatLine] = []  # what a screen read put on the card, until cleared
         self._last_thumb: np.ndarray | None = None  # thumbnail of the region last read
         self._skip_run = 0
         self._resize_reported: tuple[int, int] | None = None  # the frame size `resized` was last emitted for
@@ -149,6 +151,21 @@ class PipelineThread(QThread):
         """Settings edited while the loop runs: taken up at the next frame.
         The blocks are kept unless what is read or how it is tracked changed."""
         self._next_cfg = cfg
+
+    @property
+    def last_frame(self) -> Frame | None:
+        """The frame last processed (None before the first)."""
+        return self._last_frame
+
+    @property
+    def page(self) -> list[ChatLine]:
+        """What a screen read put on the card."""
+        return list(self._page)
+
+    def set_page(self, lines: list[ChatLine]) -> None:
+        """Show `lines` (a screen read's texts) on the card under the
+        transcript, in every mode, until cleared with an empty list."""
+        self._page = list(lines)
 
     def _adopt_config(self) -> None:
         cfg, self._next_cfg = self._next_cfg, None
@@ -220,6 +237,7 @@ class PipelineThread(QThread):
         translations and what to draw."""
         self._adopt_config()
         self._check_size(frame)
+        self._last_frame = frame
         cfg = self.cfg
         if self.unchanged(frame):
             self.skipped += 1
@@ -327,7 +345,10 @@ class PipelineThread(QThread):
         area = self._last_area = self._area(frame)
         if self.cfg.render == "chat":
             return self._chat_card(blocks, area)
-        return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
+        shown = [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
+        if self._page:
+            shown.append(self._card(self._page, area, []))
+        return shown
 
     def _chat_card(self, blocks: list[TextBlock], area: Box) -> list[Drawable]:
         """Chat mode: every subtitle block with a translation is fed to the
@@ -353,26 +374,28 @@ class PipelineThread(QThread):
             speaker, spoken = self._spoken(block)
             self._transcript.observe(block.id, speaker, spoken, block.translation, now)
         self._transcript.prune(now)
-        if not self._transcript and not covers:
+        if not self._transcript and not self._page and not covers:
             return []
         lines = [
             ChatLine(u.speaker, u.text, self._transcript.speaker_index(u.speaker), self._stamp(u.at, now))
             for u in self._transcript.utterances
         ]
-        return [
-            ChatCard(
-                area=area,
-                lines=lines,
-                zone=cfg.roi,
-                corner=cfg.chat_corner,
-                width=cfg.chat_width,
-                font_px=self._chat_px,
-                fg=cfg.subtitle_color or (255, 255, 255),  # the card is dark: white, unless a colour is set
-                weight=cfg.subtitle_weight,
-                alpha=cfg.subtitle_pill_alpha,
-                covers=covers,
-            )
-        ]
+        return [self._card(lines + self._page, area, covers)]
+
+    def _card(self, lines: list[ChatLine], area: Box, covers: list[Box]) -> ChatCard:
+        cfg = self.cfg
+        return ChatCard(
+            area=area,
+            lines=lines,
+            zone=cfg.roi,
+            corner=cfg.chat_corner,
+            width=cfg.chat_width,
+            font_px=self._chat_px,
+            fg=cfg.subtitle_color or (255, 255, 255),  # the card is dark: white, unless a colour is set
+            weight=cfg.subtitle_weight,
+            alpha=cfg.subtitle_pill_alpha,
+            covers=covers,
+        )
 
     def _stamp(self, at: float, now: float) -> str:
         """The clock time a line first seen `at` (monotonic) was said, as the card shows it; "" when off."""

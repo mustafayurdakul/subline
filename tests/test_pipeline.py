@@ -206,6 +206,27 @@ def test_the_card_ages_on_a_still_screen_and_a_mode_switch_clears_it() -> None:
         thread.service.shutdown()
 
 
+def test_a_screen_read_page_shows_on_the_card_in_every_mode() -> None:
+    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
+    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
+    try:
+        (block,) = process_until(thread, lambda r: bool(r))
+        assert thread.last_frame is not None and thread.last_frame.width == WIDTH
+        page = [ChatLine("Note", "Kapı kilitli.\nAnahtar masada.", -1, "21:36:05")]
+        thread.set_page(page)
+        subtitle, card = thread._process(frame())
+        assert subtitle.lines == block.lines and isinstance(card, ChatCard)  # the subtitle stays, the page joins
+        assert card.lines == page and card.covers == []
+        thread.update_config(replace(thread.cfg, render="chat"))
+        (card,) = process_until(thread, lambda r: r and len(r[0].lines) == 2)
+        assert [ln.speaker for ln in card.lines] == ["", "Note"]  # the transcript first, the page last
+        thread.set_page([])
+        (card,) = thread._process(frame())
+        assert [ln.speaker for ln in card.lines] == [""] and thread.page == []
+    finally:
+        thread.service.shutdown()
+
+
 def test_in_place_mode_translates_a_label_whole() -> None:
     engine = FakeEngine([line("Objective: Find the key", 300, 20, 700, 60)])
     thread = pipeline(engine, roi=STRIP, render="inplace", change_threshold=0)

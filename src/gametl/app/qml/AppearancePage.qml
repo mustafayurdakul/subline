@@ -15,7 +15,7 @@ ColumnLayout {
         title: "Mode"
         SettingRow {
             label: "Render"
-            helper: "Subtitle: one style in the area. Chat: the last lines as a transcript, with who said them. In place: each translation on its own box, in the game's colours."
+            helper: "Subtitle: one style in the area. Chat: the last lines as a transcript, with who said them; best with Claude, which translates each line in the light of the conversation. In place: each translation on its own box, in the game's colours."
             Segmented { key: "render"; options: ["Subtitle", "Chat", "In place"]; values: ["subtitle", "chat", "inplace"] }
         }
         SettingRow {

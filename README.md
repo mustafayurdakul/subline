@@ -53,6 +53,11 @@ from a recording by an earlier build (see
   conversation pauses. Turn speaker names on in the
   game: the name in front of a line is kept as it is and the words alone
   are translated, with the speaker passed to DeepL and Claude as a hint.
+- **Read the screen.** A hotkey sends the whole frame to a vision model
+  (Claude, or any OpenAI-compatible service: OpenAI, Gemini, Mistral, a
+  local Ollama) and puts every text worth reading on it, notes, letters,
+  signs, menus, translated onto the chat card. One call per press; the
+  frame leaves the computer only then.
 - **Three translators.** DeepL (the default: fast, strong for European
   languages, free tier), Claude (glossary, tone notes, any language), or
   an offline CTranslate2 model (no network; an optional download). DeepL
@@ -199,6 +204,7 @@ Default hotkeys (changeable on the Hotkeys page):
 | Ctrl+Shift+T | start / stop the overlay |
 | Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
 | Ctrl+Shift+R | rescan: forget tracked lines and read the screen afresh |
+| Ctrl+Shift+D | read the screen with the vision model onto the chat card; again clears it |
 | Ctrl+Shift+S | open settings |
 
 Pause and rescan are held only while the overlay runs, so the same keys
@@ -316,7 +322,20 @@ Most settings have a command-line equivalent (the hotkeys do not);
   and Claude (beside the items) as a hint for register and pronouns. A
   line that grows (a typewriter reveal) or is read differently by OCR
   replaces its earlier version; the next line at the same spot, or the
-  same words from another speaker, is a new entry.
+  same words from another speaker, is a new entry. Claude translates each
+  line in the light of the last 30, with their speakers, which is what
+  chat mode is for; DeepL is faster and sees the same lines as context.
+- **Screen read** (Translation page, hotkey **Read the screen**, default
+  Ctrl+Shift+D): the frame on screen goes to a vision model, which returns
+  every text a player would want translated (notes, letters, signs,
+  menus; HUD skipped; unreadable parts marked) as entries on the chat
+  card, in every render mode, each with a title in place of a speaker and
+  the time of the read; pressing the hotkey again clears them. **Model
+  service** is Claude (the Anthropic key; **Model** empty uses the Claude
+  model above) or OpenAI-compatible (**Base URL** up to `/v1`, the model's
+  name, and its key under API keys; a local Ollama or LM Studio needs no
+  key). The frame is sent as a PNG no wider than 1568 px. About $0.0003
+  a press on Claude Haiku, one to three seconds.
 - **Font and Weight** (Appearance page): any font installed on the
   computer (default Segoe UI) and a weight from Regular to Bold (default
   SemiBold). The preview on the page is painted by the overlay's own

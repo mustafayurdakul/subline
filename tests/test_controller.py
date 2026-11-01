@@ -418,6 +418,59 @@ def test_stop_keeps_the_session_stats_and_a_second_stop_does_nothing(qapp, contr
     assert controller.messages == messages and controller.running_log == running_log
 
 
+def test_read_screen_puts_the_models_texts_on_the_card_and_clears_on_the_next_press(
+    qapp, controller, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gametl.translate.screen import ScreenText
+
+    class FakeReader:
+        name = "fake"
+        calls: list[tuple[int, str, str]] = []
+
+        def read(self, png: bytes, target_lang: str, game: str = "") -> list[ScreenText]:
+            FakeReader.calls.append((len(png), target_lang, game))
+            return [ScreenText("Note", "Kapı kilitli.")]
+
+    controller.read_screen()
+    assert controller.messages[-1] == "screen read: start the overlay first"
+    monkeypatch.setattr(controller_module, "build_screen_reader", lambda settings, secrets: FakeReader())
+    controller.start(settings(target_lang="tr", game="Fake Game"))
+    wait_for(qapp, lambda: controller.running and controller.worker.last_frame is not None)
+    controller.read_screen()
+    assert controller.messages[-1] == "reading the screen with fake..."
+    wait_for(qapp, lambda: bool(controller.worker.page))
+    (entry,) = controller.worker.page
+    assert (entry.speaker, entry.text, entry.speaker_index) == ("Note", "Kapı kilitli.", -1) and entry.stamp
+    assert FakeReader.calls[0][1:] == ("tr", "Fake Game") and FakeReader.calls[0][0] > 8
+    wait_for(qapp, lambda: controller._screen_worker is None)
+    assert controller.messages[-1] == "screen read: 1 text(s)"
+    controller.read_screen()  # a page shows: this press clears it
+    assert controller.worker.page == [] and controller.messages[-1] == "screen read cleared"
+
+
+def test_read_screen_reports_a_missing_key_and_a_failed_read(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gametl.translate.screen import ScreenReadError
+
+    controller.start(settings(screen_reader="openai", screen_model=""))
+    wait_for(qapp, lambda: controller.running and controller.worker.last_frame is not None)
+    controller.read_screen()
+    assert controller.messages[-1] == "Screen read: name the model on the Translation page"
+    controller.settings.screen_reader = "claude"
+    controller.read_screen()
+    assert controller.messages[-1] == "Screen read: add your Anthropic key on the Translation page"
+
+    class FailingReader:
+        name = "failing"
+
+        def read(self, png, target_lang, game=""):
+            raise ScreenReadError("HTTP 401: bad key")
+
+    monkeypatch.setattr(controller_module, "build_screen_reader", lambda settings, secrets: FailingReader())
+    controller.read_screen()
+    wait_for(qapp, lambda: controller._screen_worker is None)
+    assert controller.messages[-1] == "screen read failed: HTTP 401: bad key" and controller.worker.page == []
+
+
 def test_finished_start_threads_are_let_go(qapp, controller) -> None:
     threads = []
     for lang in ("de", "tr", "fr"):

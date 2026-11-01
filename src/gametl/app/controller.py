@@ -15,17 +15,26 @@ from PySide6.QtCore import QObject, QThread, Signal
 from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
 from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
-from ..overlay.paint import CHAT_CORNERS
+from ..overlay.paint import CHAT_CORNERS, ChatLine
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
 from ..overlay.window import OverlayWindow
 from ..tracking.filters import LineFilter
 from ..translate.base import Translator
 from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
+from ..translate.screen import (
+    ClaudeScreenReader,
+    OpenAICompatibleScreenReader,
+    ScreenReader,
+    ScreenReadError,
+    ScreenText,
+    encode_frame,
+)
 from ..translate.service import TranslationService
 from .config import ProfileStore, Settings, chat_width_share
 from .credentials import (
     DEEPL_KEY,
+    SCREEN_KEY,
     SecretStore,
     WindowsCredentialStore,
     anthropic_api_key,
@@ -218,6 +227,39 @@ def build_claude_translator(settings: Settings, game: str, secrets: SecretStore)
     )
 
 
+def build_screen_reader(settings: Settings, secrets: SecretStore) -> ScreenReader:
+    """The vision model the "read" hotkey sends the frame to. Raises
+    StartError when its key is missing."""
+    if settings.screen_reader == "openai":
+        key = resolve_key(SCREEN_KEY, secrets)
+        if not settings.screen_model.strip():
+            raise StartError("Screen read: name the model on the Translation page")
+        return OpenAICompatibleScreenReader(settings.screen_base_url, settings.screen_model.strip(), key and key[0])
+    if not has_anthropic_credentials(secrets):
+        raise StartError("Screen read: add your Anthropic key on the Translation page")
+    return ClaudeScreenReader(settings.screen_model.strip() or settings.model, api_key=anthropic_api_key(secrets))
+
+
+class _ScreenWorker(QThread):
+    """One screen read on its own thread: the frame goes to the model and
+    the texts come back, without the UI waiting."""
+
+    done = Signal(list)  # list[ScreenText]
+    failed = Signal(str)
+
+    def __init__(self, reader: ScreenReader, png: bytes, target_lang: str, game: str) -> None:
+        super().__init__()
+        self.reader, self.png, self.target_lang, self.game = reader, png, target_lang, game
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self.reader.read(self.png, self.target_lang, self.game))
+        except ScreenReadError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # anything unforeseen still reaches the status line
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
 def _spread(values: Iterable[float]) -> str:
     ordered = sorted(values)
     return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
@@ -337,6 +379,7 @@ class OverlayController(QObject):
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
         self.last_stats = ""  # stats_text() of the last session, kept when it stops
+        self._screen_worker: _ScreenWorker | None = None  # the screen read under way, if any
 
     # -- state -------------------------------------------------------------
 
@@ -626,6 +669,52 @@ class OverlayController(QObject):
         if self.worker is not None:
             self.worker.rescan()
             self._say("rescanning")
+
+    # -- screen read ----------------------------------------------------------
+
+    def read_screen(self) -> None:
+        """The "read" hotkey: send the frame on screen to the vision model
+        and put what it reads on the card; pressed again while a page
+        shows, clear it. Needs a running session (the overlay to draw on)."""
+        worker = self.worker
+        if worker is None or self.settings is None:
+            self._say("screen read: start the overlay first")
+            return
+        if worker.page:
+            worker.set_page([])
+            self._say("screen read cleared")
+            return
+        if self._screen_worker is not None:
+            return  # one at a time
+        frame = worker.last_frame
+        if frame is None:
+            self._say("screen read: no frame yet")
+            return
+        try:
+            reader = build_screen_reader(self.settings, self.secrets)
+            png = encode_frame(frame.image)
+        except (StartError, ScreenReadError) as exc:
+            self._say(str(exc))
+            return
+        self._say(f"reading the screen with {reader.name}...")
+        self._screen_worker = _ScreenWorker(reader, png, self.settings.target_lang, self.settings.game or self.title)
+        self._screen_worker.done.connect(self._on_screen_read)
+        self._screen_worker.failed.connect(self._on_screen_failed)
+        self._screen_worker.finished.connect(self._on_screen_worker_finished)
+        self._screen_worker.start()
+
+    def _on_screen_read(self, texts: list[ScreenText]) -> None:
+        if self.worker is None:
+            return
+        stamp = time.strftime("%H:%M:%S") if self.settings is not None and self.settings.chat_timestamps else ""
+        self.worker.set_page([ChatLine(t.title, t.text, -1, stamp) for t in texts])
+        self._say(f"screen read: {len(texts)} text(s)" if texts else "screen read: nothing to translate")
+
+    def _on_screen_failed(self, message: str) -> None:
+        self._say(f"screen read failed: {message}")
+
+    def _on_screen_worker_finished(self) -> None:
+        self._screen_worker = None
 
     # -- area selection ------------------------------------------------------
 

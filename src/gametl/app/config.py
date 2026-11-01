@@ -24,6 +24,7 @@ DEFAULT_HOTKEYS: dict[str, str] = {
     "pause": "ctrl+shift+p",  # hide translations, keep running
     "rescan": "ctrl+shift+r",  # forget tracked blocks and read the screen afresh
     "select": "ctrl+shift+a",  # drag-select the area to translate (e.g. the subtitle strip)
+    "read": "ctrl+shift+d",  # read the whole screen with a vision model, onto the chat card (again: clear)
     "settings": "ctrl+shift+s",  # open the settings window
 }
 
@@ -66,6 +67,11 @@ class Settings:
     chat_corner: str = "bottom-left"  # "bottom-left" | "bottom-right" | "top-left" | "top-right"
     chat_width: int = 38  # % of the window width
     chat_timestamps: bool = True  # the time each line was said, in front of it
+    # screen read (the "read" hotkey): which vision model reads the frame; "claude" uses the Anthropic key and
+    # `screen_model` (empty = `model`); "openai" is any OpenAI-compatible endpoint with its own key
+    screen_reader: str = "claude"  # "claude" | "openai"
+    screen_model: str = ""
+    screen_base_url: str = "https://api.openai.com/v1"
     # HUD text sharing the area: subtitles are centred and one size; prompts and objectives are not.
     subtitle_center_tolerance: int = 10  # % of the area width a block's centre may be off the area's centre; 0 = off
     subtitle_size_tolerance: int = 35  # % a block's line height may differ from the learned subtitle size; 0 = off

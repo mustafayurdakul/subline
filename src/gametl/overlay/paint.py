@@ -410,7 +410,11 @@ class BlockPainter:
         for line in card.lines:
             stamp_w = stamps.horizontalAdvance(line.stamp) + round(px * 0.4) if line.stamp else 0
             text_w = inner if line.speaker else inner - stamp_w  # with no name row the time shares the first row
-            rows = wrap_words(line.text, max(px, text_w), lambda s: measure(s, px))
+            rows = [  # a screen read's page keeps its paragraphs
+                row
+                for paragraph in line.text.split("\n")
+                for row in wrap_words(paragraph, max(px, text_w), lambda s: measure(s, px))
+            ]
             laid.append((line, stamp_w, rows))
 
         def rows_of(entry: tuple[ChatLine, int, list[str]]) -> int:
@@ -423,6 +427,10 @@ class BlockPainter:
         room_top, room_bottom = chat_room(card, margin)
         while len(laid) > 1 and height_of(laid) > room_bottom - room_top:
             del laid[0]  # the oldest line goes first; the newest is never dropped
+        if height_of(laid) > room_bottom - room_top:  # one line alone too tall (a long page): cut, with a mark
+            line, stamp_w, rows = laid[0]
+            fit = max(1, int((room_bottom - room_top - 2 * pad) / line_h) - (1 if line.speaker else 0))
+            laid[0] = (line, stamp_w, [*rows[: fit - 1], "…"])
         rect = chat_card_rect(card, width, height_of(laid), margin)
         entries: list[ChatEntry] = []
         top = float(rect.top() + pad)
@@ -582,9 +590,12 @@ class BlockPainter:
         line_h = placed.line_height
         fg = QColor(*card.fg)
         for entry in placed.entries:
-            colour = QColor(*CHAT_PALETTE[entry.line.speaker_index % len(CHAT_PALETTE)]) if entry.line.speaker else None
+            # A speaker's colour; a line with none, or a screen read's page (a title, no speaker index), the plain bar.
+            colour = CHAT_BAR_PLAIN
+            if entry.line.speaker and entry.line.speaker_index >= 0:
+                colour = QColor(*CHAT_PALETTE[entry.line.speaker_index % len(CHAT_PALETTE)])
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(colour or CHAT_BAR_PLAIN)
+            p.setBrush(colour)
             p.drawRoundedRect(QRectF(entry.bar), entry.bar.width() / 2, entry.bar.width() / 2)
             if entry.line.stamp:
                 muted = QColor(*card.fg, CHAT_STAMP_ALPHA)
