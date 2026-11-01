@@ -1,8 +1,8 @@
-"""The chat card: laid out in its corner above the strip, lines oldest first
-with the newest brightest, names in their speaker's colour, words wrapped
-to the card, the bands over the source lines, and the card drawn only
-when it has lines. Runs offscreen; nothing reads glyph shapes, so a
-font-less runner passes too."""
+"""The chat card: laid out in its corner above the strip, lines oldest
+first, the time and the name in front of the words, names in their
+speaker's colour, words wrapped to the card, the bands over the source
+lines, and the card drawn only when it has lines. Runs offscreen; nothing
+reads glyph shapes, so a font-less runner passes too."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from gametl.overlay.paint import (
     ChatCard,
     ChatLine,
     chat_card_rect,
-    chat_opacity,
 )
 
 AREA = (0, 0, 800, 450)
@@ -37,9 +36,9 @@ def painter(qapp: QApplication) -> BlockPainter:
     return BlockPainter()
 
 
-def card(lines: list[tuple[str, str]], **kwargs) -> ChatCard:
+def card(lines: list[tuple[str, str]], stamp: str = "", **kwargs) -> ChatCard:
     speakers = {name: i for i, name in enumerate(dict.fromkeys(name for name, _ in lines if name))}
-    entries = [ChatLine(name, text, speakers.get(name, -1)) for name, text in lines]
+    entries = [ChatLine(name, text, speakers.get(name, -1), stamp) for name, text in lines]
     return ChatCard(AREA, entries, **{"zone": STRIP, "font_px": 20, **kwargs})
 
 
@@ -78,17 +77,31 @@ def test_the_card_sits_in_its_corner_above_the_strip(painter: BlockPainter) -> N
     assert chat_card_rect(ChatCard(AREA, corner="top-right"), 100, 50, 10).topRight().x() == 800 - 10 - 1
 
 
-def test_lines_run_oldest_to_newest_and_fade_with_age(painter: BlockPainter) -> None:
+def test_lines_run_oldest_to_newest(painter: BlockPainter) -> None:
     placed = painter.place_chat(card(SAMPLE))
     entries = placed.entries
     assert [e.line.text for e in entries] == [text for _, text in SAMPLE]
-    assert [e.opacity for e in entries] == [chat_opacity(2), chat_opacity(1), 1.0]
     assert entries[0].text.top() < entries[1].text.top() < entries[2].text.top()
     assert all(e.text.top() >= placed.card.top() and e.text.bottom() <= placed.card.bottom() for e in entries)
-    assert chat_opacity(0) == 1.0 and chat_opacity(1) < 1.0 and chat_opacity(10) == chat_opacity(20) > 0  # a floor
     # A line without a speaker has no name box and its words start at the card's padding.
     (entry,) = painter.place_chat(card([("", "Hello.")])).entries
-    assert entry.name.isEmpty() and entry.text.left() == placed.entries[0].name.left()
+    assert entry.name.isEmpty() and entry.stamp.isEmpty() and entry.text.left() == placed.entries[0].name.left()
+
+
+def test_the_time_goes_in_front_of_the_name(painter: BlockPainter) -> None:
+    placed = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=0.6))
+    for entry in placed.entries:
+        assert entry.stamp.left() == placed.card.left() + round(20 * 0.55)
+        assert entry.stamp.right() < entry.name.left() < entry.text.left()  # time, name, words
+        assert entry.stamp.top() == entry.name.top() == entry.text.top()
+    (plain,) = painter.place_chat(card([("", "Hello.")], stamp="21:36:05", width=0.6)).entries
+    assert plain.name.isEmpty() and plain.stamp.right() < plain.text.left()  # no name: time, then the words
+    with_time = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=0.6)).entries[0].text.width()
+    without = painter.place_chat(card(SAMPLE, width=0.6)).entries[0].text.width()
+    assert with_time < without  # the words give way to the time
+    # On a narrow card the time and the name together would leave the words no room: the name takes a row.
+    (narrow,) = painter.place_chat(card(SAMPLE[:1], stamp="21:36:05", width=0.25)).entries
+    assert narrow.stamp.right() < narrow.name.left() and narrow.text.top() > narrow.name.top()
 
 
 def test_long_lines_wrap_to_the_card(painter: BlockPainter) -> None:
@@ -116,7 +129,6 @@ def test_the_oldest_lines_go_when_the_card_would_not_fit(painter: BlockPainter) 
     assert placed.card.top() >= 20 and placed.card.bottom() < STRIP[1]  # fits between the margin and the strip
     assert 0 < len(placed.entries) < 12
     assert [e.line.text for e in placed.entries] == [text for _, text in many[-len(placed.entries) :]]  # newest kept
-    assert placed.entries[-1].opacity == 1.0
 
 
 def test_a_faint_card_loses_its_border_and_shadows_its_text(painter: BlockPainter) -> None:

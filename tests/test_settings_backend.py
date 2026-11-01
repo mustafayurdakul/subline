@@ -320,7 +320,11 @@ def test_the_preview_shows_the_chat_card_above_the_strip(qapp, tmp_path: Path) -
     settings = Settings(render="chat", chat_lines=2, subtitle_font_px=40, subtitle_hide_source=True)
     game_line, card = preview_blocks(settings, 960, 540, painter)
     assert isinstance(card, ChatCard) and card.area == (0, 0, 960, 540) and card.zone == (0, 405, 960, 540)
-    assert [(ln.speaker, ln.text) for ln in card.lines] == CHAT_LINES[-2:]  # as many lines as kept
+    assert [(ln.stamp, ln.speaker, ln.text) for ln in card.lines] == CHAT_LINES[-2:]  # as many lines as kept
+    assert all(
+        ln.stamp == ""
+        for ln in preview_blocks(Settings(render="chat", chat_timestamps=False), 960, 540, painter)[1].lines
+    )
     assert card.font_px == game_line.font_px == 20  # to scale, like the subtitle
     assert card.covers == [game_line.bbox] and game_line.bbox[1] > 405  # the game's line, in the strip, hidden
     placed = painter.place_chat(card)

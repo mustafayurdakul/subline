@@ -60,6 +60,8 @@ def test_cli_options_override_profile_only_when_given() -> None:
     )
     s = settings_from_args(chat, base)
     assert (s.render, s.chat_lines, s.chat_seconds, s.chat_corner, s.chat_width) == ("chat", 6, 0, "top-right", 50)
+    assert s.chat_timestamps is True
+    assert settings_from_args(build_parser().parse_args(["--no-chat-timestamps"]), base).chat_timestamps is False
 
 
 def test_window_titles_are_none_without_a_desktop(monkeypatch: pytest.MonkeyPatch) -> None:

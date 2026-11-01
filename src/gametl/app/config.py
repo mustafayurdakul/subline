@@ -65,6 +65,7 @@ class Settings:
     chat_seconds: int = 20
     chat_corner: str = "bottom-left"  # "bottom-left" | "bottom-right" | "top-left" | "top-right"
     chat_width: int = 38  # % of the window width
+    chat_timestamps: bool = True  # the time each line was said, in front of it
     # HUD text sharing the area: subtitles are centred and one size; prompts and objectives are not.
     subtitle_center_tolerance: int = 10  # % of the area width a block's centre may be off the area's centre; 0 = off
     subtitle_size_tolerance: int = 35  # % a block's line height may differ from the learned subtitle size; 0 = off

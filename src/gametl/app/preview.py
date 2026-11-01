@@ -28,11 +28,11 @@ REFERENCE_WIDTH = 1920  # the game the preview frame stands for: 1080p
 DEFAULT_FONT_PX = 36  # at 1080p, when the size is the game's own, which the preview cannot know
 DEFAULT_COLOR = (242, 242, 242)
 STRIP = 0.25  # of the frame: the bottom strip the game's line sits in, as the default area
-# The chat card's sample: what was said before the game's line, and the line itself last.
+# The chat card's sample: what was said before the game's line, and the line itself last, with the times.
 CHAT_LINES = [
-    ("Casey", "Nereye gidiyorsun?"),
-    ("Alan", "Işıklar söndüğünde buradaydın."),
-    ("Casey", "Sanki sinyal kalitesi kötüymüş gibi geliyor."),
+    ("21:36:05", "Casey", "Nereye gidiyorsun?"),
+    ("21:36:11", "Alan", "Işıklar söndüğünde buradaydın."),
+    ("21:36:18", "Casey", "Sanki sinyal kalitesi kötüymüş gibi geliyor."),
 ]
 
 
@@ -73,10 +73,11 @@ def preview_blocks(settings: Settings, width: int, height: int, painter: BlockPa
     pill_alpha = max(0, min(255, int(settings.subtitle_pill_alpha)))
     if chat:
         shown = CHAT_LINES[-max(1, int(settings.chat_lines)) :]
-        speakers = {name: i for i, name in enumerate(dict.fromkeys(name for name, _ in CHAT_LINES))}
+        speakers = {name: i for i, name in enumerate(dict.fromkeys(name for _, name, _ in CHAT_LINES))}
+        stamps = bool(settings.chat_timestamps)
         card = ChatCard(
             area=(0, 0, width, height),
-            lines=[ChatLine(name, text, speakers[name]) for name, text in shown],
+            lines=[ChatLine(name, text, speakers[name], stamp if stamps else "") for stamp, name, text in shown],
             zone=zone,
             corner=settings.chat_corner if settings.chat_corner in CHAT_CORNERS else CHAT_CORNERS[0],
             width=chat_width_share(settings.chat_width),

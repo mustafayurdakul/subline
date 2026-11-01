@@ -48,9 +48,9 @@ from a recording by an earlier build (see
   Long translations wrap at the same size, and lines shown together stack
   instead of overlapping.
 - **Or a chat transcript.** Chat mode keeps the last lines of dialogue on
-  a card in a corner, each with its speaker's name in a colour of its own
-  ("Casey: ..."), the newest bright and the older ones fading, and clears
-  the card when the conversation pauses. Turn speaker names on in the
+  a card in a corner, each with the time it was said and its speaker's
+  name in a colour of its own ("21:36:05 Casey: ..."), and clears the
+  card when the conversation pauses. Turn speaker names on in the
   game: the name in front of a line is kept as it is and the words alone
   are translated, with the speaker passed to DeepL and Claude as a hint.
 - **Three translators.** DeepL (the default: fast, strong for European
@@ -302,9 +302,11 @@ Most settings have a command-line equivalent (the hotkeys do not);
   corner sits above the area read when that is the lower part of the
   window, clear of the game's own subtitles, which **Hide the original
   line** can cover as in subtitle mode; the oldest lines are dropped when
-  the card would not fit. The text is the subtitle size (held from the
-  first line up), font and weight, white unless a colour is set, on a card
-  of the pill's opacity. Turn speaker names on in the game: a capitalised
+  the card would not fit. Each line starts with the clock time it was
+  said (**Time stamps**, `--no-chat-timestamps` turns them off). The text
+  is the subtitle size (held from the first line up), font and weight,
+  white unless a colour is set, on a card of the pill's opacity. Turn
+  speaker names on in the game: a capitalised
   name before a colon ("Casey: ...") is taken as the speaker in subtitle
   and chat mode (not in place, where labels such as "Objective:" count and
   are translated whole; a few common English lead-ins are never taken as

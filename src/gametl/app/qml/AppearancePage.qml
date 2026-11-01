@@ -43,6 +43,12 @@ ColumnLayout {
             Gauge { key: "chat_width"; from: 20; to: 70; stepSize: 2; suffix: "%" }
         }
         SettingRow {
+            visible: root.chat
+            label: "Time stamps"
+            helper: "The clock time each line was said, in front of it."
+            Toggle { key: "chat_timestamps" }
+        }
+        SettingRow {
             visible: String(root.s.render) === "inplace"
             label: "In-place style"
             helper: "Auto patches the original out in its own colours, or uses a pill where the background is busy."

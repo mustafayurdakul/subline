@@ -122,6 +122,7 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
         chat_seconds=max(0.0, float(settings.chat_seconds)),
         chat_corner=settings.chat_corner if settings.chat_corner in CHAT_CORNERS else CHAT_CORNERS[0],
         chat_width=chat_width_share(settings.chat_width),
+        chat_timestamps=settings.chat_timestamps,
         subtitle_center_tolerance=max(0, settings.subtitle_center_tolerance) / 100,
         subtitle_size_tolerance=max(0, settings.subtitle_size_tolerance) / 100,
         debug=settings.debug,

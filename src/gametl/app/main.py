@@ -109,6 +109,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"chat: card width, {CHAT_WIDTH_RANGE[0]}-{CHAT_WIDTH_RANGE[1]} (default {Settings.chat_width})",
     )
     look.add_argument(
+        "--no-chat-timestamps", action="store_true", default=None, help="chat: no time in front of each line"
+    )
+    look.add_argument(
         "--subtitle-font", type=int, metavar="PX", help="fixed subtitle font size; 0 = the game's own size"
     )
     look.add_argument(
@@ -228,6 +231,7 @@ _VALUE_OPTIONS = {
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
 _FLAG_OPTIONS = {
     "no_center_area": ("center_area", False),
+    "no_chat_timestamps": ("chat_timestamps", False),
     "hide_source": ("subtitle_hide_source", True),
     "include_frame": ("include_frame", True),
     "structured": ("structured", True),

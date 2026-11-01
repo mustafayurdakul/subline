@@ -57,6 +57,7 @@ class PipelineConfig:
     chat_seconds: float = 20.0  # 0 = lines never age out
     chat_corner: str = "bottom-left"
     chat_width: float = 0.38  # share of the area's width
+    chat_timestamps: bool = True
     # Which blocks in the zone are subtitles rather than HUD text: centred in the
     # zone (within a fraction of its width) and about the learned line height.
     subtitle_center_tolerance: float = 0.10  # 0 = off
@@ -355,7 +356,8 @@ class PipelineThread(QThread):
         if not self._transcript and not covers:
             return []
         lines = [
-            ChatLine(u.speaker, u.text, self._transcript.speaker_index(u.speaker)) for u in self._transcript.utterances
+            ChatLine(u.speaker, u.text, self._transcript.speaker_index(u.speaker), self._stamp(u.at, now))
+            for u in self._transcript.utterances
         ]
         return [
             ChatCard(
@@ -371,6 +373,12 @@ class PipelineThread(QThread):
                 covers=covers,
             )
         ]
+
+    def _stamp(self, at: float, now: float) -> str:
+        """The clock time a line first seen `at` (monotonic) was said, as the card shows it; "" when off."""
+        if not self.cfg.chat_timestamps:
+            return ""
+        return time.strftime("%H:%M:%S", time.localtime(time.time() - (now - at)))
 
     # -- subtitle zone ------------------------------------------------------------
 

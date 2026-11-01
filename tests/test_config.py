@@ -59,7 +59,7 @@ def test_subtitle_defaults_favour_a_steady_look() -> None:
     assert "center_zone" not in old.to_dict()
     assert old.subtitle_background == "pill" and old.subtitle_pill_alpha == 230
     assert (s.render, s.chat_lines, s.chat_seconds) == ("subtitle", 4, 20)
-    assert (s.chat_corner, s.chat_width) == ("bottom-left", 38)
+    assert (s.chat_corner, s.chat_width, s.chat_timestamps) == ("bottom-left", 38, True)
     assert Settings.from_dict({"subtitle_bold": True}).subtitle_weight == "bold"  # the switch before weights
     assert Settings.from_dict({"subtitle_bold": False}).subtitle_weight == "semibold"
     assert Settings.from_dict({"font": "Fira Sans"}).font == "Segoe UI"  # a font 0.1.6 shipped and 0.1.8 does not

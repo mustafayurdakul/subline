@@ -129,7 +129,17 @@ def test_chat_mode_keeps_a_transcript_with_the_speakers() -> None:
     try:
         (card,) = process_until(thread, lambda r: bool(r))
         assert isinstance(card, ChatCard)
-        assert card.lines == [ChatLine("Casey", "STAY CLOSE.", 0)]  # the name is kept, the words translated
+        (said,) = card.lines
+        assert (said.speaker, said.text, said.speaker_index) == (
+            "Casey",
+            "STAY CLOSE.",
+            0,
+        )  # the name kept, words translated
+        assert said.stamp == time.strftime("%H:%M:%S") or said.stamp < time.strftime("%H:%M:%S")  # said just now
+        thread.update_config(replace(thread.cfg, chat_timestamps=False))
+        (card,) = thread._process(frame())
+        assert card.lines == [ChatLine("Casey", "STAY CLOSE.", 0)]  # no stamp
+        thread.update_config(replace(thread.cfg, chat_timestamps=True))
         assert card.corner == "top-left" and card.zone == STRIP and card.area == (0, 0, WIDTH, HEIGHT)
         assert card.covers == []  # hide_source off
         assert translator.requests == [["Stay close."]] and translator.speakers == [["Casey"]]
