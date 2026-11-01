@@ -89,15 +89,17 @@ def test_lines_run_oldest_to_newest(painter: BlockPainter) -> None:
 
 
 def test_the_time_goes_in_front_of_the_name(painter: BlockPainter) -> None:
-    placed = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=0.6))
+    # The widest card: on a font-less runner every glyph is a full box, and the time and the
+    # name must still fit side by side with room left for the words.
+    placed = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=1.0))
     for entry in placed.entries:
         assert entry.stamp.left() == placed.card.left() + round(20 * 0.55)
         assert entry.stamp.right() < entry.name.left() < entry.text.left()  # time, name, words
         assert entry.stamp.top() == entry.name.top() == entry.text.top()
-    (plain,) = painter.place_chat(card([("", "Hello.")], stamp="21:36:05", width=0.6)).entries
+    (plain,) = painter.place_chat(card([("", "Hello.")], stamp="21:36:05", width=1.0)).entries
     assert plain.name.isEmpty() and plain.stamp.right() < plain.text.left()  # no name: time, then the words
-    with_time = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=0.6)).entries[0].text.width()
-    without = painter.place_chat(card(SAMPLE, width=0.6)).entries[0].text.width()
+    with_time = painter.place_chat(card(SAMPLE, stamp="21:36:05", width=1.0)).entries[0].text.width()
+    without = painter.place_chat(card(SAMPLE, width=1.0)).entries[0].text.width()
     assert with_time < without  # the words give way to the time
     # On a narrow card the time and the name together would leave the words no room: the name takes a row.
     (narrow,) = painter.place_chat(card(SAMPLE[:1], stamp="21:36:05", width=0.25)).entries
