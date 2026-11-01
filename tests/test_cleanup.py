@@ -43,7 +43,7 @@ def populated(tmp_path: Path) -> tuple[ProfileStore, MemorySecretStore]:
     return store, secrets
 
 
-def test_forget_trial_removes_what_0_2_left_and_nothing_else(tmp_path: Path) -> None:
+def test_forget_trial_removes_stale_entries_and_nothing_else(tmp_path: Path) -> None:
     store, secrets = populated(tmp_path)
     forget_trial(store, secrets)
     assert all(secrets.get(name) is None for name in STALE_SECRET_NAMES)

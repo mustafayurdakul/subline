@@ -19,7 +19,7 @@ def make_icon(running: bool, paused: bool = False, starting: bool = False, size:
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     unit = size / 64
-    frame = GOLD if running or starting or paused else GREY
+    frame = GOLD if running or starting else GREY  # a paused session is a running one
     strip = GOLD if running and not paused else GREY
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(DARK)

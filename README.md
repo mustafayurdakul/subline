@@ -47,17 +47,6 @@ from a recording by an earlier build (see
   centred in the area.
   Long translations wrap at the same size, and lines shown together stack
   instead of overlapping.
-- **Or a chat transcript.** Chat mode keeps the last lines of dialogue on
-  a card in a corner, each with a bar in its speaker's colour, the name
-  over the words and the time it was said, and clears the card when the
-  conversation pauses. Turn speaker names on in the
-  game: the name in front of a line is kept as it is and the words alone
-  are translated, with the speaker passed to DeepL and Claude as a hint.
-- **Read the screen.** A hotkey sends the whole frame to a vision model
-  (Claude, or any OpenAI-compatible service: OpenAI, Gemini, Mistral, a
-  local Ollama) and puts every text worth reading on it, notes, letters,
-  signs, menus, translated onto the chat card. One call per press; the
-  frame leaves the computer only then.
 - **Three translators.** DeepL (the default: fast, strong for European
   languages, free tier), Claude (glossary, tone notes, any language), or
   an offline CTranslate2 model (no network; an optional download). DeepL
@@ -118,8 +107,9 @@ Credential Manager entries (`gametl/DEEPL_AUTH_KEY`,
 page, or `gametl-cli --remove-all-data`, deletes the folder and the
 entries. What versions up to 0.2.1 kept for their licence and trial (two
 more entries, `trial_used` in `config.json` and the registry key
-`HKEY_CURRENT_USER\Software\Subline`) is removed the first time 0.3 or
-later starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
+`HKEY_CURRENT_USER\Software\Subline`), and the screen-read key of 0.3.0
+and 0.3.1 (`gametl/SCREEN_API_KEY`), are removed the first time a later
+version starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
 which goes when it quits.
 
 ### From source
@@ -181,11 +171,11 @@ every control.
 
 Changes take effect as you make them, on the running overlay too: a typed
 value once the typing pauses, and the game window, game name, source
-language, glossary, tone notes and Claude model when you press Enter or
-leave the field. The area, the filters, the look and most of the timing
-reach a running overlay directly; a new window, game name, language,
-translator or capture rate restarts it (Claude's options do so only while
-Claude is in use).
+language, OCR language, glossary, tone notes and Claude model when you
+press Enter or leave the field. The area, the filters, the look and most
+of the timing reach a running overlay directly; a new window, game name,
+language, translator or draft, OCR on the GPU, capture rate or a cache
+setting restarts it (Claude's options do so only while Claude is in use).
 
 Next time, run Subline the same way. If the game of a saved profile is
 open, that profile loads and the overlay starts at once; otherwise the
@@ -204,7 +194,6 @@ Default hotkeys (changeable on the Hotkeys page):
 | Ctrl+Shift+T | start / stop the overlay |
 | Ctrl+Shift+P | pause / resume (hides translations, keeps running) |
 | Ctrl+Shift+R | rescan: forget tracked lines and read the screen afresh |
-| Ctrl+Shift+D | read the screen with the vision model onto the chat card; again clears it |
 | Ctrl+Shift+S | open settings |
 
 Pause and rescan are held only while the overlay runs, so the same keys
@@ -284,9 +273,8 @@ Most settings have a command-line equivalent (the hotkeys do not);
   both work; given a code they do not know, or a script such as
   `cyrillic`, DeepL and Claude detect the language themselves.
 - **Render** (Appearance page): `subtitle` draws every line in one style
-  centred in the selected area; `chat` keeps the last lines as a
-  transcript card; `inplace` puts each translation on its own OCR box in
-  the game's own colours. In subtitle mode the font size and the text
+  centred in the selected area; `inplace` puts each translation on its own
+  OCR box in the game's own colours. In subtitle mode the font size and the text
   colour are learned from the game's first lines and then held for the
   session (set a size or a `#RRGGBB` colour to override), and the text
   sits on a steady baseline at the bottom of the area (**Position**
@@ -297,48 +285,16 @@ Most settings have a command-line equivalent (the hotkeys do not);
   takes 0-255), a `shadow` like the game's own text, or `none`. **Hide the
   original line** covers the game's own text when the translation is drawn
   elsewhere; off by default.
-- **Chat mode** (Appearance page, **Render** `chat`): the card shows the
-  last **Lines kept** (`--chat-lines`, default 4) lines of dialogue,
-  oldest first, each with a bar in its speaker's fixed colour, the name
-  over the words and the time at the right; a line
-  leaves **Clear after** seconds (`--chat-seconds`, default 20; 0 keeps
-  it) after it was last on screen, so the card is gone between
-  conversations and a line the game leaves up stays. The card takes
-  **Card width** (`--chat-width`, default 38 %, 20-70) of the game window
-  in its **Corner** (`--chat-corner`, default `bottom-left`); a bottom
-  corner sits above the area read when that is the lower part of the
-  window, clear of the game's own subtitles, which **Hide the original
-  line** can cover as in subtitle mode; the oldest lines are dropped when
-  the card would not fit. The card is frosted glass: the game under it,
-  blurred and darkened by **Card opacity**, as the game's own subtitle box
-  does it. Each line carries the clock time it was said,
-  `HH:MM:SS` (**Time stamps**, `--no-chat-timestamps` turns them off). The text
-  is the subtitle size (held from the first line up), font and weight,
-  white unless a colour is set, on a card of the pill's opacity. Turn
-  speaker names on in the game: a capitalised
-  name before a colon ("Casey: ..."), or on a line of its own above the
-  words as Alan Wake 2 prints it, is taken as the speaker in subtitle
-  and chat mode (not in place, where labels such as "Objective:" count and
-  are translated whole; a few common English lead-ins are never taken as
-  names), kept as it is while the words alone are translated and cached,
-  and passed to DeepL (in its context, with the lines being translated)
-  and Claude (beside the items) as a hint for register and pronouns. A
-  line that grows (a typewriter reveal) or is read differently by OCR
-  replaces its earlier version; the next line at the same spot, or the
-  same words from another speaker, is a new entry. Claude translates each
-  line in the light of the last 30, with their speakers, which is what
-  chat mode is for; DeepL is faster and sees the same lines as context.
-- **Screen read** (Translation page, hotkey **Read the screen**, default
-  Ctrl+Shift+D): the frame on screen goes to a vision model, which returns
-  every text a player would want translated (notes, letters, signs,
-  menus; HUD skipped; unreadable parts marked) as entries on the chat
-  card, in every render mode, each with a title in place of a speaker and
-  the time of the read; pressing the hotkey again clears them. **Model
-  service** is Claude (the Anthropic key; **Model** empty uses the Claude
-  model above) or OpenAI-compatible (**Base URL** up to `/v1`, the model's
-  name, and its key under API keys; a local Ollama or LM Studio needs no
-  key). The frame is sent as a PNG no wider than 1568 px. About $0.0003
-  a press on Claude Haiku, one to three seconds.
+- **Speaker names**: turn them on in the game. A capitalised name before
+  a colon ("Casey: ..."), or on a line of its own above the words as Alan
+  Wake 2 prints it, is taken as the speaker in subtitle mode (not in
+  place, where labels such as "Objective:" count and are translated
+  whole; a few common English lead-ins are never taken as names). The
+  name stays as the game printed it while the words alone are translated
+  and cached, and the speaker goes to DeepL (in its context, with the
+  lines being translated) and Claude (beside the items) as a hint for
+  register and pronouns. Claude sees the last 30 lines with their
+  speakers.
 - **Font and Weight** (Appearance page): any font installed on the
   computer (default Segoe UI) and a weight from Regular to Bold (default
   SemiBold). The preview on the page is painted by the overlay's own
@@ -373,7 +329,7 @@ Most settings have a command-line equivalent (the hotkeys do not);
 ## Command line
 
 In the packaged build, run these with `gametl-cli` (see
-[Packaged build](#packaged-build)); from source, with `uv run gametl`.
+[Portable build](#portable-build)); from source, with `uv run gametl`.
 
 `gametl` on its own runs the tray app with the profile of the game that is
 open, or the last one used (see [Getting started](#getting-started)).
@@ -467,8 +423,8 @@ tests/
 docs/         demo clip, renders of the settings pages (docs/ui)
 ```
 
-[PLAN.md](PLAN.md) is the design log of the first builds (up to 0.1.0):
-the early decisions and the measurements behind them. This README
+[PLAN.md](PLAN.md) is the design log: the early decisions and the
+measurements behind them, then selected later decisions. This README
 describes the app as it is now.
 
 ## Development
@@ -479,7 +435,7 @@ uv run ruff check src tests scripts
 uv run ruff format src tests scripts
 ```
 
-The overlay, selector and hotkey tests need an interactive desktop
+The overlay and hotkey-registration tests need an interactive desktop
 session; CI skips them.
 
 CI and the release build install with `uv sync --locked`: after a change
@@ -504,8 +460,7 @@ opencv-python-headless provides `cv2`); in an environment that had both,
   `--scale 1.5` renders as on a 150 % screen, `--profiles` adds the open
   Profiles popup and `--translator claude` shows the Claude card. The
   renders in `docs/ui` come from `preview_ui.py --full --profiles --out docs/ui`
-  and `--page appearance --full --background shadow --out docs/ui` (and
-  `--render chat` for the chat-mode page).
+  and `--page appearance --full --background shadow --out docs/ui`.
 - `gametl --check-ui` (or `python -m gametl.app.settings_window --check`)
   loads every page and popup offscreen and reports QML problems. CI and
   the release workflow run it on the frozen build too
@@ -531,15 +486,16 @@ and `gametl-cli.exe` on one shared runtime; `--installer` also compiles
 lives; `pyproject.toml` reads it from there) and merge to `main`, and the
 workflow, seeing a version with no tag yet, builds the folder, checks its
 settings window with `gametl-cli.exe --check-ui`, creates the tag
-`v<version>` at the merge commit and attaches `gametl-v<version>-win64.zip`
-to its release. A merge whose version is already tagged builds nothing.
+`v<version>` at the merge commit and attaches `Subline-v<version>-setup.exe`
+and `gametl-v<version>-win64.zip` to its release. A merge whose version is already tagged builds nothing.
 Pushing a tag by hand (a dash, as in `v0.2.0-beta1`, makes a pre-release)
 or running the workflow from the Actions tab with a tag name does the
 same; with the tag left empty, the workflow builds without releasing and
-keeps the zip as a seven-day artifact. The tag must match `__version__`.
+keeps the installer and the zip as seven-day artifacts. The tag must match `__version__`.
 
 The releases of a private repository are visible to its collaborators
-only; for customers, publish the zip elsewhere. The executables are not
+only; to share builds publicly, make the repository public or publish
+the files elsewhere. The executables are not
 code-signed, so Windows warns about an unknown publisher until a signing
 step is added.
 

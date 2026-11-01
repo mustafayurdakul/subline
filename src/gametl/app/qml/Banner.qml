@@ -28,6 +28,7 @@ Rectangle {
         width: 40; height: parent.height
         activeFocusOnTab: true
         Keys.onReturnPressed: root.dismissed()
+        Keys.onEnterPressed: root.dismissed()
         Keys.onSpacePressed: root.dismissed()
         Rectangle {
             anchors.centerIn: parent

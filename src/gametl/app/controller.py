@@ -15,26 +15,16 @@ from PySide6.QtCore import QObject, QThread, Signal
 from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
 from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
-from ..overlay.paint import CHAT_CORNERS, ChatLine
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
 from ..overlay.window import OverlayWindow
 from ..tracking.filters import LineFilter
 from ..translate.base import Translator
 from ..translate.cache import TranslationCache
 from ..translate.dummy import EchoTranslator, UppercaseTranslator, VerboseTranslator
-from ..translate.screen import (
-    ClaudeScreenReader,
-    OpenAICompatibleScreenReader,
-    ScreenReader,
-    ScreenReadError,
-    ScreenText,
-    encode_frame,
-)
 from ..translate.service import TranslationService
-from .config import ProfileStore, Settings, chat_width_share
+from .config import DRAFTS, TRANSLATORS, ProfileStore, Settings
 from .credentials import (
     DEEPL_KEY,
-    SCREEN_KEY,
     SecretStore,
     WindowsCredentialStore,
     anthropic_api_key,
@@ -127,11 +117,6 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
         subtitle_weight=settings.subtitle_weight,
         subtitle_position=settings.subtitle_position,
         subtitle_hide_source=settings.subtitle_hide_source,
-        chat_lines=max(1, int(settings.chat_lines)),
-        chat_seconds=max(0.0, float(settings.chat_seconds)),
-        chat_corner=settings.chat_corner if settings.chat_corner in CHAT_CORNERS else CHAT_CORNERS[0],
-        chat_width=chat_width_share(settings.chat_width),
-        chat_timestamps=settings.chat_timestamps,
         subtitle_center_tolerance=max(0, settings.subtitle_center_tolerance) / 100,
         subtitle_size_tolerance=max(0, settings.subtitle_size_tolerance) / 100,
         debug=settings.debug,
@@ -142,13 +127,12 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
 # -- translators ---------------------------------------------------------------------
 
 
-class StartError(RuntimeError):
+class StartError(Exception):
     """A start that cannot go ahead, with a message fit for the status line."""
 
 
-# Translators for trying the pipeline without a key or a network.
+# The translators that translate nothing, for trying the pipeline without a key or a network.
 _DUMMY_TRANSLATORS = {"uppercase": UppercaseTranslator, "verbose": VerboseTranslator, "echo": EchoTranslator}
-TRANSLATORS = ("deepl", "claude", "offline", *_DUMMY_TRANSLATORS)
 
 
 def translator_name(settings: Settings) -> str:
@@ -156,13 +140,20 @@ def translator_name(settings: Settings) -> str:
     return settings.translator.strip().lower()
 
 
+def draft_name(settings: Settings) -> str:
+    """The draft `settings` names, read the same way ("" for none)."""
+    return settings.draft.strip().lower()
+
+
 def check_translator(settings: Settings, secrets: SecretStore) -> None:
-    """Refuse at once, before any waiting or loading, a translator that does
-    not exist or has no key to work with. Raises StartError."""
+    """Refuse at once, before any waiting or loading, a translator or draft
+    that does not exist or has no key to work with. Raises StartError."""
     name = translator_name(settings)
     if name not in TRANSLATORS:
         raise StartError(f"unknown translator {settings.translator!r}")
-    if "deepl" in (name, settings.draft) and resolve_key(DEEPL_KEY, secrets) is None:
+    if draft_name(settings) not in DRAFTS:
+        raise StartError(f"unknown draft {settings.draft!r}")
+    if "deepl" in (name, draft_name(settings)) and resolve_key(DEEPL_KEY, secrets) is None:
         raise StartError("Add your DeepL key on the Translation page")
     if name == "claude" and not has_anthropic_credentials(secrets):
         raise StartError("Add your Anthropic key on the Translation page")
@@ -183,13 +174,12 @@ def build_deepl_translator(secrets: SecretStore) -> Translator:
 
 
 def build_draft_translator(settings: Settings, store: ProfileStore, secrets: SecretStore) -> Translator | None:
-    if not settings.draft or settings.draft == translator_name(settings):
+    draft = draft_name(settings)
+    if not draft or draft == translator_name(settings):
         return None
-    if settings.draft == "offline":
+    if draft == "offline":
         return build_offline_translator(settings, store)
-    if settings.draft == "deepl":
-        return build_deepl_translator(secrets)
-    return None
+    return build_deepl_translator(secrets)  # check_translator has refused any other name
 
 
 def build_translator(settings: Settings, game: str, store: ProfileStore, secrets: SecretStore) -> Translator:
@@ -227,44 +217,6 @@ def build_claude_translator(settings: Settings, game: str, secrets: SecretStore)
     )
 
 
-def build_screen_reader(settings: Settings, secrets: SecretStore) -> ScreenReader:
-    """The vision model the "read" hotkey sends the frame to. Raises
-    StartError when its key is missing."""
-    if settings.screen_reader == "openai":
-        key = resolve_key(SCREEN_KEY, secrets)
-        if not settings.screen_model.strip():
-            raise StartError("Screen read: name the model on the Translation page")
-        return OpenAICompatibleScreenReader(settings.screen_base_url, settings.screen_model.strip(), key and key[0])
-    if not has_anthropic_credentials(secrets):
-        raise StartError("Screen read: add your Anthropic key on the Translation page")
-    return ClaudeScreenReader(settings.screen_model.strip() or settings.model, api_key=anthropic_api_key(secrets))
-
-
-class _ScreenWorker(QThread):
-    """One screen read on its own thread: the frame goes to the model and
-    the texts come back, without the UI waiting."""
-
-    done = Signal(list)  # list[ScreenText]
-    failed = Signal(str)
-
-    def __init__(self, reader: ScreenReader, png: bytes, target_lang: str, game: str) -> None:
-        super().__init__()
-        self.reader, self.png, self.target_lang, self.game = reader, png, target_lang, game
-
-    def run(self) -> None:
-        try:
-            self.done.emit(self.reader.read(self.png, self.target_lang, self.game))
-        except ScreenReadError as exc:
-            self.failed.emit(str(exc))
-        except Exception as exc:  # anything unforeseen still reaches the status line
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
-
-
-def _spread(values: Iterable[float]) -> str:
-    ordered = sorted(values)
-    return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"
-
-
 # Settings a running session cannot take up on the fly: a change in one of
 # them restarts the session. Everything else (the area, the filters, the
 # timing, the look) reaches the pipeline and the overlay as they run.
@@ -281,7 +233,7 @@ CLAUDE_FIELDS = frozenset({"model", "effort", "thinking", "structured", "tone", 
 
 def restart_fields(settings: Settings) -> frozenset[str]:
     """The SESSION_FIELDS whose change restarts a session run with `settings`."""
-    if "claude" in (translator_name(settings), settings.draft):
+    if translator_name(settings) == "claude":  # a draft is never Claude
         return SESSION_FIELDS
     return SESSION_FIELDS - CLAUDE_FIELDS
 
@@ -297,7 +249,6 @@ class Prepared:
     hwnd: int
     title: str
     settings: Settings
-    game: str
     translator: Translator
     draft: Translator | None
     cache: TranslationCache
@@ -379,7 +330,6 @@ class OverlayController(QObject):
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
         self.last_stats = ""  # stats_text() of the last session, kept when it stops
-        self._screen_worker: _ScreenWorker | None = None  # the screen read under way, if any
 
     # -- state -------------------------------------------------------------
 
@@ -461,7 +411,7 @@ class OverlayController(QObject):
         hwnd: int | None,
         wait: float,
         say: Callable[[str], None],
-        generation: int = 0,
+        generation: int,
     ) -> Prepared:
         """The slow, thread-safe part of start(): find the window (waiting up
         to `wait` seconds), build the translators, read the translation
@@ -480,8 +430,6 @@ class OverlayController(QObject):
         try:
             translator = build_translator(settings, game, self.store, self.secrets)
             draft = build_draft_translator(settings, self.store, self.secrets)
-        except StartError:
-            raise
         except (OSError, ValueError, RuntimeError, ImportError) as exc:
             raise StartError(f"translator setup failed: {exc}") from exc
         for candidate in (translator, draft):
@@ -500,23 +448,23 @@ class OverlayController(QObject):
             engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3], say)
         except Exception as exc:
             raise StartError(f"OCR engine failed to load: {type(exc).__name__}: {exc}") from exc
-        return Prepared(generation, hwnd, title, settings, game, translator, draft, cache, engine, config)
+        return Prepared(generation, hwnd, title, settings, translator, draft, cache, engine, config)
 
     def _on_start_worker_finished(self) -> None:
         """A start thread has ended (its result, queued before, has arrived):
         the last reference to it goes, and with it the thread object."""
         self._start_workers.discard(self.sender())  # type: ignore[arg-type]
 
-    def _settled(self) -> None:
+    def _end_starting(self) -> None:
         """The start in progress has reached its outcome, whichever it is."""
         if self._starting:
             self._starting = False
             self.starting_changed.emit(False)
 
     def _on_prepared(self, prepared: Prepared) -> None:
-        if prepared.generation != self._generation or self.running:
+        if prepared.generation != self._generation:
             return  # a later start() or stop() superseded this one
-        self._settled()
+        self._end_starting()
         try:
             self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
             self.translator, self.cache = prepared.translator, prepared.cache
@@ -551,7 +499,7 @@ class OverlayController(QObject):
     def _on_start_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
             return
-        self._settled()
+        self._end_starting()
         self._fail(message)
 
     def _fail(self, message: str) -> None:
@@ -606,12 +554,12 @@ class OverlayController(QObject):
         if not (self.running or self.starting):
             return
         self._generation += 1
-        self._settled()
+        self._end_starting()
         worker = self.worker
         if worker is not None:
             worker.stop()
             worker.wait(3000)
-        if worker is not None or self.service is not None:
+        if worker is not None:  # the service comes and goes with it
             self.last_stats = self.stats_text()  # the session's numbers, before they are let go
         self._release()
         self.running_changed.emit(False)
@@ -669,52 +617,6 @@ class OverlayController(QObject):
         if self.worker is not None:
             self.worker.rescan()
             self._say("rescanning")
-
-    # -- screen read ----------------------------------------------------------
-
-    def read_screen(self) -> None:
-        """The "read" hotkey: send the frame on screen to the vision model
-        and put what it reads on the card; pressed again while a page
-        shows, clear it. Needs a running session (the overlay to draw on)."""
-        worker = self.worker
-        if worker is None or self.settings is None:
-            self._say("screen read: start the overlay first")
-            return
-        if worker.page:
-            worker.set_page([])
-            self._say("screen read cleared")
-            return
-        if self._screen_worker is not None:
-            return  # one at a time
-        frame = worker.last_frame
-        if frame is None:
-            self._say("screen read: no frame yet")
-            return
-        try:
-            reader = build_screen_reader(self.settings, self.secrets)
-            png = encode_frame(frame.image)
-        except (StartError, ScreenReadError) as exc:
-            self._say(str(exc))
-            return
-        self._say(f"reading the screen with {reader.name}...")
-        self._screen_worker = _ScreenWorker(reader, png, self.settings.target_lang, self.settings.game or self.title)
-        self._screen_worker.done.connect(self._on_screen_read)
-        self._screen_worker.failed.connect(self._on_screen_failed)
-        self._screen_worker.finished.connect(self._on_screen_worker_finished)
-        self._screen_worker.start()
-
-    def _on_screen_read(self, texts: list[ScreenText]) -> None:
-        if self.worker is None:
-            return
-        stamp = time.strftime("%H:%M:%S") if self.settings is not None and self.settings.chat_timestamps else ""
-        self.worker.set_page([ChatLine(t.title, t.text, -1, stamp) for t in texts])
-        self._say(f"screen read: {len(texts)} text(s)" if texts else "screen read: nothing to translate")
-
-    def _on_screen_failed(self, message: str) -> None:
-        self._say(f"screen read failed: {message}")
-
-    def _on_screen_worker_finished(self) -> None:
-        self._screen_worker = None
 
     # -- area selection ------------------------------------------------------
 
@@ -809,3 +711,9 @@ class OverlayController(QObject):
                 f"{totals['cache_write']} cache write over {calls} calls{cost_text}"
             )
         return "\n".join(parts)
+
+
+def _spread(values: Iterable[float]) -> str:
+    """Median, low and high of a set of timings, for stats_text."""
+    ordered = sorted(values)
+    return f"median {ordered[len(ordered) // 2]:.0f}ms min {ordered[0]:.0f}ms max {ordered[-1]:.0f}ms"

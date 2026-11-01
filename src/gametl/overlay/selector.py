@@ -89,7 +89,10 @@ class AreaSelector(QWidget):
 
     def hint(self) -> str:
         if self._rect is not None:
-            return "Enter confirms. Arrow keys nudge (Shift: 10 px, Ctrl: resize). Drag again to redo. Esc cancels."
+            return (
+                f"Enter confirms. Arrow keys nudge (Shift: {BIG_NUDGE} px, Ctrl: resize). "
+                "Drag again to redo. Esc cancels."
+            )
         shift = "frees it" if self.mirror_x else "keeps it centred"
         return f"Drag to select the area to translate. Shift while dragging {shift}. Esc cancels."
 

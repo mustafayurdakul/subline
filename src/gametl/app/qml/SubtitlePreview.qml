@@ -3,12 +3,10 @@ import QtQuick
 // A game-like frame with the subtitle on it as the overlay would draw it:
 // the image comes from the window's preview provider, painted by the same
 // code as the overlay, and is asked for again on every edit. The frame
-// stands for a 1080p game; the image is the bottom-strip area (in chat
-// mode the whole frame, so the card above the strip shows), so sizes in it
-// are to scale (preview.py). Always dark, like a game: no theme colours.
+// stands for a 1080p game; the image is the bottom-strip area, so sizes in
+// it are to scale (preview.py). Always dark, like a game: no theme colours.
 Rectangle {
     id: root
-    readonly property bool chat: String(backend.settings.render) === "chat"
 
     implicitHeight: width * 9 / 16
     clip: true
@@ -43,8 +41,8 @@ Rectangle {
     Image {
         id: zone
         width: parent.width
-        y: root.chat ? 0 : parent.height * 0.75
-        height: root.chat ? parent.height : parent.height * 0.25
+        y: parent.height * 0.75
+        height: parent.height * 0.25
         sourceSize.width: Math.round(width * uiScale)
         sourceSize.height: Math.round(height * uiScale)
         cache: false
@@ -52,10 +50,7 @@ Rectangle {
     }
 
     Rectangle {
-        // Out of the chat card's way: the tag moves left when the card takes the top-right corner.
-        readonly property bool cardHere: root.chat && String(backend.settings.chat_corner) === "top-right"
-        anchors.right: cardHere ? undefined : parent.right
-        anchors.left: cardHere ? parent.left : undefined
+        anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: 10
         width: previewTag.implicitWidth + 16

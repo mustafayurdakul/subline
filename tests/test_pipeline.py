@@ -17,7 +17,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from gametl.app.pipeline import PipelineConfig, PipelineThread
 from gametl.capture.base import Frame
 from gametl.ocr.base import OcrResult, TextLine
-from gametl.overlay.paint import ChatCard, ChatLine
 from gametl.translate.base import TranslationRequest
 from gametl.translate.cache import TranslationCache
 from gametl.translate.dummy import UppercaseTranslator
@@ -114,122 +113,10 @@ class RecordingTranslator(UppercaseTranslator):
 
     def __init__(self) -> None:
         self.requests: list[list[str]] = []
-        self.speakers: list[list[str] | None] = []
 
     def translate(self, request: TranslationRequest) -> list[str]:
         self.requests.append(list(request.texts))
-        self.speakers.append(request.speakers)
         return super().translate(request)
-
-
-def test_chat_mode_keeps_a_transcript_with_the_speakers() -> None:
-    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="chat", chat_corner="top-left", change_threshold=0)
-    translator = thread.service.translator = RecordingTranslator()
-    try:
-        (card,) = process_until(thread, lambda r: bool(r))
-        assert isinstance(card, ChatCard)
-        assert card.backdrop is not None and card.backdrop.shape == (HEIGHT // 8, WIDTH // 8, 3)  # the glass
-        version = card.backdrop_version
-        for _ in range(3):
-            (card,) = thread._process(frame())
-        assert card.backdrop_version == version + 1  # refreshed every third frame, not every frame
-        (said,) = card.lines
-        assert (said.speaker, said.text, said.speaker_index) == (
-            "Casey",
-            "STAY CLOSE.",
-            0,
-        )  # the name kept, words translated
-        assert said.stamp == time.strftime("%H:%M:%S") or said.stamp < time.strftime("%H:%M:%S")  # said just now
-        thread.update_config(replace(thread.cfg, chat_timestamps=False))
-        (card,) = thread._process(frame())
-        assert card.lines == [ChatLine("Casey", "STAY CLOSE.", 0)]  # no stamp
-        thread.update_config(replace(thread.cfg, chat_timestamps=True))
-        assert card.corner == "top-left" and card.zone == STRIP and card.area == (0, 0, WIDTH, HEIGHT)
-        assert card.covers == []  # hide_source off
-        assert translator.requests == [["Stay close."]] and translator.speakers == [["Casey"]]
-        for _ in range(3):  # the line seen again is not said again
-            (card,) = thread._process(frame())
-        assert len(card.lines) == 1
-        # The next line at the same spot joins the transcript; the first stays.
-        engine.lines = [line("Alan: Go.", 300, 20, 700, 60)]
-        (card,) = process_until(thread, lambda r: r and len(r[0].lines) == 2)
-        assert [(ln.speaker, ln.text, ln.speaker_index) for ln in card.lines] == [
-            ("Casey", "STAY CLOSE.", 0),
-            ("Alan", "GO.", 1),
-        ]
-        # The card's words are the cache's keys: the line comes back as a cache hit.
-        assert thread.service.cache.get("Go.", "tr") == "GO."
-        thread.update_config(replace(thread.cfg, subtitle_hide_source=True))
-        (card,) = thread._process(frame())
-        assert card.covers == [(300, 620, 700, 660)]  # the live source line is hidden under a band
-        thread.update_config(replace(thread.cfg, subtitle_hide_source=False, chat_seconds=0.01))
-        time.sleep(0.02)
-        (card,) = thread._process(frame())
-        assert [ln.text for ln in card.lines] == ["GO."]  # the line still on screen stays, however old; the other went
-        engine.lines = []
-        time.sleep(0.02)
-        assert process_until(thread, lambda r: r == []) == []  # off screen and past its time: nothing is drawn
-    finally:
-        thread.service.shutdown()
-
-
-def test_a_rescan_or_a_pause_does_not_say_a_line_twice() -> None:
-    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="chat", change_threshold=0)
-    try:
-        process_until(thread, lambda r: bool(r))
-        for _ in range(3):
-            thread._process(frame())
-        thread._forget_blocks(reset_style=True)  # what rescan, unpause and a changed area do
-        (card,) = process_until(thread, lambda r: thread._tracker.blocks and thread._tracker.blocks[0].translation)
-        assert [ln.text for ln in card.lines] == ["STAY CLOSE."]  # found again by its words, not said again
-        assert thread._transcript.utterances[0].block_id == thread._tracker.blocks[0].id  # and followed anew
-    finally:
-        thread.service.shutdown()
-
-
-def test_the_card_ages_on_a_still_screen_and_a_mode_switch_clears_it() -> None:
-    engine = FakeEngine([line("Casey: Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="chat", change_threshold=0, chat_seconds=0.2)
-    emitted: list[list] = []
-    thread.blocks_ready.connect(emitted.append)
-    try:
-        process_until(thread, lambda r: bool(r))
-        engine.lines = []  # the line goes; the game then stops redrawing
-        process_until(thread, lambda r: not thread._tracker.blocks)
-        assert len(thread._transcript) == 1  # just gone: still within its time
-        time.sleep(0.25)
-        thread._idle()  # no frame arrives: the loop ticks the transcript instead
-        assert emitted[-1] == []  # the card went without a frame
-        engine.lines = [line("Casey: Stay close.", 300, 20, 700, 60)]
-        process_until(thread, lambda r: bool(r))
-        thread.update_config(replace(thread.cfg, render="subtitle"))
-        thread._process(frame())
-        assert len(thread._transcript) == 0  # another mode: the transcript starts afresh
-    finally:
-        thread.service.shutdown()
-
-
-def test_a_screen_read_page_shows_on_the_card_in_every_mode() -> None:
-    engine = FakeEngine([line("Stay close.", 300, 20, 700, 60)])
-    thread = pipeline(engine, roi=STRIP, render="subtitle", change_threshold=0)
-    try:
-        (block,) = process_until(thread, lambda r: bool(r))
-        assert thread.last_frame is not None and thread.last_frame.width == WIDTH
-        page = [ChatLine("Note", "Kapı kilitli.\nAnahtar masada.", -1, "21:36:05")]
-        thread.set_page(page)
-        subtitle, card = thread._process(frame())
-        assert subtitle.lines == block.lines and isinstance(card, ChatCard)  # the subtitle stays, the page joins
-        assert card.lines == page and card.covers == []
-        thread.update_config(replace(thread.cfg, render="chat"))
-        (card,) = process_until(thread, lambda r: r and len(r[0].lines) == 2)
-        assert [ln.speaker for ln in card.lines] == ["", "Note"]  # the transcript first, the page last
-        thread.set_page([])
-        (card,) = thread._process(frame())
-        assert [ln.speaker for ln in card.lines] == [""] and thread.page == []
-    finally:
-        thread.service.shutdown()
 
 
 def test_in_place_mode_translates_a_label_whole() -> None:

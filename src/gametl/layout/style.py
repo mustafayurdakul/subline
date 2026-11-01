@@ -17,13 +17,12 @@ from statistics import median
 
 from ..geometry import BGR, Box
 
+GLYPH_FACTOR = 0.8  # glyphs are about this share of the line height
+
 
 def line_height_of(bbox: Box, n_lines: int) -> float:
     """Source box height per text line."""
     return (bbox[3] - bbox[1]) / max(1, n_lines)
-
-
-GLYPH_FACTOR = 0.8  # glyphs are about this share of the line height
 
 
 def font_px_for(line_height: float) -> int:

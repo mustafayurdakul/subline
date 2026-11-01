@@ -29,9 +29,9 @@ C.ComboBox {
     // The list follows the map, so the open list and the arrow keys start
     // from the value in force. A model reset (the window list refreshing)
     // moves the index itself, so the binding is put back after one.
-    function indexOfValue(value) { return (values.length ? values : options).indexOf(value) }
-    currentIndex: indexOfValue(map[key])
-    onCountChanged: currentIndex = Qt.binding(function() { return root.indexOfValue(root.map[root.key]) })
+    function valueIndex(value) { return (values.length ? values : options).indexOf(value) }
+    currentIndex: valueIndex(map[key])
+    onCountChanged: currentIndex = Qt.binding(function() { return root.valueIndex(root.map[root.key]) })
 
     // The text comes from the map, not from editText: a model reset blanks
     // editText, and must not blank the field.

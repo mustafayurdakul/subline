@@ -9,8 +9,8 @@ game from a recording, without running the game.
 
 The default layout stacks the original frame above the translated one, so
 a viewer sees both subtitles; `--layout single` shows only the result. The
-translator comes from your settings (DeepL or Claude need their key,
-`--translator uppercase` needs nothing). `--roi` is the subtitle area as
+translator is `--translator` (default DeepL; DeepL and Claude read their
+key from Credential Manager, `uppercase` needs nothing). `--roi` is the subtitle area as
 fractions of the frame, like the app's area selection.
 """
 
@@ -30,6 +30,7 @@ from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
+from gametl import APP_NAME
 from gametl.app.config import ProfileStore, Settings
 from gametl.app.controller import build_translator, parse_zone, pipeline_config
 from gametl.app.credentials import WindowsCredentialStore
@@ -42,7 +43,7 @@ from gametl.overlay.paint import BlockPainter
 from gametl.translate.cache import TranslationCache
 from gametl.translate.service import TranslationService
 
-LABELS = {"original": "Game", "translated": "With gametl"}
+LABELS = {"original": "Game", "translated": f"With {APP_NAME}"}
 
 
 def paint_onto(image_bgr: np.ndarray, overlay: BlockPainter, blocks) -> np.ndarray:

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..capture.windows import foreground_window, is_minimized, is_window, window_rect
 from ..geometry import Box
-from .paint import BlockPainter, Drawable
+from .paint import BlockPainter, RenderBlock
 
 _user32 = ctypes.windll.user32
 _GWL_EXSTYLE = -20
@@ -38,6 +38,9 @@ _user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
 _user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
 
 
+_POLL_MS = 33  # ~30 Hz: the overlay follows a dragged or resized game window without visible lag
+
+
 class OverlayWindow(QWidget):
     target_lost = Signal()
 
@@ -47,7 +50,6 @@ class OverlayWindow(QWidget):
         hide_when_unfocused: bool = True,
         exclude_from_capture: bool = True,
         font_family: str = "Segoe UI",
-        poll_ms: int = 33,
     ) -> None:
         super().__init__(
             None,
@@ -58,8 +60,7 @@ class OverlayWindow(QWidget):
             | Qt.WindowType.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # translucency also drops the system background
 
         self.target_hwnd = target_hwnd
         self.hide_when_unfocused = hide_when_unfocused
@@ -67,12 +68,11 @@ class OverlayWindow(QWidget):
         self.painter = BlockPainter(font_family)
         self.paint_errors = 0
 
-        self._blocks: list[Drawable] = []
+        self._blocks: list[RenderBlock] = []
         self._target_rect: Box | None = None
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._follow)
-        self._poll_ms = poll_ms
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -80,7 +80,7 @@ class OverlayWindow(QWidget):
         self._follow()
         self.show()
         self._apply_native_styles()
-        self._timer.start(self._poll_ms)
+        self._timer.start(_POLL_MS)
 
     def _apply_native_styles(self) -> None:
         """Make sure the Win32 extended styles say click-through, no
@@ -103,8 +103,7 @@ class OverlayWindow(QWidget):
         if exclude_from_capture != self.exclude_from_capture:
             self.exclude_from_capture = exclude_from_capture
             self._set_capture_affinity()
-        if font_family != self.painter.font_family:
-            self.painter.set_font(font_family)
+        if self.painter.set_font(font_family):
             self.update()
 
     def ex_style(self) -> int:
@@ -133,11 +132,10 @@ class OverlayWindow(QWidget):
     # -- content ---------------------------------------------------------------
 
     @Slot(list)
-    def set_blocks(self, blocks: list[Drawable]) -> None:
-        """The pipeline sends the blocks (and chat mode's card) after every
-        captured frame, mostly the same ones again: repaint only when they
-        change, since a repaint pushes the whole translucent window to the
-        screen."""
+    def set_blocks(self, blocks: list[RenderBlock]) -> None:
+        """The pipeline sends the blocks after every captured frame, mostly
+        the same ones again: repaint only when they change, since a repaint
+        pushes the whole translucent window to the screen."""
         blocks = list(blocks)
         if blocks == self._blocks:
             return

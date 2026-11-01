@@ -2,8 +2,9 @@
 
 One request per batch: the system prompt (fixed per session, cache-marked)
 carries the rules, the game name, tone notes and the glossary; the user
-message is a JSON document with the target language, recent context and
-the items; the reply is JSON parsed into `TranslationBatch`.
+message is a JSON document with the target language, recent context (with
+speaker names), the items' speakers when known, and the items; the reply is
+JSON parsed into `TranslationBatch`.
 
 Two reply modes. Default: the prompt asks for a JSON list and the text is
 parsed here (malformed output raises TranslationError and the batch is
@@ -25,7 +26,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .base import TranslationError, TranslationRequest, language_name
+from .base import CONTEXT_LINES, TranslationError, TranslationRequest, language_name
 
 
 class TranslatedItem(BaseModel):
@@ -54,8 +55,6 @@ _SYSTEM_RULES = "\n".join(
     ]
 )
 
-CONTEXT_PAIRS = 30  # the most recent (source, translation) pairs sent along; about a thousand tokens
-
 _PLAIN_FORMAT = (
     '\nReply exactly as {"items": ["<translation of item 0>", "<translation of item 1>", ...]}: '
     "one string per item, same order and count."
@@ -67,6 +66,14 @@ PRICES_PER_MTOK: dict[str, tuple[float, float, float, float]] = {
     "claude-sonnet-5-5": (2.00, 10.00, 0.20, 2.50),
     "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
 }
+
+
+def _retry_after(exc: Exception) -> float:
+    """The seconds a rate-limited reply asks to wait (its retry-after header), else 0."""
+    try:
+        return float(exc.response.headers.get("retry-after", 0))  # type: ignore[attr-defined]
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
 
 
 def estimate_cost_usd(model: str, totals: dict[str, int]) -> float | None:
@@ -160,8 +167,8 @@ class ClaudeTranslator:
         payload: dict[str, Any] = {
             "target_language": language_name(request.target_lang) or request.target_lang,
         }
-        if request.context:  # the scene so far: the service keeps the last 30 lines
-            payload["context"] = [[source, target] for source, target in request.context[-CONTEXT_PAIRS:]]
+        if request.context:  # capped whatever the caller sends: tokens cost
+            payload["context"] = [[source, target] for source, target in request.context[-CONTEXT_LINES:]]
         if request.speakers and any(request.speakers):
             payload["speakers"] = list(request.speakers)
         if self.structured:
@@ -171,7 +178,7 @@ class ClaudeTranslator:
         return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
-    def _parse_text_json(response: Any, count: int) -> TranslationBatch:
+    def parse_text_json(response: Any, count: int) -> TranslationBatch:
         """Plain-JSON mode: the answer is the first text block (after any
         thinking blocks), possibly wrapped in a code fence. `count` is the
         number of texts asked for: bare strings are matched by position, so a
@@ -238,20 +245,20 @@ class ClaudeTranslator:
             return []
         kwargs = self.request_params(request)
 
-        try:
-            import anthropic
-        except ImportError:  # pragma: no cover - the stub client path in tests
-            anthropic = None  # type: ignore[assignment]
+        import anthropic  # here, not at the top: the settings window imports this module for its prices
 
         try:
             if self.structured:
                 response = self.client.messages.parse(**kwargs)
             else:
                 response = self.client.messages.create(**kwargs)
-        except Exception as exc:
-            if anthropic is not None and isinstance(exc, (anthropic.APIConnectionError, anthropic.APIStatusError)):
-                raise TranslationError(f"{type(exc).__name__}: {exc}") from exc
-            raise
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+            # Retrying a rejected key every few seconds only repeats the message: leave it a minute.
+            raise TranslationError("Anthropic rejected the key: check it on the Translation page", 60.0) from exc
+        except anthropic.RateLimitError as exc:
+            raise TranslationError("Claude is busy, retrying", _retry_after(exc)) from exc
+        except (anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
+            raise TranslationError(f"{type(exc).__name__}: {exc}") from exc
 
         # Token accounting for the cost estimate, then the stop reasons that mean failure.
         self.calls += 1
@@ -273,5 +280,5 @@ class ClaudeTranslator:
             if batch is None:
                 raise TranslationError("no structured output in response")
         else:
-            batch = self._parse_text_json(response, len(request.texts))
+            batch = self.parse_text_json(response, len(request.texts))
         return self.results_from(batch, len(request.texts))

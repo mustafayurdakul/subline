@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ..textutil import said_by
 from .base import TranslationError, TranslationRequest, language_code, single_line
 
 FREE_URL = "https://api-free.deepl.com/v2/translate"
@@ -113,8 +114,10 @@ class DeepLTranslator:
         source = deepl_code(request.source_lang)
         if source:
             body["source_lang"] = source
-        said = [(f"{s}: {t}", "") for s, t in zip(request.speakers or [], texts, strict=False) if s]
-        context = context_text([*(request.context or []), *said])
+        # The lines being translated, with their speakers, as the newest context: who is talking now.
+        speakers = request.speakers or [""] * len(texts)
+        current = [(said_by(s, t), "") for s, t in zip(speakers, texts, strict=True) if s]
+        context = context_text([*(request.context or []), *current])
         if context:
             body["context"] = context
         try:

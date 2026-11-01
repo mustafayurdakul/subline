@@ -53,15 +53,17 @@ def test_subtitle_defaults_favour_a_steady_look() -> None:
     assert s.center_area is False  # free selection; Shift centres
     assert (s.subtitle_center_tolerance, s.subtitle_size_tolerance) == (10, 35)
     assert s.short_line_confidence == 0.9
+
+
+def test_old_profiles_are_upgraded() -> None:
     # A profile saved before these fields existed keeps working and gets the defaults.
     old = Settings.from_dict({"window_match": "Alan Wake 2", "subtitle_position": "source", "center_zone": True})
     assert old.subtitle_position == "source" and old.center_area is True  # center_zone: the name up to 0.1.8
     assert "center_zone" not in old.to_dict()
     assert old.subtitle_background == "pill" and old.subtitle_pill_alpha == 230
-    assert (s.render, s.chat_lines, s.chat_seconds) == ("subtitle", 4, 20)
-    assert (s.chat_corner, s.chat_width, s.chat_timestamps) == ("bottom-left", 38, True)
-    assert (s.screen_reader, s.screen_model, s.screen_base_url) == ("claude", "", "https://api.openai.com/v1")
-    assert s.hotkeys["read"] == "ctrl+shift+d"
+    # A 0.3.x profile in chat mode, with its screen-read hotkey: subtitle mode, the hotkey dropped.
+    chat = Settings.from_dict({"render": "chat", "chat_lines": 6, "hotkeys": {"read": "ctrl+shift+d"}})
+    assert chat.render == "subtitle" and "read" not in chat.hotkeys and chat.hotkeys == DEFAULT_HOTKEYS
     assert Settings.from_dict({"subtitle_bold": True}).subtitle_weight == "bold"  # the switch before weights
     assert Settings.from_dict({"subtitle_bold": False}).subtitle_weight == "semibold"
     assert Settings.from_dict({"font": "Fira Sans"}).font == "Segoe UI"  # a font 0.1.6 shipped and 0.1.8 does not

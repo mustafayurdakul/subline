@@ -98,7 +98,7 @@ General Public License, version 2.1, as separate DLL files (`geos-*.dll`,
 
 ## Services
 
-Translation through DeepL or Anthropic uses the licensee's own account and
+Translation through DeepL or Anthropic uses the user's own account and
 is subject to those services' terms.
 
 ## Demo footage

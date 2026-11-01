@@ -81,7 +81,7 @@ Dialog {
             id: save
             text: "Save current as"
             icon_: Icons.check
-            onClicked: { backend.saveProfile(name.text); name.text = ""; root.close() }
+            onClicked: if (backend.saveProfile(name.text)) { name.text = ""; root.close() }  // kept open on a problem
         }
     }
 

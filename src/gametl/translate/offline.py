@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .base import TranslationRequest, language_code, single_line
+from .base import TranslationRequest, language_code, quiet, single_line
 
 ARGOS_INDEX_URL = "https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json"
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
@@ -120,10 +120,6 @@ def find_package(index: list[dict], source: str, target: str) -> dict | None:
         if entry.get("from_code") == source and entry.get("to_code") == target and entry.get("links"):
             return entry
     return None
-
-
-def quiet(_line: str) -> None:
-    """The progress callback that reports nothing."""
 
 
 def _download(url: str, dest: Path, say: Callable[[str], None], what: str) -> None:
@@ -320,7 +316,7 @@ class OfflineTranslator:
                     sentences.append(sentence)
             plan.append(ids)
         if not sentences:
-            return ["" for _ in request.texts]
+            return [None] * len(request.texts)
 
         tokens = [self._encode(s) for s in sentences]
         results = self.ct2.translate_batch(

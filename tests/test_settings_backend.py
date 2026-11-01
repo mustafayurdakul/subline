@@ -112,7 +112,7 @@ def test_invalid_pattern_or_hotkey_is_reported_and_blocks_start_and_save(tmp_pat
     backend.start()
     assert applied == [] and "(unclosed" in backend.problem
     backend.clearProblem()
-    backend.saveProfile("x")
+    assert backend.saveProfile("x") is False  # the popup stays open with the name
     assert "(unclosed" in backend.problem and ProfileStore(tmp_path).list() == []
     backend.settings.insert("ignore_patterns", "")
     backend.settings.insert("hotkey_toggle", "ctrl+")
@@ -206,10 +206,8 @@ def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch
     assert secrets.get(DEEPL_KEY) == "abc:fx"
     assert backend.deeplKeyStatus == "set (memory)"
     assert "abc:fx" not in str(backend.to_settings().to_dict())
-    backend.saveKey("SCREEN_API_KEY", "sk-screen")
-    assert secrets.get("SCREEN_API_KEY") == "sk-screen" and backend.screenKeyStatus != "not set"
     backend.saveKey("SOMETHING_ELSE", "x")
-    assert secrets.get("SOMETHING_ELSE") is None  # only the known keys
+    assert secrets.get("SOMETHING_ELSE") is None  # only the two known keys
     backend.clearKey(DEEPL_KEY)
     assert secrets.get(DEEPL_KEY) is None and backend.deeplKeyStatus == "not set"
 
@@ -312,36 +310,6 @@ def test_the_preview_shows_size_and_hiding_as_in_a_1080p_game(qapp) -> None:
     assert hidden.pixelColor(480, 135).alpha() > shown.pixelColor(480, 135).alpha()  # the band, opaque
 
 
-def test_the_preview_shows_the_chat_card_above_the_strip(qapp, tmp_path: Path) -> None:
-    from PySide6.QtCore import QSize
-
-    from gametl.app.preview import CHAT_LINES, PreviewImageProvider, preview_blocks, render_preview
-    from gametl.overlay.paint import BlockPainter, ChatCard
-
-    painter = BlockPainter()
-    settings = Settings(render="chat", chat_lines=2, subtitle_font_px=40, subtitle_hide_source=True)
-    game_line, card = preview_blocks(settings, 960, 540, painter)
-    assert isinstance(card, ChatCard) and card.area == (0, 0, 960, 540) and card.zone == (0, 405, 960, 540)
-    assert [(ln.stamp, ln.speaker, ln.text) for ln in card.lines] == CHAT_LINES[-2:]  # as many lines as kept
-    assert all(
-        ln.stamp == ""
-        for ln in preview_blocks(Settings(render="chat", chat_timestamps=False), 960, 540, painter)[1].lines
-    )
-    assert card.font_px == game_line.font_px == 20  # to scale, like the subtitle
-    assert card.covers == [game_line.bbox] and game_line.bbox[1] > 405  # the game's line, in the strip, hidden
-    placed = painter.place_chat(card)
-    assert placed.card.bottom() < 405 and placed.card.left() > 0  # above the strip, in from the left edge
-    image = render_preview(settings, 960, 540)
-    assert image.pixelColor(placed.card.center()).alpha() > 0  # the card is drawn
-    # The provider sizes a chat preview as a whole frame when the page has not said.
-    size = QSize()
-    image = PreviewImageProvider(backend_for(tmp_path)).requestImage("1", size, QSize(680, -1))
-    assert (image.width(), image.height()) == (680, 170)  # subtitle mode: the strip
-    backend = backend_for(tmp_path, Settings(render="chat"))
-    image = PreviewImageProvider(backend).requestImage("1", size, QSize(680, -1))
-    assert (image.width(), image.height()) == (680, round(680 * 9 / 16))  # chat mode: the whole frame
-
-
 def test_colour_swatch_shows_what_the_overlay_draws(tmp_path: Path) -> None:
     backend = backend_for(tmp_path)
     assert backend.colourHex("#ffee00") == "#FFEE00"
@@ -373,11 +341,18 @@ def test_offline_download_can_run_again(qapp, tmp_path: Path, monkeypatch: pytes
     backend.downloadOffline()
     assert backend.downloading
     assert wait_until(lambda: not backend.downloading, tick=tick)
-    assert "offline translation ready" in backend.downloadStatus
+    assert backend.downloadStatus == "Offline translation ready (en-tr)."
+    assert backend.to_settings().draft == "deepl"  # a draft already set is kept
     backend.set("target_lang", "de")
+    assert backend.downloadStatus == ""  # it spoke of the old pair
     backend.downloadOffline()
     assert wait_until(lambda: not backend.downloading, tick=tick)
     assert pairs == [("en", "tr"), ("en", "de")]
+    # With the offline model as the translator, the download does not also make it the draft.
+    offline = backend_for(tmp_path, Settings(lang="en", target_lang="tr", translator="offline"))
+    offline.downloadOffline()
+    assert wait_until(lambda: not offline.downloading, tick=tick)
+    assert offline.to_settings().draft == ""
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:
@@ -430,7 +405,7 @@ def test_status_and_text_for_the_header(tmp_path: Path) -> None:
 def test_the_pickers_list_what_the_app_accepts(tmp_path: Path) -> None:
     """The Advanced page's translator names are the ones a start accepts,
     and the Claude models are the ones with a known price, in that order."""
-    from gametl.app.controller import TRANSLATORS
+    from gametl.app.config import TRANSLATORS
     from gametl.translate.claude import PRICES_PER_MTOK
 
     backend = backend_for(tmp_path)

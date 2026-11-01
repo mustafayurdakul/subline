@@ -1,4 +1,4 @@
-"""Text helpers shared by tracking, translation and the chat transcript."""
+"""Text helpers shared by tracking, the pipeline and translation."""
 
 from __future__ import annotations
 
@@ -16,8 +16,9 @@ _SPEAKER = re.compile(rf"^\s*({_NAME})\s*[:：]\s+(\S.*)$", re.DOTALL)
 # Or the name on a line of its own above the words, no colon (Alan Wake 2
 # prints names that way): the words must then open like a sentence, a
 # capital letter or a quote, so a line wrapped after its first word
-# ("The\nfire escape...") is not read as a speaker.
-_NAME_LINE = re.compile(rf"^\s*({_NAME})[ \t]*\n\s*([A-Z\"“'‘(\[¿¡…].*)$", re.DOTALL)
+# ("The\nfire escape...") is not read as a speaker; and the name must not end
+# in a full stop, so a short sentence over the next ("Wait.\nDon't go.") is not.
+_NAME_LINE = re.compile(rf"^\s*({_NAME})(?<!\.)[ \t]*\n\s*([A-Z\"“'‘(\[¿¡…].*)$", re.DOTALL)
 # Capitalised words a game writes before a colon that name no one: HUD and
 # tutorial lead-ins, which stay in the text and are translated with it.
 _LEAD_INS = frozenset(
@@ -64,13 +65,20 @@ def letter_count(s: str) -> int:
 
 
 def split_speaker(text: str) -> tuple[str, str]:
-    """`text` as (speaker, words): the name before the colon and the rest,
-    or ("", text) when no speaker is named. A line break after the name
-    counts as the space ("CASEY:\nGo." reads "CASEY: Go.")."""
+    """`text` as (speaker, words): the name before the colon, or alone on
+    the line above the words with no colon, and the rest; ("", text) when no
+    speaker is named. A line break after a colon counts as the space
+    ("CASEY:\nGo." reads "CASEY: Go.")."""
     match = _SPEAKER.match(text) or _NAME_LINE.match(text)
     if match is None or match.group(1).split()[0].casefold() in _LEAD_INS:
         return "", text
     return match.group(1), match.group(2)
+
+
+def said_by(speaker: str, text: str) -> str:
+    """`text` with its speaker in front ("Casey: Go."), the inverse of
+    split_speaker; `text` alone when no speaker is named."""
+    return f"{speaker}: {text}" if speaker else text
 
 
 def text_similarity(a: str, b: str) -> float:

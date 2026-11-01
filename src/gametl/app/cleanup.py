@@ -20,9 +20,10 @@ from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore
 
 SECRET_NAMES = (DEEPL_KEY, ANTHROPIC_KEY)  # the Credential Manager entries the app keeps
 
-# What versions up to 0.2.1 kept for their licence key and trial: two
-# Credential Manager entries, a registry key and a key in config.json.
-STALE_SECRET_NAMES = ("LICENSE_KEY", "TRIAL_USED")
+# What earlier versions kept and this one does not: up to 0.2.1 the licence key and the trial
+# (two Credential Manager entries, a registry key and a key in config.json), in 0.3.0 and
+# 0.3.1 the screen reader's API key.
+STALE_SECRET_NAMES = ("LICENSE_KEY", "TRIAL_USED", "SCREEN_API_KEY")
 STALE_REGISTRY_KEY = r"Software\Subline"
 STALE_CONFIG_KEY = "trial_used"
 
