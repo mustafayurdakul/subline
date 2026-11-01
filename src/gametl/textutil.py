@@ -11,7 +11,13 @@ _DIGITS = re.compile(r"\d+")
 # one or two capitalised or upper-case words (Casey, Dr. Darling, SAGA
 # ANDERSON) and a colon, then the words spoken. Never a lower-case word: "note:
 # the door is locked" is a sentence, not a speaker.
-_SPEAKER = re.compile(r"^\s*((?:[A-Z][A-Za-z'’.\-]*)(?: (?:[A-Z][A-Za-z'’.\-]*))?)\s*[:：]\s+(\S.*)$", re.DOTALL)
+_NAME = r"(?:[A-Z][A-Za-z'’.\-]*)(?: (?:[A-Z][A-Za-z'’.\-]*))?"
+_SPEAKER = re.compile(rf"^\s*({_NAME})\s*[:：]\s+(\S.*)$", re.DOTALL)
+# Or the name on a line of its own above the words, no colon (Alan Wake 2
+# prints names that way): the words must then open like a sentence, a
+# capital letter or a quote, so a line wrapped after its first word
+# ("The\nfire escape...") is not read as a speaker.
+_NAME_LINE = re.compile(rf"^\s*({_NAME})[ \t]*\n\s*([A-Z\"“'‘(\[¿¡…].*)$", re.DOTALL)
 # Capitalised words a game writes before a colon that name no one: HUD and
 # tutorial lead-ins, which stay in the text and are translated with it.
 _LEAD_INS = frozenset(
@@ -61,7 +67,7 @@ def split_speaker(text: str) -> tuple[str, str]:
     """`text` as (speaker, words): the name before the colon and the rest,
     or ("", text) when no speaker is named. A line break after the name
     counts as the space ("CASEY:\nGo." reads "CASEY: Go.")."""
-    match = _SPEAKER.match(text)
+    match = _SPEAKER.match(text) or _NAME_LINE.match(text)
     if match is None or match.group(1).split()[0].casefold() in _LEAD_INS:
         return "", text
     return match.group(1), match.group(2)

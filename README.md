@@ -314,7 +314,8 @@ Most settings have a command-line equivalent (the hotkeys do not);
   is the subtitle size (held from the first line up), font and weight,
   white unless a colour is set, on a card of the pill's opacity. Turn
   speaker names on in the game: a capitalised
-  name before a colon ("Casey: ...") is taken as the speaker in subtitle
+  name before a colon ("Casey: ..."), or on a line of its own above the
+  words as Alan Wake 2 prints it, is taken as the speaker in subtitle
   and chat mode (not in place, where labels such as "Objective:" count and
   are translated whole; a few common English lead-ins are never taken as
   names), kept as it is while the words alone are translated and cached,
