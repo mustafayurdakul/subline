@@ -4,6 +4,7 @@ cannot go is reported, and the log file is closed first."""
 from __future__ import annotations
 
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -53,6 +54,27 @@ def test_forget_trial_removes_stale_entries_and_nothing_else(tmp_path: Path) -> 
     assert store.load("fake-game").window_match == "Fake Game"
     forget_trial(store, secrets)  # nothing left: harmless
     forget_trial(ProfileStore(tmp_path / "never-run"), MemorySecretStore())  # no folder: harmless
+
+
+def test_the_old_qml_cache_goes_and_nothing_else(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    for name in ("gametl", "gametl-cli"):
+        cache = tmp_path / "local" / name / "cache" / "qmlcache"
+        cache.mkdir(parents=True)
+        (cache / "page.qmlc").write_bytes(b"x")
+    (tmp_path / "local" / "gametl-cli" / "keep.txt").write_text("not Qt's")
+    store, secrets = populated(tmp_path)
+    forget_trial(store, secrets)
+    assert not (tmp_path / "local" / "gametl").exists()  # the cache and the folders Qt made for it
+    assert not (tmp_path / "local" / "gametl-cli" / "cache").exists()
+    assert (tmp_path / "local" / "gametl-cli" / "keep.txt").exists()  # a folder with other files stays
+    forget_trial(store, secrets)  # nothing left: harmless
+
+
+def test_the_settings_window_keeps_no_qml_cache() -> None:
+    import gametl.app.settings_window  # noqa: F401 (sets the environment on import)
+
+    assert os.environ["QML_DISABLE_DISK_CACHE"] == "1"
 
 
 def test_everything_gametl_wrote_is_gone(tmp_path: Path) -> None:

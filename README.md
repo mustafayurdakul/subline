@@ -108,8 +108,9 @@ page, or `gametl-cli --remove-all-data`, deletes the folder and the
 entries. What versions up to 0.2.1 kept for their licence and trial (two
 more entries, `trial_used` in `config.json` and the registry key
 `HKEY_CURRENT_USER\Software\Subline`), and the screen-read key of 0.3.0
-and 0.3.1 (`gametl/SCREEN_API_KEY`), are removed the first time a later
-version starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
+and 0.3.1 (`gametl/SCREEN_API_KEY`), and the settings window's compiled
+pages Qt kept up to 0.3.2 (`%LOCALAPPDATA%\gametl\cache\qmlcache`), are
+removed the first time a later version starts. While it runs, Subline keeps a small lock file in `%TEMP%` (`gametl-<id>.lock`),
 which goes when it quits.
 
 ### From source
