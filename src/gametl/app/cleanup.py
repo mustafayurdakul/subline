@@ -13,12 +13,17 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import IO
 
 from .config import ProfileStore
 from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore
 
 SECRET_NAMES = (DEEPL_KEY, ANTHROPIC_KEY)  # the Credential Manager entries the app keeps
+
+# Up to 0.3.2, Qt Quick kept the settings window's compiled pages here, named after the
+# executable (the tray app, the command-line build); now it keeps none (settings_window.py).
+QML_CACHE_APPS = ("gametl", "gametl-cli")
 
 # What earlier versions kept and this one does not: up to 0.2.1 the licence key and the trial
 # (two Credential Manager entries, a registry key and a key in config.json), in 0.3.0 and
@@ -56,9 +61,26 @@ def release_log() -> None:
         log.close()
 
 
+def stale_qml_caches() -> list[Path]:
+    """The folders where Qt Quick kept compiled pages up to 0.3.2."""
+    base = os.environ.get("LOCALAPPDATA")
+    return [Path(base) / name / "cache" / "qmlcache" for name in QML_CACHE_APPS] if base else []
+
+
+def forget_qml_cache() -> None:
+    """Delete those folders, and their parents once empty (Qt made them). Never raises."""
+    for path in stale_qml_caches():
+        shutil.rmtree(path, ignore_errors=True)
+        for parent in (path.parent, path.parent.parent):
+            with contextlib.suppress(OSError):
+                parent.rmdir()  # only when empty: never someone else's files
+
+
 def forget_trial(store: ProfileStore, secrets: SecretStore) -> None:
-    """Remove what versions up to 0.2.1 left behind (see STALE_*). Run at
-    every start; after the first there is nothing to do. Never raises."""
+    """Remove what earlier versions left behind (see STALE_* and the QML
+    cache). Run at every start; after the first there is nothing to do.
+    Never raises."""
+    forget_qml_cache()
     for name in STALE_SECRET_NAMES:
         with contextlib.suppress(Exception):
             secrets.delete(name)

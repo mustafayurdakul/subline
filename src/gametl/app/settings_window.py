@@ -13,6 +13,10 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
+# Qt Quick otherwise keeps compiled pages in %LOCALAPPDATA%\<exe name>\cache\qmlcache, outside the
+# data folder, where nothing removes them. Compiling a dozen small pages each time costs a few ms.
+os.environ["QML_DISABLE_DISK_CACHE"] = "1"  # before the imports below: the QML engine reads it
+
 import shiboken6
 from PySide6.QtCore import QEvent, QMetaObject, QObject, QSize, Qt, QUrl
 from PySide6.QtGui import QScreen
