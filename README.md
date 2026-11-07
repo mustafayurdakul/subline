@@ -119,8 +119,8 @@ which goes when it quits.
 Needs [uv](https://docs.astral.sh/uv/).
 
 ```
-git clone git@github.com:mustafayurdakul/yurdakuls-gameclt.git
-cd yurdakuls-gameclt
+git clone git@github.com:mustafayurdakul/subline.git
+cd subline
 uv python install 3.12
 uv sync
 uv run gametl

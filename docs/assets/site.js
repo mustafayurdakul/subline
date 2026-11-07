@@ -5,7 +5,7 @@
 (function () {
   "use strict";
 
-  var REPO = "mustafayurdakul/yurdakuls-gameclt";
+  var REPO = "mustafayurdakul/subline";
 
   function megabytes(bytes) {
     return Math.round(bytes / 1e6) + " MB";
