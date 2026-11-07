@@ -503,14 +503,15 @@ step is added.
 
 ## Website
 
-`docs/index.html` is the project's website: one static page, its styles,
-script and images in `docs/assets`, and the settings-page renders from
-`docs/ui`. There is nothing to build. To publish it with GitHub Pages:
-Settings > Pages > Deploy from a branch, `main`, folder `/docs` (on a free
-plan the repository must be public). Any static host works the same way,
-with `docs` as the folder to publish. The page's own address is in its
-canonical and `og:` tags (`https://mustafayurdakul.github.io/yurdakuls-gameclt/`);
-change them when it is served from elsewhere.
+`docs/index.html` is the project's website, at
+<https://subline.yurdakul.dev>: one static page, its styles, script and
+images in `docs/assets`, and the settings-page renders from `docs/ui`.
+There is nothing to build. GitHub Pages serves it (Settings > Pages >
+Deploy from a branch, `main`, folder `/docs`, Enforce HTTPS; on a free
+plan the repository must be public). `docs/CNAME` names the domain, and
+a DNS `CNAME` record points `subline` in the `yurdakul.dev` zone at
+`mustafayurdakul.github.io`. The address is also in the page's canonical
+and `og:` tags; to move the site, change those and `docs/CNAME`.
 
 The download buttons link to the latest release and, once the page has
 asked the GitHub API, straight to its installer and zip, so a release
