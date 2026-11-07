@@ -1,6 +1,7 @@
 // Subline website: the latest release's files on the download buttons, the
 // settings-window tabs, and a still demo for people who ask for less motion.
-// Everything works without this script; it only makes the links direct.
+// Without it the buttons link to the release page, the tour shows the Home
+// page only, and the demo plays for everyone.
 
 (function () {
   "use strict";
@@ -61,6 +62,7 @@
         t.tabIndex = on ? 0 : -1;
       });
       image.src = tab.dataset.src;
+      image.parentNode.scrollTop = 0;
       image.alt = tab.dataset.alt;
       caption.textContent = tab.dataset.caption;
       panel.setAttribute("aria-labelledby", tab.id);

@@ -21,12 +21,13 @@ TranslationError.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any
 
 from pydantic import BaseModel
 
-from .base import CONTEXT_LINES, TranslationError, TranslationRequest, language_name
+from .base import CONTEXT_LINES, TranslationError, TranslationRequest, language_name, speakers_or_none
 
 
 class TranslatedItem(BaseModel):
@@ -76,6 +77,12 @@ def _retry_after(exc: Exception) -> float:
         return 0.0
 
 
+def _part(request: TranslationRequest, start: int, stop: int | None) -> TranslationRequest:
+    """`request` with only its texts from `start` to `stop`, and their speakers."""
+    speakers = speakers_or_none(request.speakers[start:stop]) if request.speakers else None
+    return dataclasses.replace(request, texts=request.texts[start:stop], speakers=speakers)
+
+
 def estimate_cost_usd(model: str, totals: dict[str, int]) -> float | None:
     prices = PRICES_PER_MTOK.get(model)
     if prices is None:
@@ -87,13 +94,14 @@ def estimate_cost_usd(model: str, totals: dict[str, int]) -> float | None:
 
 
 def supports_disabled_thinking(model: str) -> bool:
-    """Claude Haiku 5.5 and Claude Opus 5 accept thinking=disabled at effort
-    high or below; Claude Opus 5.5 and Claude Sonnet 5.5 return 400 for it
-    (thinking stays adaptive there, effort is the only lever)."""
+    """Claude Haiku 5.5, Claude Opus 5 and Claude Sonnet 5 accept
+    thinking=disabled at effort high or below. Claude Sonnet 5.5 returns 400
+    for it and takes {"type": "between_tools"} as its off switch
+    (request_params). Claude Opus 5.5 has no off switch: effort is the only lever."""
     model = model.lower()
     if model.startswith(("claude-opus-5-5", "claude-sonnet-5-5")):
         return False
-    return model.startswith(("claude-haiku-5-5", "claude-opus-5"))
+    return model.startswith(("claude-haiku-5-5", "claude-opus-5", "claude-sonnet-5"))
 
 
 class ClaudeTranslator:
@@ -236,6 +244,9 @@ class ClaudeTranslator:
             params["output_format"] = TranslationBatch
         if self.thinking == "disabled" and supports_disabled_thinking(self.model):
             params["thinking"] = {"type": "disabled"}
+        elif self.thinking == "disabled" and self.model.lower().startswith("claude-sonnet-5-5"):
+            # Claude Sonnet 5.5's off switch: no other field beside it, effort high or below.
+            params["thinking"] = {"type": "between_tools"}
         return params
 
     # -- call ------------------------------------------------------------------
@@ -273,6 +284,10 @@ class ClaudeTranslator:
             details = getattr(response, "stop_details", None)
             raise TranslationError(f"model declined the batch ({getattr(details, 'category', None)})")
         if stop == "max_tokens":
+            if len(request.texts) > 1:
+                # Too long to answer at once: each half fits in a reply of its own.
+                half = len(request.texts) // 2
+                return self.translate(_part(request, 0, half)) + self.translate(_part(request, half, None))
             raise TranslationError("response cut off at max_tokens")
 
         if self.structured:

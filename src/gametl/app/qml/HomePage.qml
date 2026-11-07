@@ -9,7 +9,7 @@ ColumnLayout {
     readonly property bool idle: backend.status === "idle"
     // DeepL, the default, cannot start without a key: ask for it here, not three pages away.
     readonly property bool usesDeepl: String(backend.settings.translator) === "deepl" || String(backend.settings.draft) === "deepl"
-    readonly property bool needsDeeplKey: usesDeepl && backend.deeplKeyStatus === "not set"
+    readonly property bool needsDeeplKey: usesDeepl && !backend.deeplKeySet
     // The subtitle settings below do nothing in place or with the whole window (see the Appearance page).
     readonly property bool subtitleMode: String(backend.settings.render) === "subtitle" && String(backend.settings.roi) !== ""
     spacing: 2 * Theme.space
@@ -77,7 +77,7 @@ ColumnLayout {
             visible: root.subtitleMode
             label: "Subtitle size"
             helper: "Learned from the game, or set your own."
-            Stepper { key: "subtitle_font_px"; from: 0; to: 200; step: 2; suffix: " px"; specialText: "game's own" }
+            Stepper { key: "subtitle_font_px"; from: 0; to: 200; start: 36; step: 2; suffix: " px"; specialText: "game's own" }
         }
         SettingRow {
             visible: root.subtitleMode

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..jsonfile import write_json_atomic
 from ..textutil import split_speaker
 from .base import TranslationError, TranslationRequest, quiet, speakers_or_none
 from .cache import TranslationCache
@@ -129,9 +130,10 @@ def chunked(items: list[str], size: int) -> list[list[str]]:
 
 
 def uncached(lines: list[str], cache: TranslationCache, target_lang: str) -> list[str]:
-    """The lines the cache has no translation for. The lookup is the cache's
-    own, fuzzy one, so a near-duplicate of a cached line is skipped too."""
-    return [line for line in lines if cache.get(line, target_lang) is None]
+    """The lines the cache has no exact translation for. Near-duplicates are
+    sent too: the fuzzy tier only looks at the most recent lines of a
+    session, so it cannot be relied on to find them in play."""
+    return [line for line in lines if not cache.has(line, target_lang)]
 
 
 # -- synchronous ------------------------------------------------------------------
@@ -178,9 +180,9 @@ class BatchJob:
     game: str = ""  # whose cache the results go to
 
     def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        """Written whole or not at all: the file is the only record of a paid batch's id."""
         data = {"batch_id": self.batch_id, "target_lang": self.target_lang, "game": self.game, "chunks": self.chunks}
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        write_json_atomic(path, data, indent=1)
 
     @classmethod
     def load(cls, path: Path) -> BatchJob:
@@ -212,12 +214,11 @@ def submit_batch(
     cache: TranslationCache,
     target_lang: str,
     chunk_size: int = 20,
-    client: Any = None,
     game: str = "",
 ) -> BatchJob | None:
     """Create a batch for the lines not in the cache. None when nothing to do.
-    The request goes through the translator's own client (so a key from the
-    Credential Manager is used) unless another `client` is given."""
+    The request goes through the translator's own client, so a key from the
+    Credential Manager is used."""
     if translator.structured:
         raise ValueError("batch pre-translation needs the plain-JSON reply mode (structured=False)")
     words, speakers = spoken(lines)
@@ -225,26 +226,19 @@ def submit_batch(
     if not todo:
         return None
     requests, chunks = build_batch_requests(todo, translator, target_lang, chunk_size, speakers)
-    if client is None:
-        client = translator.client
-    batch = client.messages.batches.create(requests=requests)
+    batch = translator.client.messages.batches.create(requests=requests)
     return BatchJob(batch.id, target_lang, chunks, game)
 
 
 def collect_batch(
     job: BatchJob,
     cache: TranslationCache,
-    client: Any = None,
+    client: Any,
     say: Callable[[str], None] = quiet,
 ) -> tuple[bool, int, int]:
     """Fetch a batch's results into the cache. Returns (ended, lines added,
     failed chunks). When the batch has not ended, nothing is collected yet.
-    `client` is an Anthropic client; without one the SDK's own configuration
-    (ANTHROPIC_API_KEY) is used."""
-    if client is None:
-        import anthropic
-
-        client = anthropic.Anthropic()
+    `client` is an Anthropic client carrying the app's key."""
     batch = client.messages.batches.retrieve(job.batch_id)
     if batch.processing_status != "ended":
         counts = batch.request_counts
@@ -283,8 +277,8 @@ def wait_for_batch(
     job: BatchJob,
     cache: TranslationCache,
     timeout: float,
+    client: Any,
     poll: float = 20.0,
-    client: Any = None,
     say: Callable[[str], None] = quiet,
 ) -> tuple[bool, int, int]:
     deadline = time.monotonic() + timeout

@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import re
@@ -17,6 +16,7 @@ import threading
 from collections import deque
 from pathlib import Path
 
+from ..jsonfile import write_text_atomic
 from ..textutil import normalize_text, text_similarity
 
 _DIGITS = re.compile(r"\d+")
@@ -64,13 +64,21 @@ class TranslationCache:
         self._lock = threading.Lock()
         self._dirty = False
         self.load_error: str | None = None  # set when the file on disk could not be read
+        self.set_aside = False  # True when a damaged file was moved aside as .bad
+        # The file's (mtime, size) when this cache last read or wrote it: a
+        # change since then is another process's work, which a save keeps.
+        self._disk_stamp: tuple[int, int] | None = None
         if self.path and self.path.exists():
             self._load()
 
     def _load(self) -> None:
         """Read the file at `path`. A damaged file must not stop the game
-        from starting: it is set aside as .bad and the cache begins empty."""
+        from starting: it is set aside as .bad and the cache begins empty. A
+        file that cannot be read at all (another program holds it, access is
+        denied) is not damaged: it is left as it is, and this cache never
+        saves over it (`path` becomes None)."""
         assert self.path is not None
+        stamp = self._stamp()  # before reading: a write after it is merged on the next save
         try:
             with open(self.path, encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -79,12 +87,33 @@ class TranslationCache:
                 for key, per_lang in data.get("entries", {}).items():
                     for lang, translation in per_lang.items():
                         self._store(key, lang, translation)
-        except (OSError, ValueError, AttributeError, TypeError) as exc:
-            self.load_error = f"{type(exc).__name__}: {exc}"
-            with self._lock:
-                self._clear()
-            with contextlib.suppress(OSError):
+        except OSError as exc:
+            self._load_failed(exc)
+            self.path = None
+        except (ValueError, AttributeError, TypeError) as exc:
+            self._load_failed(exc)
+            try:
                 os.replace(self.path, self.path.with_suffix(self.path.suffix + ".bad"))
+            except OSError:
+                self.path = None  # still in place: a later session may read it, so it is not overwritten
+            else:
+                self.set_aside = True
+        else:
+            self._disk_stamp = stamp
+
+    def _load_failed(self, exc: Exception) -> None:
+        self.load_error = f"{type(exc).__name__}: {exc}"
+        with self._lock:
+            self._clear()
+
+    def _stamp(self) -> tuple[int, int] | None:
+        """The file's (mtime in ns, size), or None when it is not there."""
+        assert self.path is not None
+        try:
+            st = self.path.stat()
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size
 
     def _clear(self) -> None:
         self._entries.clear()
@@ -98,6 +127,13 @@ class TranslationCache:
 
     def __len__(self) -> int:
         return len(self._entries)
+
+    def has(self, text: str, target_lang: str) -> bool:
+        """Whether a translation of exactly this text (after whitespace and
+        case normalisation) is stored: no number swap, no fuzzy match."""
+        key = self.key(text)
+        with self._lock:
+            return target_lang in self._entries.get(key, {})
 
     def get(self, text: str, target_lang: str) -> str | None:
         key = self.key(text)
@@ -153,22 +189,55 @@ class TranslationCache:
         self._recent.append(key)
 
     def save(self) -> bool:
-        """Write to disk if anything changed. Returns True when written."""
+        """Write to disk if anything changed. Returns True when written.
+        Lines another process wrote to the file since this cache read or
+        wrote it (the pretranslate command, a second overlay) are kept."""
         if self.path is None:
             return False
         with self._lock:
             if not self._dirty:
                 return False
+        self._merge_from_disk()
+        with self._lock:
             # Serialised under the lock: a worker thread may `put` while we write.
             text = json.dumps({"version": 1, "entries": self._entries}, ensure_ascii=False, indent=0)
             self._dirty = False
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, self.path)
+            write_text_atomic(self.path, text)
         except OSError:
             with self._lock:
                 self._dirty = True  # still unsaved: the next save tries again
             raise
+        self._disk_stamp = self._stamp()
         return True
+
+    def _merge_from_disk(self) -> None:
+        """Fold in the entries the file gained since this cache last read or
+        wrote it; on a conflict this session's translation wins. They do not
+        join the fuzzy tier's recent lines, which stay this session's own.
+        Raises OSError when the changed file cannot be read, so that nothing
+        is written over it."""
+        assert self.path is not None
+        stamp = self._stamp()
+        if stamp is None or stamp == self._disk_stamp:
+            return
+        with open(self.path, encoding="utf-8") as fh:
+            try:
+                data = json.load(fh)
+            except ValueError:
+                return  # damaged: nothing to keep
+        entries = data.get("entries") if isinstance(data, dict) else None
+        if not isinstance(entries, dict):
+            return
+        with self._lock:
+            for key, per_lang in entries.items():
+                if not isinstance(per_lang, dict):
+                    continue
+                for lang, translation in per_lang.items():
+                    mine = self._entries.setdefault(key, {})
+                    if lang in mine:
+                        continue
+                    mine[lang] = translation
+                    template, numbers = numeric_template(key)
+                    if numbers:
+                        self._templates.setdefault((template, lang), (numbers, translation))

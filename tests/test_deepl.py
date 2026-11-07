@@ -72,7 +72,6 @@ def test_free_and_pro_endpoints_and_request_shape() -> None:
         "source_lang": "EN",
     }
     assert call["headers"]["Authorization"] == "DeepL-Auth-Key abc:fx"
-    assert translator.calls == 1 and translator.characters == len("Stay close.") + len("Run!")
     assert DeepLTranslator(auth_key="abc", session=session).url == PRO_URL
 
 
@@ -101,14 +100,9 @@ def test_key_and_quota_errors_read_plainly_and_ask_for_a_longer_pause() -> None:
     assert str(other).startswith("DeepL HTTP 500:") and other.retry_after == 0
 
 
-def test_errors_raise_translation_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DEEPL_AUTH_KEY", raising=False)
+def test_errors_raise_translation_error() -> None:
     with pytest.raises(TranslationError, match="Add your DeepL key on the Translation page"):
         DeepLTranslator(session=StubSession())
-    with pytest.raises(TranslationError):
-        DeepLTranslator(auth_key="k", session=StubSession(status=456)).translate(
-            TranslationRequest(["a"], target_lang="tr")
-        )
     with pytest.raises(TranslationError):
         DeepLTranslator(auth_key="k", session=StubSession(translations=[])).translate(
             TranslationRequest(["a"], target_lang="tr")

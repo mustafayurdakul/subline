@@ -3,7 +3,8 @@ through the real window and backend on the offscreen platform. Hotkey
 capture ends with its page, drop-downs start from the value in force,
 typed session fields are written once the typing is done, pages open at
 their top, the scroll bar shows only when there is something to scroll,
-and the window and its popups follow the screen's scale."""
+a refused key stays in its field, and the window and its popups follow
+the screen's scale."""
 
 from __future__ import annotations
 
@@ -183,6 +184,69 @@ def test_a_hotkey_field_says_why_a_key_was_not_taken(qapp, window: SettingsWindo
     press(qapp, window, Qt.Key.Key_Adiaeresis, "ä", Qt.KeyboardModifier.ControlModifier)
     assert field.property("refusal") == "that key cannot be a hotkey"  # Ctrl is there; the key is the trouble
     assert window.backend.settings.value("hotkey_toggle") == "ctrl+shift+t"
+
+
+def test_a_hotkey_field_refuses_a_combination_another_action_has(qapp, window: SettingsWindow) -> None:
+    """Windows gives a combination to one registration: the second action would never fire."""
+    window.show_page("hotkeys")
+    settle(qapp)
+    (field,) = find(window, "HotkeyField", key="hotkey_toggle")
+    QMetaObject.invokeMethod(field, "forceActiveFocus")
+    settle(qapp)
+    ctrl_shift = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+    press(qapp, window, Qt.Key.Key_P, "P", ctrl_shift)  # Pause / resume has it
+    assert field.property("refusal") == "used by Pause / resume" and field.property("activeFocus")
+    assert window.backend.settings.value("hotkey_toggle") == "ctrl+shift+t"
+    press(qapp, window, Qt.Key.Key_Y, "Y", ctrl_shift)
+    assert window.backend.settings.value("hotkey_toggle") == "ctrl+shift+y"
+
+
+def test_the_first_step_up_from_the_games_own_size_is_readable(qapp, window: SettingsWindow) -> None:
+    window.show_page("appearance")
+    settle(qapp)
+    window.backend.set("subtitle_font_px", 0)
+    settle(qapp)
+    (stepper,) = [item for item in find(window, "Stepper", key="subtitle_font_px") if item.isVisible()]  # not Home's
+    QMetaObject.invokeMethod(stepper, "forceActiveFocus")
+    sizes = []
+    for key in (Qt.Key.Key_Up, Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Down):
+        press(qapp, window, key)
+        sizes.append(window.backend.settings.value("subtitle_font_px"))
+    assert sizes == [36, 38, 36, 34]  # not 2 px: then two at a time, as before
+
+
+def test_the_preview_shows_only_where_the_overlay_draws_subtitles(qapp, window: SettingsWindow) -> None:
+    """In place, or with the whole window, the overlay draws in the game's colours: no pill to preview."""
+    window.show_page("appearance")
+    settle(qapp)
+    (preview,) = find(window, "SubtitlePreview")
+    assert preview.property("visible")
+    window.backend.set("render", "inplace")
+    settle(qapp)
+    assert not preview.property("visible")
+    window.backend.set("render", "subtitle")
+    window.backend.set("roi", "")
+    settle(qapp)
+    assert not preview.property("visible")
+
+
+def test_a_key_the_store_refuses_stays_in_its_field(qapp, window: SettingsWindow) -> None:
+    class RefusingStore(MemorySecretStore):
+        def set(self, name: str, value: str) -> None:
+            raise OSError("vault refused")
+
+    window.show_page("translation")
+    settle(qapp)
+    (entry,) = [item for item in find(window, "KeyEntry", name="DEEPL_AUTH_KEY") if item.isVisible()]  # not Home's
+    (field,) = [field for field in find(window, "Field", secret=True) if field.parentItem() is entry]
+    QMetaObject.invokeMethod(field, "forceActiveFocus")
+    type_text(qapp, window, "abc")
+    window.backend.secrets = RefusingStore()
+    press(qapp, window, Qt.Key.Key_Return)  # Enter saves
+    assert field.property("text") == "abc" and "vault refused" in window.backend.problem
+    window.backend.secrets = MemorySecretStore()
+    press(qapp, window, Qt.Key.Key_Return)
+    assert field.property("text") == "" and window.backend.secrets.get("DEEPL_AUTH_KEY") == "abc"
 
 
 def test_a_new_page_opens_at_its_top(qapp, window: SettingsWindow) -> None:

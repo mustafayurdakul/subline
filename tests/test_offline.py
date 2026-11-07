@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,9 +10,12 @@ import pytest
 
 from gametl.translate.base import TranslationRequest
 from gametl.translate.offline import (
+    ARGOS_INDEX_URL,
     RUNTIME_PACKAGES,
+    DownloadCancelled,
     OfflineTranslator,
     activate_runtime,
+    ensure_model,
     ensure_runtime,
     find_model,
     find_package,
@@ -131,7 +137,7 @@ def test_a_sentence_wrapped_over_two_lines_is_translated_whole() -> None:
 
 
 def test_missing_model_raises_with_hint(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="download-model"):
+    with pytest.raises(RuntimeError, match="gametl-cli --download-model"):
         OfflineTranslator.from_models_dir(tmp_path, "en", "tr")
 
 
@@ -158,3 +164,119 @@ def test_the_runtime_download_is_for_the_packaged_build_only(tmp_path: Path, mon
     with pytest.raises(RuntimeError, match="uv sync --extra offline"):
         ensure_runtime(tmp_path)
     assert not tmp_path.exists() or not any(tmp_path.iterdir())  # nothing fetched
+
+
+def test_a_wheel_that_fails_its_checksum_is_deleted_not_unpacked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The checksum is the only guard before downloaded code goes on the import path."""
+    import gametl.translate.offline as offline
+
+    monkeypatch.setattr(offline, "runtime_available", lambda runtime_dir: False)
+    monkeypatch.setattr(offline, "sys", SimpleNamespace(platform="win32", version_info=(3, 12, 0), maxsize=2**63 - 1))
+    monkeypatch.setattr(offline, "_download", lambda url, dest, say, what, cancelled: dest.write_bytes(b"tampered"))
+    with pytest.raises(RuntimeError, match="checksum"):
+        ensure_runtime(tmp_path / "runtime")
+    assert list(tmp_path.iterdir()) == []  # neither the runtime folder nor its staging folder
+
+
+def _argos_archive(with_model: bool = True) -> bytes:
+    """An Argos package as the index links it: a zip of one folder."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        if with_model:
+            zf.writestr("translate-en_tr/model/model.bin", b"weights")
+        zf.writestr("translate-en_tr/sentencepiece.model", b"vocab")
+        zf.writestr("translate-en_tr/stanza/tokenize.pt", b"unused")
+    return buffer.getvalue()
+
+
+class FakeResponse:
+    def __init__(self, body: bytes = b"", data=None, status: int = 200) -> None:
+        self.body, self.data, self.status = body, data, status
+        self.headers = {"content-length": str(len(body))}
+
+    def __enter__(self) -> FakeResponse:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def raise_for_status(self) -> None:
+        import requests
+
+        if self.status >= 400:
+            raise requests.HTTPError(f"{self.status} Server Error")
+
+    def json(self):
+        return self.data
+
+    def iter_content(self, chunk_size: int):
+        for i in range(0, len(self.body), 4):  # small chunks: a cancel can land between them
+            yield self.body[i : i + 4]
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, archive: bytes, index_status: int = 200) -> list[str]:
+    """Answer the index and package URLs; returns the URLs asked for."""
+    import requests
+
+    asked: list[str] = []
+    index = [{"from_code": "en", "to_code": "tr", "links": ["https://example/en_tr.argosmodel"], "code": "en_tr"}]
+
+    def get(url: str, **_kwargs) -> FakeResponse:
+        asked.append(url)
+        if url == ARGOS_INDEX_URL:
+            return FakeResponse(data=index, status=index_status)
+        return FakeResponse(body=archive)
+
+    monkeypatch.setattr(requests, "get", get)
+    return asked
+
+
+def test_a_downloaded_package_is_moved_into_place_only_when_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(monkeypatch, _argos_archive())
+    model_dir = ensure_model("en", "tr", tmp_path)
+    dest = package_dir(tmp_path, "en", "tr")
+    assert model_dir == dest / "translate-en_tr" / "model"
+    assert json.loads((dest / "gametl.json").read_text(encoding="utf-8"))["package"] == "en_tr"
+    assert not (dest / "package.argosmodel").exists() and not (dest / "translate-en_tr" / "stanza").exists()
+    assert [p.name for p in tmp_path.iterdir()] == [dest.name]  # no staging folder left
+
+    # A package without model files leaves nothing behind, and no installed model.
+    other = tmp_path / "other"
+    _serve(monkeypatch, _argos_archive(with_model=False))
+    with pytest.raises(RuntimeError, match="no model files"):
+        ensure_model("en", "tr", other)
+    assert list(other.iterdir()) == []
+
+
+def test_a_cancelled_or_failed_download_leaves_nothing_behind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _serve(monkeypatch, _argos_archive())
+    chunks = iter(range(1000))
+    with pytest.raises(DownloadCancelled):
+        ensure_model("en", "tr", tmp_path, cancelled=lambda: next(chunks) >= 3)  # mid-download
+    assert list(tmp_path.iterdir()) == []
+
+    import requests
+
+    _serve(monkeypatch, _argos_archive(), index_status=503)
+    with pytest.raises(requests.HTTPError, match="503"):  # the server's answer, not a JSON error
+        ensure_model("en", "tr", tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_folder_cut_short_is_fetched_again_and_an_opus_model_is_used_as_it_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = _serve(monkeypatch, _argos_archive())
+    _make_argos(package_dir(tmp_path, "en", "tr"))  # model files, but no gametl.json: extraction was cut short
+    ensure_model("en", "tr", tmp_path)
+    assert asked and (package_dir(tmp_path, "en", "tr") / "gametl.json").exists()
+
+    asked.clear()
+    assert ensure_model("en", "tr", tmp_path) == package_dir(tmp_path, "en", "tr") / "translate-en_tr" / "model"
+    _make_opus(opus_dir(tmp_path, "de", "tr"))
+    assert ensure_model("German", "tr", tmp_path) == opus_dir(tmp_path, "de", "tr") / "model"
+    assert asked == []  # installed models: nothing fetched

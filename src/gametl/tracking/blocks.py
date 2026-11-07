@@ -146,8 +146,8 @@ class TextBlock:
     contrast: float = 255.0  # luminance difference between text and background
 
     @property
-    def line_texts(self) -> list[str]:
-        return self.text.split("\n")
+    def n_lines(self) -> int:
+        return self.text.count("\n") + 1
 
 
 class BlockTracker:
@@ -175,11 +175,11 @@ class BlockTracker:
         """Feed one frame's OCR lines. `scanned` is the frame region that was
         read; blocks outside it are left untouched (neither matched nor
         counted missing). None means the whole frame. Returns the live blocks."""
-        # 1. This frame's lines become candidate blocks; only known blocks inside
-        #    the read region take part in matching.
+        # 1. This frame's lines are grouped into blocks; only the known blocks
+        #    inside the read region take part in matching.
         groups = group_lines(lines, self.gap_factor)
         group_boxes = [union([line.bbox for line in group]) for group in groups]
-        candidates = [b for b in self.blocks if scanned is None or intersects(b.bbox, scanned)]
+        in_region = [b for b in self.blocks if scanned is None or intersects(b.bbox, scanned)]
         prior_boxes = [b.bbox for b in self.blocks]
 
         # 2. Score every (group, block) pair by overlap, or by containment when
@@ -187,7 +187,7 @@ class BlockTracker:
         #    a line between frames).
         pairs: list[tuple[float, int, TextBlock]] = []
         for index, box in enumerate(group_boxes):
-            for block in candidates:
+            for block in in_region:
                 score = iou(box, block.bbox)
                 if score < self.min_iou and containment(box, block.bbox) >= self.min_containment:
                     score = self.min_iou  # eligible, ranked below real overlaps
@@ -207,7 +207,7 @@ class BlockTracker:
 
         # 4. Known blocks that were in the read region but not seen age one frame;
         #    after max_missing frames they are dropped.
-        for block in candidates:
+        for block in in_region:
             if block.id not in matched_blocks:
                 block.missing_frames += 1
         self.blocks = [b for b in self.blocks if b.missing_frames <= self.max_missing]

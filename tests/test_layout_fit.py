@@ -8,11 +8,24 @@ def measure(text: str, px: int) -> float:
     return len(text) * px * 0.5
 
 
-def test_wrap_words_greedy_and_overflowing_word() -> None:
+def test_wrap_words_greedy_and_a_word_too_wide_is_cut() -> None:
     width_of = lambda s: len(s)  # noqa: E731
     assert wrap_words("aa bb cc dd", 5, width_of) == ["aa bb", "cc dd"]
-    assert wrap_words("supercalifragilistic is long", 8, width_of) == ["supercalifragilistic", "is long"]
+    assert wrap_words("supercalifragilistic is long", 8, width_of) == ["supercal", "ifragili", "stic is", "long"]
     assert wrap_words("", 10, width_of) == [""]
+    assert wrap_words("abc", 0.5, width_of) == ["a", "b", "c"]  # a character wider than the box stands alone
+
+
+def test_text_without_spaces_wraps_between_characters() -> None:
+    # Japanese is written without spaces: the whole line is one word.
+    text = "あなたがここまで来てくれるなんて信じられない"
+    lines = wrap_words(text, 10, len)
+    assert lines == ["あなたがここまで来て", "くれるなんて信じられ", "ない"]
+    assert "".join(lines) == text
+    layout = fit_text(text, 200, 40, measure, base_px=32, max_height=120)  # 22 characters need 352 px
+    assert layout.font_px == 32 and len(layout.lines) == 2
+    assert all(measure(line, 32) <= 200 for line in layout.lines)
+    assert "".join(layout.lines) == text
 
 
 def test_truncate_with_ellipsis() -> None:
@@ -62,14 +75,14 @@ def test_hopeless_text_is_truncated_at_minimum_size() -> None:
     assert layout.height <= 20 + 1
 
 
-def test_prefer_grow_keeps_the_size_and_wraps_when_there_is_room() -> None:
-    # 26 chars: would shrink to 30 px to stay on one line; with prefer_grow it wraps at 32 px.
+def test_keeps_the_size_and_wraps_when_there_is_room() -> None:
+    # 26 chars: would shrink to 30 px to stay on one line; with room to grow it wraps at 32 px.
     text = "twenty-six characters here"
-    layout = fit_text(text, 400, 40, measure, base_px=32, max_height=120, prefer_grow=True)
+    layout = fit_text(text, 400, 40, measure, base_px=32, max_height=120)
     assert layout.font_px == 32
     assert len(layout.lines) == 2 and layout.grown is True
-    # Without room it falls back to the shrink-first order.
-    layout = fit_text(text, 400, 40, measure, base_px=32, max_height=None, prefer_grow=True)
+    # Without room it shrinks to fit the source box.
+    layout = fit_text(text, 400, 40, measure, base_px=32, max_height=None)
     assert layout.font_px < 32 and len(layout.lines) == 1
 
 

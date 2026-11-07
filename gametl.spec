@@ -62,7 +62,8 @@ def licence_files() -> list[tuple[str, str]]:
     """(source, destination folder) pairs: each component's licence texts
     from its dist-info, plus texts the wheels do not carry."""
     pairs: list[tuple[str, str]] = []
-    for dist in runtime_distributions():
+    bootloader = metadata.distribution("pyinstaller")  # its bootloader is part of the packaged program
+    for dist in [*runtime_distributions(), bootloader]:
         folder = f"licenses/{dist.metadata['Name']}"
         for file in dist.files or []:
             parts = file.parts

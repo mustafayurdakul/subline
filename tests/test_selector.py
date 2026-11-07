@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
@@ -39,6 +38,13 @@ def test_rect_to_zone_spec_fractions_and_clamping() -> None:
     assert rect_to_zone_spec((320, 30, 960, 390), area) == "0.2500,0.0000,0.5000,0.5000"
     # Outside the client area gets clamped to its edge.
     assert rect_to_zone_spec((-50, 0, 640, 390), area) == "0.0000,0.0000,0.5000,0.5000"
+
+
+def test_a_selection_with_nothing_inside_the_client_area_gives_no_spec() -> None:
+    client = (8, 31, 1288, 751)  # a windowed game: title bar above, borders round it
+    assert rect_to_zone_spec((200, 4, 900, 28), client) is None  # all on the title bar
+    assert rect_to_zone_spec((1288, 100, 1296, 700), client) is None  # all on the right border
+    assert rect_to_zone_spec((200, 4, 900, 32), client) == "0.1500,0.0000,0.5469,0.0014"  # one row inside
 
 
 def test_drag_then_enter_emits_selection_in_frame_pixels(qapp: QApplication) -> None:

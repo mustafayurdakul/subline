@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gametl.app.pretranslate import positive_int
+from gametl.app.pretranslate import finish, open_cache, positive_int
 from gametl.translate.cache import TranslationCache
 from gametl.translate.claude import ClaudeTranslator
 from gametl.translate.pretranslate import (
@@ -18,6 +18,7 @@ from gametl.translate.pretranslate import (
     load_lines,
     pretranslate_sync,
     submit_batch,
+    uncached,
 )
 from tests.helpers import text_response
 
@@ -124,7 +125,7 @@ def test_batch_submit_save_and_collect(tmp_path: Path) -> None:
     assert "output_format" not in requests[0]["params"]
     assert chunks["chunk-00001"] == ["c"]
 
-    job = submit_batch(["Stay close.", "Open the door.", "Run!"], translator, cache, "tr", chunk_size=2, client=client)
+    job = submit_batch(["Stay close.", "Open the door.", "Run!"], translator, cache, "tr", chunk_size=2)
     assert job is not None and job.batch_id == "msgbatch_test"
     path = tmp_path / "job.json"
     job.save(path)
@@ -137,7 +138,7 @@ def test_batch_submit_save_and_collect(tmp_path: Path) -> None:
     ended, added, failed = collect_batch(loaded, cache, client=client)
     assert (ended, added, failed) == (True, 3, 0)
     assert cache.get("Run!", "tr") == "TR Run!"
-    assert submit_batch(["Run!"], translator, cache, "tr", client=client) is None  # all cached
+    assert submit_batch(["Run!"], translator, cache, "tr") is None  # all cached
 
 
 def test_a_chunk_whose_reply_lost_an_item_counts_as_failed(tmp_path: Path) -> None:
@@ -147,7 +148,7 @@ def test_a_chunk_whose_reply_lost_an_item_counts_as_failed(tmp_path: Path) -> No
     client = SimpleNamespace(messages=SimpleNamespace(batches=batches))
     translator = ClaudeTranslator(client=client, source_lang="en")
     cache = TranslationCache(tmp_path / "c.json")
-    job = submit_batch(["A", "B", "C"], translator, cache, "tr", chunk_size=3, client=client)
+    job = submit_batch(["A", "B", "C"], translator, cache, "tr", chunk_size=3)
     assert job is not None
     batches.status = "ended"
     short = json.dumps({"items": ["B-cevap", "C-cevap"]})
@@ -167,3 +168,40 @@ def test_batch_goes_through_the_translators_own_client_by_default(tmp_path: Path
     translator = ClaudeTranslator(client=client, source_lang="en")
     job = submit_batch(["Stay close."], translator, TranslationCache(tmp_path / "c.json"), "tr")
     assert job is not None and [r["custom_id"] for r in batches.requests] == ["chunk-00000"]
+
+
+def test_a_near_duplicate_of_a_cached_line_is_translated_too() -> None:
+    """The fuzzy tier only looks at a session's recent lines: in play it would
+    not find the cached line a near-duplicate resembles."""
+    cache = TranslationCache()
+    cache.put("I can't believe you actually did that.", "tr", "Bunu gerçekten yaptığına inanamıyorum.")
+    lines = ["i can't believe you actually did  that.", "I can't believe you actually did that!"]
+    assert uncached(lines, cache, "tr") == ["I can't believe you actually did that!"]
+
+
+def test_a_collected_job_file_goes_and_one_with_failed_chunks_stays(tmp_path: Path, capsys) -> None:
+    cache = TranslationCache()
+    done, failed = tmp_path / "done.json", tmp_path / "failed.json"
+    for path in (done, failed):
+        path.write_text("{}", encoding="utf-8")
+    finish(done, 3, 0, cache)
+    finish(failed, 2, 1, cache)
+    assert not done.exists() and failed.exists()  # --resume can still be run on the failed one
+    out = capsys.readouterr().out
+    assert "job file removed" in out and f"job file kept: {failed}" in out
+
+
+def test_a_cache_file_that_cannot_be_read_stops_the_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Results collected into it could not be saved: nothing is sent, nothing paid for."""
+    import gametl.translate.cache as cache_module
+
+    path = tmp_path / "fake-game.tr.claude.json"
+    path.write_text('{"version": 1, "entries": {}}', encoding="utf-8")
+
+    def locked(*_args, **_kwargs):
+        raise PermissionError(13, "The process cannot access the file")
+
+    monkeypatch.setattr(cache_module, "open", locked, raising=False)
+    assert open_cache(path) is None
+    monkeypatch.undo()
+    assert open_cache(path) is not None

@@ -1,8 +1,9 @@
 """Remove everything gametl keeps on this computer.
 
 Two places hold data: the folder under %APPDATA%\\gametl (profiles,
-translation caches, downloaded models, config.json, the log, batch job
-files) and the Windows Credential Manager (the API keys).
+translation caches, downloaded models and the offline runtime,
+config.json, the log, batch job files) and the Windows Credential Manager
+(the API keys).
 """
 
 from __future__ import annotations
@@ -61,26 +62,25 @@ def release_log() -> None:
         log.close()
 
 
-def stale_qml_caches() -> list[Path]:
-    """The folders where Qt Quick kept compiled pages up to 0.3.2."""
+def _forget_qml_caches() -> None:
+    """Delete the folders where Qt Quick kept compiled pages up to 0.3.2,
+    and their parents once empty (Qt made them). Never raises."""
     base = os.environ.get("LOCALAPPDATA")
-    return [Path(base) / name / "cache" / "qmlcache" for name in QML_CACHE_APPS] if base else []
-
-
-def forget_qml_cache() -> None:
-    """Delete those folders, and their parents once empty (Qt made them). Never raises."""
-    for path in stale_qml_caches():
+    if not base:
+        return
+    for name in QML_CACHE_APPS:
+        path = Path(base) / name / "cache" / "qmlcache"
         shutil.rmtree(path, ignore_errors=True)
         for parent in (path.parent, path.parent.parent):
             with contextlib.suppress(OSError):
                 parent.rmdir()  # only when empty: never someone else's files
 
 
-def forget_trial(store: ProfileStore, secrets: SecretStore) -> None:
+def forget_old_versions(store: ProfileStore, secrets: SecretStore) -> None:
     """Remove what earlier versions left behind (see STALE_* and the QML
     cache). Run at every start; after the first there is nothing to do.
     Never raises."""
-    forget_qml_cache()
+    _forget_qml_caches()
     for name in STALE_SECRET_NAMES:
         with contextlib.suppress(Exception):
             secrets.delete(name)
@@ -123,7 +123,7 @@ def remove_all_data(store: ProfileStore, secrets: SecretStore) -> CleanupReport:
     """Delete the Credential Manager entries and the data folder. Never raises: whatever could not be removed is listed
     in the report."""
     report = CleanupReport()
-    forget_trial(store, secrets)
+    forget_old_versions(store, secrets)
     for name in SECRET_NAMES:
         try:
             secrets.delete(name)

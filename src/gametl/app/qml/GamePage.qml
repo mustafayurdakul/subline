@@ -9,8 +9,8 @@ ColumnLayout {
         SettingRow { label: "Game window"; helper: "Part of the window title is enough."; WindowPicker {} }
         SettingRow {
             label: "Game name"
-            helper: "Names the translation cache (and, with Claude, the game in the prompt)."
-            Field { key: "game"; live: false; placeholderText: "default: the window title" }
+            helper: "Names the translation cache (and, with Claude, the game in the prompt). Empty: the Game window text above."
+            Field { key: "game"; live: false; placeholderText: "default: the Game window text" }
         }
     }
 

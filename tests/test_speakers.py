@@ -31,3 +31,16 @@ def test_split_speaker() -> None:
     assert split_speaker("Mr. Wake.\nYou're late.") == ("", "Mr. Wake.\nYou're late.")
     assert split_speaker("Warning\nLow health") == ("", "Warning\nLow health")
     assert split_speaker("Where are you going?") == ("", "Where are you going?")
+
+
+def test_names_in_any_script_split_off() -> None:
+    assert split_speaker("Zoë: Wait for me.") == ("Zoë", "Wait for me.")
+    assert split_speaker("Jürgen: Komm her.") == ("Jürgen", "Komm her.")
+    assert split_speaker("Ángel: ¡Vamos!") == ("Ángel", "¡Vamos!")
+    assert split_speaker("Chloé: On y va.") == ("Chloé", "On y va.")
+    assert split_speaker("Şule Yılmaz: Geliyorum.") == ("Şule Yılmaz", "Geliyorum.")
+    assert split_speaker("Łukasz\nChodź tutaj.") == ("Łukasz", "Chodź tutaj.")
+    # A script without capitals names no one this way; nor does a lower-case word, nor words that open lower-case.
+    assert split_speaker("東京: 行こう") == ("", "東京: 行こう")
+    assert split_speaker("ölüm: yakın") == ("", "ölüm: yakın")
+    assert split_speaker("Zoë\nwait for me.") == ("", "Zoë\nwait for me.")

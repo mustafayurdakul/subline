@@ -38,7 +38,7 @@ def test_zone_style_locks_after_a_few_lines_and_holds() -> None:
     zone.observe(44, white)
     assert zone.locked and zone.line_height == 40
     assert zone.font_px(fallback=30) == 32
-    assert zone.fg == (250, 250, 255) or zone.fg == (255, 255, 255)
+    assert zone.fg == (255, 255, 255)  # the per-channel median of the three samples
     # A box with descenders, a two-line block measured per line, a short word: all render at 32 px.
     for height in (46, 38, 30, 50, 41):
         zone.observe(height, white)

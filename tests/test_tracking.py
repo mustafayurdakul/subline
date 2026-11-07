@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from gametl.tracking.blocks import (
     BlockTracker,
+    TextBlock,
     containment,
     group_lines,
     iou,
@@ -22,6 +23,11 @@ def test_iou_overlap_and_disjoint() -> None:
 def test_containment() -> None:
     assert containment((0, 0, 100, 10), (80, 2, 100, 8)) == 1.0
     assert containment((0, 0, 10, 10), (20, 0, 30, 10)) == 0.0
+
+
+def test_a_block_counts_its_lines() -> None:
+    assert TextBlock(1, (0, 0, 10, 10), "one").n_lines == 1
+    assert TextBlock(1, (0, 0, 10, 20), "one\ntwo").n_lines == 2
 
 
 def test_text_similarity_tolerates_ocr_jitter() -> None:

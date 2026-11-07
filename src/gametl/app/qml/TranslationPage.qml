@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import "Icons.js" as Icons
 
 ColumnLayout {
     id: root
@@ -13,7 +12,7 @@ ColumnLayout {
             label: "OCR language"
             helper: "The script the game writes in: en, de, japan, korean, cyrillic..."
             // Editable: any language the OCR can read may be typed, beyond the common ones listed.
-            Combo { key: "lang"; options: backend.ocrLangs; editable: true; live: false; implicitWidth: 180 }
+            Combo { key: "lang"; options: backend.ocrLangs; editable: true; implicitWidth: 180 }
         }
         SettingRow {
             label: "Read on the GPU"
@@ -36,7 +35,8 @@ ColumnLayout {
         SettingRow {
             label: "Service"
             helper: "DeepL and Claude need their key below. Offline runs on this computer, after a download."
-            TranslatorPicker {}
+            // The test translators are picked by name on the Advanced page.
+            Segmented { key: "translator"; options: ["DeepL", "Claude", "Offline"]; values: ["deepl", "claude", "offline"] }
         }
         SettingRow {
             label: "Draft"
@@ -63,7 +63,7 @@ ColumnLayout {
     Card {
         visible: root.translator === "claude"
         title: "Claude"
-        SettingRow { label: "Model"; Combo { key: "model"; options: backend.claudeModels; editable: true; live: false; implicitWidth: 220 } }
+        SettingRow { label: "Model"; Combo { key: "model"; options: backend.claudeModels; editable: true; implicitWidth: 220 } }
         SettingRow {
             label: "Effort"
             Segmented { key: "effort"; options: ["Low", "Medium", "High"]; values: ["low", "medium", "high"] }
@@ -79,12 +79,8 @@ ColumnLayout {
         }
         SettingRow {
             label: "Glossary"
-            helper: "A JSON file of term: translation pairs."
-            RowLayout {
-                spacing: Theme.space
-                Field { key: "glossary_path"; live: false; placeholderText: "none"; implicitWidth: 220 }
-                SecondaryButton { text: "Browse"; icon_: Icons.folder; onClicked: backend.browseGlossary() }
-            }
+            helper: "A JSON file of term: translation pairs. Paste its path."
+            Field { key: "glossary_path"; live: false; placeholderText: "none"; implicitWidth: 300 }
         }
         SettingRow {
             label: "Tone notes"

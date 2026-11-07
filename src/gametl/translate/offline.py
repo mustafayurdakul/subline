@@ -25,6 +25,7 @@ import importlib
 import importlib.util
 import json
 import re
+import shutil
 import sys
 import zipfile
 from collections.abc import Callable
@@ -32,7 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .base import TranslationRequest, language_code, quiet, single_line
+from ..textutil import single_line
+from .base import TranslationRequest, language_code, quiet
 
 ARGOS_INDEX_URL = "https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json"
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
@@ -111,6 +113,69 @@ def find_model(models_dir: Path | str, source: str, target: str) -> ModelFiles |
     return None
 
 
+# -- downloads ----------------------------------------------------------------------
+
+
+class DownloadCancelled(Exception):  # noqa: N818 (a stop on request, not an error)
+    """The download was stopped on request; nothing of it is left behind."""
+
+
+def _not_cancelled() -> bool:
+    """The `cancelled` check of a download nobody can stop."""
+    return False
+
+
+def _stop_if(cancelled: Callable[[], bool]) -> None:
+    if cancelled():
+        raise DownloadCancelled("download cancelled")
+
+
+def _download(
+    url: str, dest: Path, say: Callable[[str], None], what: str, cancelled: Callable[[], bool] = _not_cancelled
+) -> None:
+    """Stream `url` to `dest`, reporting the progress of `what`. Raises
+    DownloadCancelled when `cancelled()` turns true."""
+    import requests
+
+    with requests.get(url, stream=True, timeout=60) as response:
+        response.raise_for_status()
+        total = int(response.headers.get("content-length") or 0)
+        done = 0
+        with open(dest, "wb") as fh:
+            for chunk in response.iter_content(chunk_size=1 << 20):
+                _stop_if(cancelled)
+                fh.write(chunk)
+                done += len(chunk)
+                if total:
+                    say(f"downloading {what}: {done * 100 // total}%")
+
+
+def _unpack(
+    archive: Path, dest: Path, cancelled: Callable[[], bool], skip: Callable[[str], bool] | None = None
+) -> None:
+    """Extract the zip `archive` into `dest`, but the members whose name `skip` picks."""
+    with zipfile.ZipFile(archive) as zf:
+        for member in zf.infolist():
+            _stop_if(cancelled)
+            if skip is None or not skip(member.filename):
+                zf.extract(member, dest)
+
+
+def _staging(dest: Path) -> Path:
+    """An empty folder beside `dest` to download and unpack into: moved to
+    `dest` once complete, so a cut-off download never passes as installed."""
+    part = dest.with_name(dest.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)  # what an interrupted attempt left
+    part.mkdir(parents=True)
+    return part
+
+
+def _install(part: Path, dest: Path) -> None:
+    """Put a complete staging folder in place of `dest`."""
+    shutil.rmtree(dest, ignore_errors=True)
+    part.rename(dest)
+
+
 # -- Argos packages ---------------------------------------------------------------
 
 
@@ -122,54 +187,60 @@ def find_package(index: list[dict], source: str, target: str) -> dict | None:
     return None
 
 
-def _download(url: str, dest: Path, say: Callable[[str], None], what: str) -> None:
-    """Stream `url` to `dest`, reporting the progress of `what`."""
-    import requests
-
-    with requests.get(url, stream=True, timeout=60) as response:
-        response.raise_for_status()
-        total = int(response.headers.get("content-length") or 0)
-        done = 0
-        with open(dest, "wb") as fh:
-            for chunk in response.iter_content(chunk_size=1 << 20):
-                fh.write(chunk)
-                done += len(chunk)
-                if total:
-                    say(f"downloading {what}: {done * 100 // total}%")
+def _skip_stanza(name: str) -> bool:
+    """The stanza sentence splitter in an Argos package: large and unused here."""
+    return "/stanza/" in name or name.startswith("stanza/")
 
 
-def ensure_model(source: str, target: str, models_dir: Path | str, say: Callable[[str], None] = quiet) -> Path:
-    """The model folder for the pair, downloading the Argos package on first
-    use. Raises RuntimeError when no package exists."""
+def ensure_model(
+    source: str,
+    target: str,
+    models_dir: Path | str,
+    say: Callable[[str], None] = quiet,
+    cancelled: Callable[[], bool] = _not_cancelled,
+) -> Path:
+    """The model folder for the pair: an installed one (a converted OPUS
+    model is used as it is), else the Argos package, downloaded on first use.
+    Raises RuntimeError when no package exists, DownloadCancelled when
+    `cancelled()` turns true."""
     import requests
 
     source, target = iso_pair(source, target)
     dest = package_dir(models_dir, source, target)
-    found = locate_model_files(dest) if dest.exists() else None
-    if found:
+    found = find_model(models_dir, source, target)
+    # gametl.json is written last: an Argos folder without it was cut short, and is fetched again.
+    if found and (found.kind == "opus" or (dest / "gametl.json").exists()):
         return found.model_dir
 
+    _stop_if(cancelled)
     say(f"fetching Argos package index for {source}->{target}")
-    index = requests.get(ARGOS_INDEX_URL, timeout=30).json()
-    entry = find_package(index, source, target)
+    response = requests.get(ARGOS_INDEX_URL, timeout=30)
+    response.raise_for_status()
+    entry = find_package(response.json(), source, target)
     if entry is None:
         raise RuntimeError(f"no offline model package for {source}->{target}")
-    dest.mkdir(parents=True, exist_ok=True)
-    archive = dest / "package.argosmodel"
-    _download(entry["links"][0], archive, say, "the offline model")
-    say("extracting")
-    with zipfile.ZipFile(archive) as zf:
-        for member in zf.infolist():
-            # Skip the stanza sentence splitter: large and unused here.
-            if "/stanza/" in member.filename or member.filename.startswith("stanza/"):
-                continue
-            zf.extract(member, dest)
-    archive.unlink(missing_ok=True)
+    part = _staging(dest)
+    try:
+        archive = part / "package.argosmodel"
+        _download(entry["links"][0], archive, say, "the offline model", cancelled)
+        say("extracting")
+        _unpack(archive, part, cancelled, skip=_skip_stanza)
+        archive.unlink()
+        if not locate_model_files(part):
+            raise RuntimeError(f"package for {source}->{target} has no model files")
+        meta = {
+            "source": source,
+            "target": target,
+            "package": entry.get("code"),
+            "version": entry.get("package_version"),
+        }
+        (part / "gametl.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        _install(part, dest)
+    except BaseException:
+        shutil.rmtree(part, ignore_errors=True)
+        raise
     found = locate_model_files(dest)
-    if not found:
-        raise RuntimeError(f"package for {source}->{target} has no model files")
-    meta = {"source": source, "target": target, "package": entry.get("code"), "version": entry.get("package_version")}
-    (dest / "gametl.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    assert found is not None  # checked in the staging folder
     say("offline model ready")
     return found.model_dir
 
@@ -190,9 +261,12 @@ def runtime_available(runtime_dir: Path | str) -> bool:
     return all(importlib.util.find_spec(name) is not None for name in RUNTIME_PACKAGES)
 
 
-def ensure_runtime(runtime_dir: Path | str, say: Callable[[str], None] = quiet) -> None:
+def ensure_runtime(
+    runtime_dir: Path | str, say: Callable[[str], None] = quiet, cancelled: Callable[[], bool] = _not_cancelled
+) -> None:
     """Make the runtime importable: nothing to do when it is installed,
-    else fetch the pinned wheels and unpack them under `runtime_dir`."""
+    else fetch the pinned wheels and unpack them under `runtime_dir`.
+    Raises DownloadCancelled when `cancelled()` turns true."""
     runtime_dir = Path(runtime_dir)
     if runtime_available(runtime_dir):
         return
@@ -201,16 +275,22 @@ def ensure_runtime(runtime_dir: Path | str, say: Callable[[str], None] = quiet) 
             "the offline runtime download is for the packaged build (64-bit Windows, Python 3.12); "
             "a development install gets it with: uv sync --extra offline"
         )
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    for name, url, sha256 in RUNTIME_WHEELS:
-        wheel = runtime_dir / name
-        _download(url, wheel, say, name)
-        if hashlib.sha256(wheel.read_bytes()).hexdigest() != sha256:
+    # Unpacked in full or not at all: a half-unpacked package would pass
+    # runtime_available's check and never be fetched again.
+    part = _staging(runtime_dir)
+    try:
+        for name, url, sha256 in RUNTIME_WHEELS:
+            _stop_if(cancelled)
+            wheel = part / name
+            _download(url, wheel, say, name, cancelled)
+            if hashlib.sha256(wheel.read_bytes()).hexdigest() != sha256:
+                raise RuntimeError(f"{name} did not match its checksum; try the download again")
+            _unpack(wheel, part, cancelled)
             wheel.unlink()
-            raise RuntimeError(f"{name} did not match its checksum; try the download again")
-        with zipfile.ZipFile(wheel) as zf:
-            zf.extractall(runtime_dir)
-        wheel.unlink()
+        _install(part, runtime_dir)
+    except BaseException:
+        shutil.rmtree(part, ignore_errors=True)
+        raise
     importlib.invalidate_caches()
     if not runtime_available(runtime_dir):
         raise RuntimeError("the offline runtime was unpacked but cannot be imported")
@@ -218,12 +298,18 @@ def ensure_runtime(runtime_dir: Path | str, say: Callable[[str], None] = quiet) 
 
 
 def ensure_offline(
-    source: str, target: str, models_dir: Path | str, runtime_dir: Path | str, say: Callable[[str], None] = quiet
+    source: str,
+    target: str,
+    models_dir: Path | str,
+    runtime_dir: Path | str,
+    say: Callable[[str], None] = quiet,
+    cancelled: Callable[[], bool] = _not_cancelled,
 ) -> Path:
     """Everything the offline translator needs for the pair: the runtime,
-    then the model. Returns the model folder."""
-    ensure_runtime(runtime_dir, say)
-    return ensure_model(source, target, models_dir, say)
+    then the model. Returns the model folder. Raises DownloadCancelled when
+    `cancelled()` turns true; what was not complete by then is removed."""
+    ensure_runtime(runtime_dir, say, cancelled)
+    return ensure_model(source, target, models_dir, say, cancelled)
 
 
 # -- translator ---------------------------------------------------------------------
@@ -245,7 +331,6 @@ class OfflineTranslator:
         kind: str = "argos",
         compute_type: str = "int8",
         beam_size: int = 2,
-        threads: int | None = None,
     ) -> None:
         try:
             import ctranslate2
@@ -253,7 +338,7 @@ class OfflineTranslator:
         except ImportError as exc:
             raise RuntimeError(
                 "offline translation is not installed: press Download on the Translation page "
-                "(or run gametl --download-model)"
+                "(or run gametl-cli --download-model)"
             ) from exc
 
         self.sp_source = spm.SentencePieceProcessor(model_file=str(sp_source))
@@ -262,10 +347,7 @@ class OfflineTranslator:
             if sp_target is None or Path(sp_target) == Path(sp_source)
             else spm.SentencePieceProcessor(model_file=str(sp_target))
         )
-        kwargs: dict[str, Any] = {"device": "cpu", "compute_type": compute_type}
-        if threads:
-            kwargs["intra_threads"] = threads
-        self.ct2 = ctranslate2.Translator(str(model_dir), **kwargs)
+        self.ct2 = ctranslate2.Translator(str(model_dir), device="cpu", compute_type=compute_type)
         self.beam_size = beam_size
         self.kind = kind
         self.model_dir = Path(model_dir)
@@ -276,7 +358,7 @@ class OfflineTranslator:
         if not found:
             raise RuntimeError(
                 f"offline model for {source}->{target} not installed: press Download on the Translation page, "
-                "run gametl --download-model, or convert an OPUS-MT model with scripts/convert_offline_model.py"
+                "run gametl-cli --download-model, or convert an OPUS-MT model with scripts/convert_offline_model.py"
             )
         return cls(found.model_dir, found.sp_source, found.sp_target, kind=found.kind, **kwargs)
 

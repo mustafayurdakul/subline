@@ -36,14 +36,19 @@ _ARROWS = {
 }
 
 
-def rect_to_zone_spec(rect: Box, area: Box, decimals: int = 4) -> str:
-    """Frame-pixel rectangle -> 'x,y,w,h' as fractions of `area`, clamped to it."""
+def rect_to_zone_spec(rect: Box, area: Box, decimals: int = 4) -> str | None:
+    """Frame-pixel rectangle -> 'x,y,w,h' as fractions of `area`, clamped to
+    it. None when nothing of the rectangle is left inside `area` (a
+    selection on the title bar or a border), which would read an empty
+    picture."""
     ax0, ay0, ax1, ay1 = area
     aw, ah = max(1, ax1 - ax0), max(1, ay1 - ay0)
     x0 = min(max(rect[0], ax0), ax1)
     y0 = min(max(rect[1], ay0), ay1)
     x1 = min(max(rect[2], ax0), ax1)
     y1 = min(max(rect[3], ay0), ay1)
+    if x1 - x0 < 1 or y1 - y0 < 1:
+        return None
     fx, fy = (x0 - ax0) / aw, (y0 - ay0) / ah
     fw, fh = (x1 - x0) / aw, (y1 - y0) / ah
     return ",".join(f"{v:.{decimals}f}" for v in (fx, fy, fw, fh))

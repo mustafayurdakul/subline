@@ -54,20 +54,13 @@ def model_params(lang: str, version: str = "PP-OCRv6", size: str = "small") -> d
 
 
 class RapidOcrEngine:
-    name = "rapidocr"
-
     def __init__(
         self,
         lang: str = "en",
         version: str = "PP-OCRv6",
         size: str = "small",
-        use_cls: bool = False,
         use_dml: bool = False,
-        text_score: float = 0.5,
         det_limit_side_len: int = 960,
-        det_limit_type: str = "max",
-        threads: int | None = None,
-        log_level: str = "error",  # "warning" would log every frame without text
         model_root_dir: str | None = None,
     ) -> None:
         # Imported here: rapidocr pulls in onnxruntime and OpenCV at import time.
@@ -79,15 +72,13 @@ class RapidOcrEngine:
             # rapidocr default upscales short sides under 736 px, which makes a
             # wide subtitle strip several times more expensive.
             "Det.limit_side_len": det_limit_side_len,
-            "Det.limit_type": det_limit_type,
+            "Det.limit_type": "max",
             # The text-direction classifier is for scanned documents; game text is upright.
-            "Global.use_cls": use_cls,
-            "Global.text_score": text_score,
-            "Global.log_level": log_level,
+            "Global.use_cls": False,
+            "Global.text_score": 0.5,
+            "Global.log_level": "error",  # "warning" would log every frame without text
             "EngineConfig.onnxruntime.use_dml": use_dml,
         }
-        if threads is not None:
-            params["EngineConfig.onnxruntime.intra_op_num_threads"] = threads
         if model_root_dir:
             params["Global.model_root_dir"] = model_root_dir
 

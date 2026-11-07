@@ -11,7 +11,8 @@ ColumnLayout {
     readonly property bool subtitleMode: String(s.render) === "subtitle" && String(s.roi) !== ""
     spacing: 2 * Theme.space
 
-    SubtitlePreview { Layout.fillWidth: true }
+    // The overlay draws in place, in the game's colours, outside subtitle mode: nothing to preview.
+    SubtitlePreview { Layout.fillWidth: true; visible: root.subtitleMode }
 
     Card {
         title: "Mode"
@@ -34,7 +35,7 @@ ColumnLayout {
             visible: root.subtitleMode
             label: "Subtitle size"
             helper: "Learned from the game's first lines and then held, or a fixed size. The preview shows it as on a 1080p game."
-            Stepper { key: "subtitle_font_px"; from: 0; to: 200; step: 2; suffix: " px"; specialText: "game's own" }
+            Stepper { key: "subtitle_font_px"; from: 0; to: 200; start: 36; step: 2; suffix: " px"; specialText: "game's own" }
         }
         SettingRow {
             visible: root.subtitleMode

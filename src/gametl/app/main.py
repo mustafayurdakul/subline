@@ -16,8 +16,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import shutil
 import sys
+import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gametl.app.config import DRAFTS, TRANSLATORS, ProfileStore, Settings, app_dir, slug
@@ -76,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--effort", choices=["low", "medium", "high"])
     tr.add_argument("--thinking", choices=["disabled", "adaptive"])
     tr.add_argument("--structured", action="store_true", default=None, help="server-side structured output")
-    tr.add_argument("--game", help="game name for the prompt and the cache file; default: window title")
+    tr.add_argument(
+        "--game", help="game name for the prompt and the cache file; default: --window, else the window title"
+    )
     tr.add_argument("--glossary", help='JSON file {"term": "translation"}')
     tr.add_argument("--tone", help="notes for the translator on tone and formality")
     tr.add_argument("--no-cache-file", action="store_true", default=None, help="keep the cache in memory only")
@@ -136,10 +141,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="cover the original line when the subtitle is drawn elsewhere",
     )
     look.add_argument(
-        "--no-center-area",
+        "--center-area",
         action="store_true",
         default=None,
-        help="do not mirror a selected area about the centre by default (Shift while dragging inverts either way)",
+        help="keep a selected area symmetric about the centre (Shift while dragging inverts it)",
+    )
+    look.add_argument(
+        "--no-center-area", action="store_true", default=None, help="turn off a profile's centring of a selected area"
     )
     # The option's name before center_zone became center_area, kept for existing shortcuts and scripts.
     look.add_argument(
@@ -208,6 +216,7 @@ _VALUE_OPTIONS = {
 } | {"window": "window_match", "glossary": "glossary_path", "subtitle_font": "subtitle_font_px"}  # fmt: skip
 # Flag -> (Settings field, value it sets); the flag's absence leaves the profile's value alone.
 _FLAG_OPTIONS = {
+    "center_area": ("center_area", True),
     "no_center_area": ("center_area", False),
     "hide_source": ("subtitle_hide_source", True),
     "include_frame": ("include_frame", True),
@@ -248,15 +257,16 @@ def screenshot(rect: tuple[int, int, int, int], path: str) -> None:
     image.save(path)
 
 
-def utf8_console() -> None:
+def utf8_console(log_dir: Path | None = None) -> None:
     """Status lines may contain the target language: never die on a cp1252
     console. A windowed build has no console at all: write to a log file in
-    the data folder instead. Either way, a native crash (access violation
-    in a DLL) dumps the Python stacks of all threads to the same place."""
+    the data folder (`log_dir`, default %APPDATA%\\gametl) instead. Either
+    way, a native crash (access violation in a DLL) dumps the Python stacks
+    of all threads to the same place."""
     import faulthandler
 
     if sys.stdout is None or sys.stderr is None:
-        log_dir = app_dir()
+        log_dir = log_dir or app_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "gametl.log"
         mode = "w" if log_path.exists() and log_path.stat().st_size > 5_000_000 else "a"
@@ -273,6 +283,93 @@ def utf8_console() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     with contextlib.suppress(AttributeError, OSError, ValueError):
         faulthandler.enable(all_threads=True)
+
+
+def data_dir_arg(argv: list[str] | None) -> str | None:
+    """The --data-dir in `argv`, read ahead of the full parse: the log has to
+    be open before argparse can report a bad argument (a windowed build has
+    no console), and it belongs in the data folder in use."""
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--data-dir")
+    return pre.parse_known_args(argv)[0].data_dir
+
+
+# -- finishing "Remove all data" -------------------------------------------------------
+
+FINISH_REMOVAL = "--finish-removal"  # hidden: run by "Remove all data" (see finish_removal_command)
+FINISH_REMOVAL_WAIT = 60.0  # seconds the helper waits for the app to exit
+_SYNCHRONIZE = 0x00100000  # the access right WaitForSingleObject needs on a process
+
+
+def finish_removal_command(pid: int, data_dir: Path) -> list[str]:
+    """The command that deletes `data_dir` once process `pid` has exited.
+    "Remove all data" runs it, detached, when files are left: the offline
+    translator's libraries stay loaded in the running app, and Windows
+    refuses to delete a loaded library."""
+    folder = os.path.abspath(data_dir)
+    if getattr(sys, "frozen", False):  # the packaged app: the executable is the entry point
+        return [sys.executable, FINISH_REMOVAL, str(pid), folder]
+    return [sys.executable, "-m", "gametl.app.main", FINISH_REMOVAL, str(pid), folder]
+
+
+def looks_like_data_folder(folder: Path) -> bool:
+    """True when `folder` is a directory holding something the app keeps in
+    its data folder: the helper deletes nothing else, whatever it is told."""
+    if not folder.is_dir():
+        return False
+    store = ProfileStore(folder)
+    names = (store.config_path, store.profiles_dir, store.cache_dir, store.models_dir, store.runtime_dir)
+    return any(path.exists() for path in (*names, folder / "gametl.log"))
+
+
+def wait_for_exit(pid: int, timeout: float) -> None:
+    """Return once process `pid` has exited, or after `timeout` seconds."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(_SYNCHRONIZE, False, pid)
+        if not handle:  # gone already
+            return
+        try:
+            kernel32.WaitForSingleObject(handle, int(timeout * 1000))
+        finally:
+            kernel32.CloseHandle(handle)
+        return
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:  # gone, or the number now belongs to another user's process
+            return
+        time.sleep(0.2)
+
+
+def finish_removal(args: list[str]) -> int:
+    """`--finish-removal PID DATA_DIR`: wait for the app (PID) to exit, then
+    delete what is left of its data folder. Writes no log, which would go
+    into that folder. 2 when the arguments are not a process number and a
+    data folder (nothing is deleted then), 1 when files are still left."""
+    if len(args) != 2 or not args[0].isdecimal():
+        return 2
+    pid, folder = int(args[0]), Path(args[1])
+    if not looks_like_data_folder(folder):
+        return 2
+    wait_for_exit(pid, FINISH_REMOVAL_WAIT)
+    for attempt in range(5):  # a virus scanner or the indexer may still hold a file for a moment
+        if attempt:
+            time.sleep(0.5)
+        shutil.rmtree(folder, ignore_errors=True)
+        if not folder.exists():
+            return 0
+    return 1
 
 
 def open_window_titles() -> list[str]:
@@ -313,7 +410,10 @@ def main(argv: list[str] | None = None) -> int:
         from gametl.app.pretranslate import main as pretranslate_main
 
         return pretranslate_main(argv[1:])  # sets up the console itself
-    utf8_console()
+    if argv and argv[0] == FINISH_REMOVAL:
+        return finish_removal(argv[1:])  # before utf8_console: its log would go into the folder it deletes
+    store = ProfileStore(data_dir_arg(argv))
+    utf8_console(store.root)  # the log goes to the data folder in use, which "Remove all data" deletes
     args = build_parser().parse_args(argv)
     if args.check_ui:
         from gametl.app.settings_window import check
@@ -339,11 +439,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"--hwnd {args.hwnd!r} is not a window handle (decimal or 0x hex)")
         return 2
 
-    store = ProfileStore(args.data_dir)
     if args.remove_all_data:
+        from gametl import APP_NAME
         from gametl.app.cleanup import remove_all_data
         from gametl.app.credentials import WindowsCredentialStore
+        from gametl.app.tray import SingleInstance
 
+        # The running app holds its log open and writes its profiles and caches again.
+        if SingleInstance(store.root).running():
+            print(f"{APP_NAME} is running: quit it from the tray first, or use Advanced > Remove all data and quit")
+            return 1
         report = remove_all_data(store, WindowsCredentialStore())
         print(report.text)
         return 0 if report.complete else 1
@@ -379,13 +484,13 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from gametl.app.cleanup import forget_trial
+    from gametl.app.cleanup import forget_old_versions
     from gametl.app.controller import OverlayController
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     controller = OverlayController(store)
-    forget_trial(store, controller.secrets)  # what versions up to 0.2.1 left behind
+    forget_old_versions(store, controller.secrets)  # what earlier versions left behind (STALE_*, old QML caches)
     controller.status.connect(lambda s: print(s, flush=True))
 
     tray_mode = args.tray or (not settings.window_match and hwnd is None)

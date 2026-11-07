@@ -1,10 +1,11 @@
 """Convert an OPUS-MT model from Hugging Face into the app's offline format.
 
 The conversion needs PyTorch and transformers, which the app itself does
-not ship. Run it once in a throwaway environment on top of the project
-(one command line):
+not ship, and CTranslate2 and SentencePiece from the project's `offline`
+extra. Run it once in a throwaway environment on top of the project (one
+command line):
 
-  uv run --with torch --with transformers --with huggingface_hub
+  uv run --extra offline --with torch --with transformers --with huggingface_hub
       python scripts/convert_offline_model.py --source en --target tr
 
 Default model per pair: Helsinki-NLP/opus-mt-tc-big-<src>-<tgt> (good
@@ -46,7 +47,7 @@ def main() -> int:
     except ImportError as exc:
         print(
             f"missing {exc.name}; run with: "
-            f"uv run --with torch --with transformers --with huggingface_hub python {sys.argv[0]} ..."
+            f"uv run --extra offline --with torch --with transformers --with huggingface_hub python {sys.argv[0]} ..."
         )
         return 2
 

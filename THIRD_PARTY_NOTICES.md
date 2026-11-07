@@ -5,15 +5,15 @@ licence (see LICENSE). It bundles the open-source components below, each of whic
 under its own licence. The full licence texts ship in the `licenses` folder
 of the packaged build, one subfolder per component (the Qt LGPL and GPL
 texts under `licenses/qt`). In the source tree, `licenses/` holds only the
-texts the wheels do not carry, including those of the offline runtime
-downloaded on demand; the build collects the rest from the installed
-packages.
+texts the wheels do not carry: Python's, those of Qt and those of the
+offline runtime downloaded on demand; the build collects the rest from the
+installed packages.
 
 ## Bundled
 
 | Component | Used for | Licence |
 | --- | --- | --- |
-| [Python](https://www.python.org/) 3.12 | runtime | PSF License |
+| [Python](https://www.python.org/) 3.12 | runtime | PSF License; the libraries its Windows build carries (OpenSSL: Apache-2.0; libffi, bzip2, Microsoft Distributable Code and others) under their own licences, all in `licenses/python` |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | text detection and recognition | Apache-2.0 |
 | [ONNX Runtime](https://onnxruntime.ai/) (onnxruntime-directml) | running the OCR models | MIT |
 | Microsoft DirectML (`DirectML.dll`, shipped inside onnxruntime-directml) | GPU OCR | Microsoft's DirectML licence, as redistributed with that package |
@@ -103,6 +103,8 @@ is subject to those services' terms.
 
 ## Demo footage
 
-The README clip is the author's own gameplay recording of Alan Wake 2
-(Remedy Entertainment), shown to demonstrate the software; the game and
-its subtitles are the property of their owners.
+The demo clip in the README and on the website (`docs/demo.gif`,
+`docs/assets/demo.*`, `docs/assets/demo-poster.jpg`) is the author's own
+gameplay recording of Alan Wake 2 (Remedy Entertainment), shown to
+demonstrate the software; the game and its subtitles are the property of
+their owners.

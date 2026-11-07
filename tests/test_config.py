@@ -9,11 +9,12 @@ from gametl.app.config import (
     BOTTOM_STRIP,
     DEFAULT_HOTKEYS,
     NO_LETTERS_PATTERN,
+    PROFILE_VERSION,
     ProfileStore,
     Settings,
     slug,
-    write_json_atomic,
 )
+from gametl.jsonfile import write_json_atomic
 
 
 def test_settings_round_trip_and_unknown_keys_ignored() -> None:
@@ -91,12 +92,15 @@ def test_the_old_default_source_language_gives_way_to_the_ocr_language() -> None
     assert chosen.copy().source_lang == "en" and chosen.copy() == chosen and chosen.copy() is not chosen
 
 
-def test_choosing_an_area_leaves_the_sweep_alone() -> None:
-    s = Settings(full_scan_every=30)
-    s.set_area("0,0.5,1,0.5")
-    assert (s.roi, s.full_scan_every) == ("0,0.5,1,0.5", 30)
-    s.set_area("")
-    assert (s.roi, s.full_scan_every) == ("", 30)
+def test_a_saved_profile_keeps_values_the_upgrades_would_reset(tmp_path: Path) -> None:
+    store = ProfileStore(tmp_path)
+    store.save("g", Settings(font="Fira Sans", lang="japan", source_lang="en"))
+    assert json.loads(store.path("g").read_text(encoding="utf-8"))["profile_version"] == PROFILE_VERSION
+    loaded = store.load("g")
+    assert (loaded.font, loaded.source_lang) == ("Fira Sans", "en")  # chosen now: kept
+    # The same values in a profile without a version are the old defaults, and are upgraded.
+    old = Settings.from_dict(Settings(font="Fira Sans", lang="japan", source_lang="en").to_dict())
+    assert (old.font, old.source_lang) == ("Segoe UI", "")
 
 
 def test_slug() -> None:

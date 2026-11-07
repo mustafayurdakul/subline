@@ -5,10 +5,12 @@ import "Icons.js" as Icons
 
 // The settings window's content: side navigation, header, the current page.
 // The window sets two context properties: `backend` (a SettingsBackend),
-// what the pages read and write, and `uiScale`, the screen's logical DPI
-// over 96. Everything is laid out at 96 dpi and drawn `uiScale` times as
-// large, so the window keeps its size and sharpness on a 150 % screen;
-// popups, drawn above the page, take the same scale themselves.
+// what the pages read and write, and `uiScale`, the window's scale
+// (settings_window.screen_scale: the screen's DPI over 96, less when the
+// window would not fit the screen). Everything is laid out at 96 dpi and
+// drawn `uiScale` times as large, so the window keeps its size and
+// sharpness on a 150 % screen; popups, drawn above the page, take the same
+// scale themselves.
 Rectangle {
     id: root
     property string page: "home"

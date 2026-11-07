@@ -10,7 +10,6 @@ import argparse
 import os
 import sys
 import tempfile
-from collections.abc import Sequence
 from pathlib import Path
 
 # Qt Quick otherwise keeps compiled pages in %LOCALAPPDATA%\<exe name>\cache\qmlcache, outside the
@@ -19,7 +18,7 @@ os.environ["QML_DISABLE_DISK_CACHE"] = "1"  # before the imports below: the QML 
 
 import shiboken6
 from PySide6.QtCore import QEvent, QMetaObject, QObject, QSize, Qt, QUrl
-from PySide6.QtGui import QScreen
+from PySide6.QtGui import QGuiApplication, QScreen
 from PySide6.QtQuick import QQuickItem, QQuickView, QQuickWindow, QSGRendererInterface
 
 from .. import APP_NAME
@@ -160,11 +159,11 @@ class SettingsWindow(QQuickView):
 
     def popups(self) -> list[QObject]:
         """Every popup the current page and the window hold (dialogs, drop-down lists)."""
-        return [obj for obj in self.objects() if _inherits(obj, "QQuickPopup")]
+        return [obj for obj in self.objects() if obj.inherits("QQuickPopup")]
 
     def foreign_types(self) -> list[str]:
         """Class names of Controls types that stand where the app's own were meant (FOREIGN_TYPES)."""
-        return sorted({name for obj in self.objects() for name in FOREIGN_TYPES if _inherits(obj, name)})
+        return sorted({name for obj in self.objects() for name in FOREIGN_TYPES if obj.inherits(name)})
 
     def present(self) -> None:
         """Show the window, in front, with focus; the tray and the hotkey call this."""
@@ -173,22 +172,12 @@ class SettingsWindow(QQuickView):
         self.requestActivate()
 
 
-def _inherits(obj: QObject, class_name: str) -> bool:
-    meta = obj.metaObject()
-    while meta is not None:
-        if meta.className() == class_name:
-            return True
-        meta = meta.superClass()
-    return False
-
-
-def check(pages: Sequence[str] = PAGES) -> list[str]:
+def check() -> list[str]:
     """Load the window and every page without a display, opening each
     popup once; the QML problems found, empty when all is well. Sets up the
     offscreen platform itself, so call it before any Qt application exists."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
-    from PySide6.QtGui import QGuiApplication  # after the platform is chosen above
 
     global _app
     _app = app = QGuiApplication.instance() or QGuiApplication([])
@@ -204,7 +193,7 @@ def check(pages: Sequence[str] = PAGES) -> list[str]:
         extra: list[str] = []
         if window.page_keys() != PAGES:
             extra.append(f"Main.qml's pages {window.page_keys()} differ from settings_window.PAGES {PAGES}")
-        for page in pages:
+        for page in PAGES:
             window.show_page(page)
             settle()
             for popup in window.popups():

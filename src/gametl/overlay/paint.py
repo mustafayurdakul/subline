@@ -67,10 +67,10 @@ class RenderBlock:
     bg: RGB = (0, 0, 0)  # the sampled background, for the in-place patch and outline styles
     fg: RGB = (255, 255, 255)
     style: str = "patch"  # "patch" | "pill" | "outline" | "subtitle"
-    font_px: int = 0  # base font size from the producer (style memory, zone style or settings); unused by outlines
+    font_px: int = 0  # base font size from the producer (style memory, zone style or settings); unused by debug boxes
     room_below: int = 0  # free pixels the box may grow into
     room_above: int = 0
-    outline: bool = False  # debug: draw the box outline only
+    debug_box: bool = False  # debug: draw the box's outline only, no text
     # subtitle style: text centred in `zone`; with hide_source a band covers the source line
     zone: Box | None = None
     position: str = "bottom"  # "source" | "bottom" | "center"
@@ -110,7 +110,7 @@ def subtitle_rect(zone: Box, anchor_y: int, text_w: int, text_h: int, position: 
 
 def _is_subtitle(block: RenderBlock) -> bool:
     """A block drawn in the subtitle style, placed in its zone."""
-    return not block.outline and bool(block.lines) and block.style == "subtitle" and block.zone is not None
+    return not block.debug_box and bool(block.lines) and block.style == "subtitle" and block.zone is not None
 
 
 def _shift(placed: SubtitlePlacement, dy: int) -> None:
@@ -206,14 +206,14 @@ class BlockPainter:
     def measurer(self, weight: str = "regular") -> Callable[[str, int], float]:
         return lambda text, px: float(self.metrics_at(px, weight).horizontalAdvance(text))
 
-    @staticmethod
-    def _cached(cache: dict, key: tuple, build: Callable[[], object]):
-        value = cache.get(key)
-        if value is None:
-            if len(cache) >= _CACHE_SIZE:
-                cache.clear()
-            value = cache[key] = build()
-        return value
+    def _layout(self, key: tuple, build: Callable[[], TextLayout]) -> TextLayout:
+        """The layout cached under `key`, built on first use."""
+        layout = self._layouts.get(key)
+        if layout is None:
+            if len(self._layouts) >= _CACHE_SIZE:
+                self._layouts.clear()
+            layout = self._layouts[key] = build()
+        return layout
 
     def _pads(self, bbox: Box) -> tuple[int, int]:
         """(horizontal, vertical) padding around a box: the sides get more on tall text."""
@@ -228,8 +228,7 @@ class BlockPainter:
         room = block.room_below + block.room_above  # only the sum matters to the layout
         ratio = self.spacing_ratio(block.weight)
         key = ("inplace", tuple(block.lines), width, height, base_px, room, block.weight)
-        return self._cached(
-            self._layouts,
+        return self._layout(
             key,
             lambda: fit_text(
                 "\n".join(block.lines),
@@ -239,7 +238,6 @@ class BlockPainter:
                 base_px,
                 max_height=height + room,
                 line_spacing=ratio,
-                prefer_grow=True,
             ),
         )
 
@@ -256,8 +254,7 @@ class BlockPainter:
         margin = max(12, font_px // 2)
         width = max(50, (zx1 - zx0) - 2 * margin)
         key = ("subtitle", tuple(block.lines), width, font_px, zy1 - zy0, block.weight)
-        layout = self._cached(
-            self._layouts,
+        layout = self._layout(
             key,
             lambda: fit_text(
                 "\n".join(block.lines),
@@ -267,7 +264,6 @@ class BlockPainter:
                 font_px,
                 max_height=(zy1 - zy0) - 2 * margin,
                 line_spacing=ratio,
-                prefer_grow=True,
             ),
         )
         # Metrics of the size the layout settled on.
@@ -317,8 +313,8 @@ class BlockPainter:
             self._paint_subtitle_text(p, blocks[i], placed)
 
     def _paint_block(self, p: QPainter, block: RenderBlock) -> None:
-        """A debug outline, or a block drawn on its own box."""
-        if block.outline:
+        """A debug box, or a block drawn on its own box."""
+        if block.debug_box:
             p.setPen(QPen(DEBUG_COLOR, 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRect(_padded(block.bbox, *self._pads(block.bbox)))

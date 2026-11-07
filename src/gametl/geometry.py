@@ -1,4 +1,4 @@
-"""Aliases shared by capture, tracking, layout and the overlay."""
+"""Type aliases shared across the package."""
 
 Box = tuple[int, int, int, int]
 """A pixel rectangle as (x0, y0, x1, y1); x1 and y1 exclusive."""

@@ -4,12 +4,15 @@ hotkeys; status in the tooltip. One tray app runs per user and data folder."""
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QLockFile, QObject, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtCore import QLockFile, QObject
+from PySide6.QtGui import QAction
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -19,7 +22,7 @@ from .config import ProfileStore, Settings, slug
 from .controller import OverlayController
 from .hotkeys import GlobalHotkeys
 from .icon import make_icon
-from .settings_backend import SettingsBackend
+from .settings_backend import SettingsBackend, open_data_folder
 from .settings_window import SettingsWindow
 
 # Hotkeys that act on a running overlay. Registered only while one runs: a
@@ -55,6 +58,14 @@ class SingleInstance(QObject):
         self._server = QLocalServer(self)
         self._server.newConnection.connect(lambda: self._answer(on_request))
         self._server.listen(self.name)
+        return True
+
+    def running(self) -> bool:
+        """True while another process holds this data folder's lock: the
+        tray app runs. Takes nothing: the lock is released at once."""
+        if self._lock.tryLock(0):
+            self._lock.unlock()
+            return False
         return True
 
     def _answer(self, on_request: Callable[[], None]) -> None:
@@ -120,9 +131,7 @@ class TrayApp(QObject):
         self.menu.addAction("Settings...").triggered.connect(self.open_settings)
         self.profiles_menu = self.menu.addMenu("Profiles")
         self.profiles_menu.aboutToShow.connect(self._rebuild_profiles_menu)
-        self.menu.addAction("Open data folder").triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.store.root)))
-        )
+        self.menu.addAction("Open data folder").triggered.connect(lambda: open_data_folder(self.store.root))
         self.menu.addSeparator()
         self.menu.addAction("Quit").triggered.connect(self.quit)
         self.tray.setContextMenu(self.menu)
@@ -153,17 +162,25 @@ class TrayApp(QObject):
         self.controller.select_area(self.settings)
 
     def _on_area_selected(self, spec: str) -> None:
-        self.settings.set_area(spec)
+        """The area takes effect at once and goes into the profile in use,
+        alone: other edits reach the file only when the profile is saved."""
+        self.settings.roi = spec
         if self.window is not None:
             self.window.backend.set("roi", spec)
-        if self.profile_name:
-            self.store.save(self.profile_name, self.settings)
-            self._on_status(f"area {'set' if spec else 'cleared'} and saved to profile {self.profile_name}")
+        if not self.profile_name:
+            return
+        try:
+            saved = self.store.load(self.profile_name)
+        except (OSError, ValueError):
+            return  # a profile that is gone or unreadable is not written anew
+        saved.roi = spec
+        self.store.save(self.profile_name, saved)
+        self._on_status(f"area {'set' if spec else 'cleared'} and saved to profile {self.profile_name}")
 
     def open_settings(self) -> None:
         if self.window is None:
             backend = SettingsBackend(self.settings, self.store, self.controller.secrets, self.profile_name)
-            backend.applied.connect(self.apply)
+            backend.start_requested.connect(self.start)
             backend.settings_changed.connect(self._on_settings_edited)
             backend.stop_requested.connect(self.controller.stop)
             backend.profile_saved.connect(self._on_profile_saved)
@@ -213,7 +230,8 @@ class TrayApp(QObject):
         self.controller.apply(settings)
         self._on_status(f"profile {name} loaded")
 
-    def apply(self, settings: Settings, hwnd: int | None = None) -> None:
+    def start(self, settings: Settings, hwnd: int | None = None) -> None:
+        """Start from the window: its settings are the ones in force from now on."""
         self.settings = settings
         self.apply_hotkeys(settings)
         self.controller.start(settings, hwnd)
@@ -257,13 +275,35 @@ class TrayApp(QObject):
 
     def remove_all_data(self) -> None:
         """Wipe everything gametl keeps on this computer, then quit. The
-        settings window has already asked for confirmation."""
+        settings window has already asked for confirmation.
+
+        Files this process still has loaded (the offline runtime's
+        libraries, which Python cannot unload) cannot be deleted while it
+        runs: a process started for that removes the folder once this one
+        has quit, so only the rest is reported as left behind."""
         self._shutdown()
         report = remove_all_data(self.store, self.controller.secrets)
-        if not report.complete:
-            QMessageBox.warning(None, APP_NAME, "Some data could not be removed:\n" + "\n".join(report.failed))
+        in_folder = [item for item in report.failed if Path(item).is_relative_to(self.store.root)]
+        failed = [item for item in report.failed if item not in in_folder]
+        if in_folder and not self._finish_removal_later():
+            failed = report.failed
+        if failed:
+            QMessageBox.warning(None, APP_NAME, "Some data could not be removed:\n" + "\n".join(failed))
         self.tray.hide()
         self.app.quit()
+
+    def _finish_removal_later(self) -> bool:
+        """Start the process that deletes the data folder once this one has
+        ended, on its own (no console, not ended with this one); False when
+        it could not start."""
+        from .main import finish_removal_command
+
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
+        try:
+            subprocess.Popen(finish_removal_command(os.getpid(), self.store.root), creationflags=flags, close_fds=True)
+        except OSError:
+            return False
+        return True
 
     def quit(self) -> None:
         self._shutdown()
@@ -271,8 +311,11 @@ class TrayApp(QObject):
         self.app.quit()
 
     def _shutdown(self) -> None:
-        """Stop the overlay (letting a start in progress run out), release
+        """Stop a download in progress and the overlay (letting a start in
+        progress run out; both threads have ended when this returns), release
         the hotkeys and close the settings window."""
+        if self.window is not None:
+            self.window.backend.close()
         self.controller.close()
         self.hotkeys.unregister_all()
         if self.window is not None:

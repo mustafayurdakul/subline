@@ -388,3 +388,37 @@ def test_timings_go_to_the_log_and_errors_to_the_status_line(capsys) -> None:
         assert "boom" in messages[0]
     finally:
         service.shutdown()
+
+
+def test_drafts_do_not_wait_behind_slow_final_requests() -> None:
+    """The draft tier is the fast one: with every final worker held by a slow
+    request, a new line's draft still arrives at once."""
+    final = GatedTranslator()
+    service = TranslationService(final, draft_translator=InstantDraft())
+    try:
+        for line in ("one", "two", "three"):  # one line a frame: a final request each, all held
+            service.submit([line])
+        assert wait_until(lambda: (service.drain(), service.lookup_best("three") is not None)[1])
+        service.submit(["four"])
+        assert wait_until(lambda: (service.drain(), service.lookup_best("four") == ("draft:four", False))[1])
+        assert service.stats["translated"] == 0  # no final has come back yet
+    finally:
+        final.release.set()
+        service.shutdown()
+
+
+def test_shutdown_drops_the_requests_not_yet_sent() -> None:
+    """A batch still queued when the session stops is never sent: it would be
+    paid for, and its answer thrown away."""
+    translator = GatedTranslator()
+    service = TranslationService(translator, workers=1)
+    for line in ("one", "two", "three"):
+        service.submit([line])
+    assert wait_until(lambda: len(translator.requests) == 1)  # the first is running, two are queued
+    service.shutdown()
+    translator.release.set()
+    (worker,) = service._pool._threads
+    worker.join(5.0)
+    assert not worker.is_alive()
+    assert [request.texts for request in translator.requests] == [["one"]]
+    assert service.drain() == 1  # the one already running still comes in; nothing cancelled is left to raise

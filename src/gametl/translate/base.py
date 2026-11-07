@@ -93,13 +93,3 @@ def language_code(code_or_name: str | None) -> str | None:
         return None
     code = _NAME_CODES.get(key, key.split("-")[0])  # a region does not change the language
     return _CODE_ALIASES.get(code, code)
-
-
-def single_line(text: str) -> str:
-    """`text` with its line breaks and runs of spaces as single spaces.
-
-    A block arrives with the line breaks of its OCR lines. A translator that
-    splits at them translates a sentence wrapped over two lines as two
-    fragments, which breaks the word order of a language like Turkish; the
-    overlay wraps the translation to its own width anyway."""
-    return " ".join(text.split())

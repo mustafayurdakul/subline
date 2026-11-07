@@ -1066,3 +1066,37 @@ forms), the words alone translated and cached, the speaker sent to the
 translators as a hint and kept in the context, pre-translation caching
 the same way, and Claude's 30-line context.
 
+
+## 29. Review pass (2026-11-07)
+
+A review of the whole project (code, tests, packaging, README, website),
+each finding checked against the code before it was applied. What changed
+in substance:
+
+- Capture starts again on Windows 10 1903 and later and on Windows 11
+  before 24H2: a capture option the system lacks (leaving out the cursor,
+  hiding the border, the minimum update interval) is dropped and the
+  start tried again, and the frame handler keeps the frame rate itself.
+  On Windows 10 the yellow capture border stays.
+- Areas and ignore zones are checked (four numbers, a width and a height
+  above 0) in the settings window's banner and at start; an area with
+  nothing inside the window is an error, never "the whole window".
+- Without a Game name, the cache and Claude's prompt take the profile's
+  window text, not the live title, which games with an FPS counter in it
+  changed at every start; a cache named after the title is still read.
+- Cache files are written atomically and merged with lines another
+  process added; a file that cannot be opened (as opposed to a damaged
+  one) is left alone and not written. Drafts get a worker of their own,
+  and stopping drops the requests not yet sent.
+- Profiles carry `profile_version`; the one-off upgrades of old profiles
+  run only on files without it.
+- Remove all data finishes after the app has quit (a hidden
+  `--finish-removal` helper deletes the offline runtime's loaded
+  libraries); `--remove-all-data` refuses while the tray app runs; the log
+  follows `--data-dir`. The installer is per-user only, and the
+  uninstaller offers to remove the data and the keys.
+- The release workflow runs the tests before it builds; the build ships
+  Python's licence with the libraries its Windows build carries.
+- The website's tour scrolls the tall pages instead of cutting them, and
+  its privacy and requirements text names what is downloaded and what is
+  sent; the renders nothing showed are gone.

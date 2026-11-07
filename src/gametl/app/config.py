@@ -2,9 +2,9 @@
 
 Everything the pipeline, translator and overlay can be told lives in one
 `Settings` dataclass. Profiles are Settings saved as JSON under
-%APPDATA%\\gametl\\profiles\\<name>.json; config.json next to them remembers
-the last profile used. A profile matches a game by `window_match`, a
-case-insensitive substring of the window title.
+%APPDATA%\\gametl\\profiles\\<name>.json; %APPDATA%\\gametl\\config.json
+remembers the last profile used. A profile matches a game by `window_match`,
+a case-insensitive substring of the window title.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ..jsonfile import write_json_atomic
 
 DEFAULT_HOTKEYS: dict[str, str] = {
     "toggle": "ctrl+shift+t",  # start / stop the overlay
@@ -41,12 +43,17 @@ DRAFTS = ("", "offline", "deepl")
 
 REMOVED_FONTS = ("Source Sans 3", "Fira Sans", "Barlow Semi Condensed")  # bundled in 0.1.6 and 0.1.7
 
+# Saved in every profile. A profile without it was written before it existed, and only such a
+# profile can hold the old values that from_dict resets (a removed font, the old "en" default):
+# in a newer one the same values are the user's choice.
+PROFILE_VERSION = 2
+
 
 @dataclass
 class Settings:
     # target
     window_match: str = ""  # substring of the game window title
-    game: str = ""  # name for the prompt and the cache; default: window title
+    game: str = ""  # name for the prompt and the cache; default: window_match, else the window title
     include_frame: bool = False  # read the title bar / frame too
     # The only area read and translated: x,y,w,h (fractions or px of the client area); empty = the whole area.
     roi: str = BOTTOM_STRIP
@@ -114,9 +121,10 @@ class Settings:
             kwargs["subtitle_weight"] = "bold"  # profiles from before weights had a bold switch
         if "center_area" not in kwargs and "center_zone" in data:
             kwargs["center_area"] = bool(data["center_zone"])  # its name up to 0.1.8
-        if kwargs.get("font") in REMOVED_FONTS:
+        unversioned = "profile_version" not in data
+        if unversioned and kwargs.get("font") in REMOVED_FONTS:
             kwargs["font"] = cls.font  # 0.1.6 and 0.1.7 shipped these; now only installed fonts are offered
-        if kwargs.get("source_lang") == "en" and kwargs.get("lang", cls.lang) != "en":
+        if unversioned and kwargs.get("source_lang") == "en" and kwargs.get("lang", cls.lang) != "en":
             # Up to 0.1.8 every profile stored "en" as its default source language, which hid the OCR
             # language from the translator. Saved beside another OCR language it is that old default.
             kwargs["source_lang"] = ""
@@ -139,10 +147,6 @@ class Settings:
         profiles there must not undo a value chosen in this session."""
         return Settings._normalised(self.to_dict())
 
-    def set_area(self, spec: str) -> None:
-        """Make `spec` the area to translate ('' for the whole window)."""
-        self.roi = spec
-
     @property
     def effective_source_lang(self) -> str:
         return self.source_lang or self.lang
@@ -154,20 +158,6 @@ def slug(text: str) -> str:
     distinguishable), everything else collapsed to one dash."""
     text = unicodedata.normalize("NFKC", text or "").casefold()
     return re.sub(r"[^\w]+|_+", "-", text).strip("-") or "game"
-
-
-def write_json_atomic(path: Path, data: Any) -> None:
-    """Write `data` as JSON to a temporary file beside `path`, then put it in
-    place: a crash or a full disk mid-write leaves the old file intact, never
-    a truncated one."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
-    finally:
-        tmp.unlink(missing_ok=True)  # only left over when the write failed
 
 
 def app_dir() -> Path:
@@ -223,7 +213,7 @@ class ProfileStore:
 
     def save(self, name: str, settings: Settings) -> Path:
         path = self.path(name)
-        write_json_atomic(path, settings.to_dict())
+        write_json_atomic(path, {"profile_version": PROFILE_VERSION, **settings.to_dict()})
         return path
 
     def delete(self, name: str) -> None:

@@ -4,15 +4,24 @@ line, the tray icon and the settings window."""
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from ..capture.windows import client_rect_on_screen, find_window, is_window, window_rect, window_title
+from ..capture.windows import (
+    client_rect_on_screen,
+    find_window,
+    is_minimized,
+    is_window,
+    window_rect,
+    window_title,
+)
 from ..geometry import RGB, Box
 from ..ocr.rapid import RapidOcrEngine
 from ..overlay.selector import AreaSelector, rect_to_zone_spec
@@ -36,19 +45,47 @@ from .pipeline import PipelineConfig, PipelineThread
 # -- zones and colours -------------------------------------------------------------
 
 
-def parse_zone(spec: str | None, width: int, height: int) -> Box | None:
-    """'x,y,w,h' as fractions (all <= 1) or pixels -> (x0, y0, x1, y1), clamped."""
-    if not spec:
-        return None
+def _zone_numbers(spec: str) -> tuple[float, float, float, float] | None:
+    """The numbers of 'x,y,w,h', or None when `spec` is not four finite numbers."""
     try:
-        x, y, w, h = (float(v) for v in spec.split(","))
+        numbers = tuple(float(v) for v in spec.split(","))
     except ValueError:
         return None
+    if len(numbers) != 4 or not all(math.isfinite(v) for v in numbers):
+        return None
+    return numbers[0], numbers[1], numbers[2], numbers[3]
+
+
+def zone_problem(spec: str, what: str = "area") -> str | None:
+    """Why `spec`, an area or an ignore zone (`what` names it in the
+    message), cannot be read; None when it can or is empty. A zone is four
+    numbers x,y,w,h with a width and a height above 0."""
+    if not spec.strip():
+        return None
+    numbers = _zone_numbers(spec)
+    if numbers is None:
+        return f"{what} {spec!r}: expected x,y,w,h"
+    if numbers[2] <= 0 or numbers[3] <= 0:
+        return f"{what} {spec!r}: the width and the height must be above 0"
+    return None
+
+
+def parse_zone(spec: str | None, width: int, height: int) -> Box | None:
+    """'x,y,w,h' as fractions (all <= 1) or pixels -> (x0, y0, x1, y1),
+    clamped to `width` x `height`. None when `spec` is empty or cannot be
+    read (see zone_problem), or when nothing of it lies inside."""
+    numbers = _zone_numbers(spec) if spec else None
+    if numbers is None:
+        return None
+    x, y, w, h = numbers
     if max(x, y, w, h) <= 1.0:
         x, y, w, h = x * width, y * height, w * width, h * height
     # Rounded, not truncated: fractions saved with four decimals land a hair
     # under the pixel they came from, and truncation would lose that pixel.
-    return max(0, round(x)), max(0, round(y)), min(width, round(x + w)), min(height, round(y + h))
+    x0, y0, x1, y1 = max(0, round(x)), max(0, round(y)), min(width, round(x + w)), min(height, round(y + h))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
 
 
 def offset_zone(zone: Box, dx: int, dy: int) -> Box:
@@ -91,12 +128,22 @@ def capture_area(hwnd: int, include_frame: bool) -> tuple[Box, Box | None]:
 def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> PipelineConfig:
     """The pipeline's view of the settings. Zones in the settings are
     fractions of the read area (the client area, or the whole frame); the
-    pipeline wants frame pixels."""
+    pipeline wants frame pixels.
+
+    Raises ValueError for an area or an ignore zone that cannot be read, and
+    for an area with nothing inside the window: read as no area, it would
+    have the whole window read and translated. re.error for an invalid
+    ignore pattern."""
+    for spec, what in [(settings.roi, "area"), *((zone, "ignore zone") for zone in settings.ignore_zones)]:
+        if problem := zone_problem(spec, what):
+            raise ValueError(problem)
     ax0, ay0, ax1, ay1 = client or frame
     width, height = ax1 - ax0, ay1 - ay0
     roi = parse_zone(settings.roi, width, height)
+    if roi is None and settings.roi.strip():
+        raise ValueError(f"area {settings.roi!r} lies outside the game's picture")
     zones = (parse_zone(spec, width, height) for spec in settings.ignore_zones)
-    ignore_zones = [offset_zone(zone, ax0, ay0) for zone in zones if zone is not None]
+    ignore_zones = [offset_zone(zone, ax0, ay0) for zone in zones if zone is not None]  # one outside hides nothing
     patterns = [p for p in settings.ignore_patterns if p.strip()]
     return PipelineConfig(
         frame_size=(frame[2] - frame[0], frame[3] - frame[1]),
@@ -113,7 +160,7 @@ def pipeline_config(settings: Settings, frame: Box, client: Box | None) -> Pipel
         subtitle_font_px=settings.subtitle_font_px,
         subtitle_color=parse_color(settings.subtitle_color) if settings.subtitle_color.strip() else None,
         subtitle_background=settings.subtitle_background,
-        subtitle_pill_alpha=max(0, min(255, int(settings.subtitle_pill_alpha))),
+        subtitle_pill_alpha=settings.subtitle_pill_alpha,
         subtitle_weight=settings.subtitle_weight,
         subtitle_position=settings.subtitle_position,
         subtitle_hide_source=settings.subtitle_hide_source,
@@ -201,8 +248,10 @@ def build_claude_translator(settings: Settings, game: str, secrets: SecretStore)
     from ..translate.claude import ClaudeTranslator
 
     glossary = None
-    if settings.glossary_path:
-        with open(settings.glossary_path, encoding="utf-8") as fh:
+    # Explorer's "Copy as path" puts the path in double quotes, and a pasted path often brings a space along.
+    glossary_path = settings.glossary_path.strip().strip('"').strip()
+    if glossary_path:
+        with open(glossary_path, encoding="utf-8") as fh:
             glossary = json.load(fh)
     return ClaudeTranslator(
         model=settings.model,
@@ -318,15 +367,17 @@ class OverlayController(QObject):
         self.overlay: OverlayWindow | None = None
         self.worker: PipelineThread | None = None
         self.service: TranslationService | None = None
-        self.translator: Translator | None = None
-        self.cache: TranslationCache | None = None
+        # Stopped pipeline threads, held until their `finished` arrives: freed
+        # earlier, a new thread can take the old one's address and be taken for it.
+        self._retiring: set[PipelineThread] = set()
         self._engines: dict[tuple[str, bool], RapidOcrEngine] = {}  # by (language, gpu)
         self._engine_lock = threading.Lock()
         self._generation = 0  # bumped by every start() and stop(); a preparation from before is ignored
         self._start_workers: set[_StartWorker] = set()
         self._starting = False
         self._requested_hwnd: int | None = None  # the handle the start in progress was given...
-        self._requested_match = ""  # ...for the window title it was asked to match
+        self._requested_match = ""  # ...for the window title it was asked to match...
+        self._start_deadline = 0.0  # ...and until when (time.monotonic()) it may wait for that window
         self._selector: AreaSelector | None = None
         self._selection: tuple[int, Box, Box | None] | None = None  # window, frame, client of the open selector
         self.last_stats = ""  # stats_text() of the last session, kept when it stops
@@ -351,11 +402,17 @@ class OverlayController(QObject):
 
     # -- lifecycle ---------------------------------------------------------
 
-    def resolve_window(self, settings: Settings, hwnd: int | None = None, wait: float = 0.0) -> tuple[int, str] | None:
+    def resolve_window(
+        self,
+        settings: Settings,
+        hwnd: int | None = None,
+        wait: float = 0.0,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> tuple[int, str] | None:
         """The window to run on: `hwnd` while it still exists (a handle
         picked from a list goes stale when the game restarts), else the first
         window whose title holds `settings.window_match`, waiting up to `wait`
-        seconds for one to appear.
+        seconds for one to appear, or until `cancelled()` turns true.
 
         A live handle is trusted whatever its title says now: many games and
         emulators put a frame counter or the level's name in it, so the title
@@ -367,7 +424,7 @@ class OverlayController(QObject):
             return None
         deadline = time.perf_counter() + wait
         info = find_window(settings.window_match)
-        while info is None and time.perf_counter() < deadline:
+        while info is None and time.perf_counter() < deadline and not (cancelled and cancelled()):
             time.sleep(0.5)
             info = find_window(settings.window_match)
         return (info.hwnd, info.title) if info else None
@@ -394,6 +451,7 @@ class OverlayController(QObject):
         self._generation += 1
         self._starting = True
         self._requested_hwnd, self._requested_match = hwnd, settings.window_match
+        self._start_deadline = time.monotonic() + wait
         self.starting_changed.emit(True)
         worker = _StartWorker(self, self._generation, settings.copy(), hwnd, wait)
         worker.progress.connect(self._say)
@@ -419,13 +477,16 @@ class OverlayController(QObject):
         Raises StartError with a message for the status line when the
         session cannot begin; a missing key is reported before any wait."""
         check_translator(settings, self.secrets)
-        resolved = self.resolve_window(settings, hwnd, wait)
+        # A later start() or stop() ends the wait: quitting must not sit out the rest of it.
+        resolved = self.resolve_window(settings, hwnd, wait, cancelled=lambda: generation != self._generation)
         if resolved is None:
             if hwnd and not settings.window_match:
                 raise StartError(f"window {hwnd:#x} is gone")
             raise StartError(f"no visible window matching {settings.window_match!r}")
         hwnd, title = resolved
-        game = settings.game or title or "game"
+        # Not the title first: many games and emulators put a frame counter in it, which would
+        # name a new cache file at every start.
+        game = settings.game or settings.window_match or title or "game"
 
         try:
             translator = build_translator(settings, game, self.store, self.secrets)
@@ -436,7 +497,7 @@ class OverlayController(QObject):
             if getattr(candidate, "kind", None):
                 say(f"offline model: {candidate.kind} ({candidate.model_dir})")  # type: ignore[union-attr]
         # Read here, off the UI thread: a pre-translated script makes a cache of tens of thousands of lines.
-        path = self.store.cache_path(game, settings.target_lang, translator.name) if settings.use_cache_file else None
+        path = self._cache_path(settings, game, title, translator.name) if settings.use_cache_file else None
         cache = TranslationCache(path)
 
         frame, client = capture_area(hwnd, settings.include_frame)
@@ -444,11 +505,24 @@ class OverlayController(QObject):
             config = pipeline_config(settings, frame, client)
         except re.error as exc:
             raise StartError(f"invalid ignore pattern: {exc}") from exc
+        except ValueError as exc:
+            raise StartError(str(exc)) from exc
         try:
             engine = self.engine(settings.lang, settings.ocr_gpu, frame[2], frame[3], say)
         except Exception as exc:
             raise StartError(f"OCR engine failed to load: {type(exc).__name__}: {exc}") from exc
         return Prepared(generation, hwnd, title, settings, translator, draft, cache, engine, config)
+
+    def _cache_path(self, settings: Settings, game: str, title: str, translator: str) -> Path:
+        """The translation cache file for `game`. Without a Game name, a file
+        named after the window title is used while there is none for `game`:
+        earlier versions named the file after the title then, and the
+        translations in it are kept."""
+        path = self.store.cache_path(game, settings.target_lang, translator)
+        if settings.game or path.exists():
+            return path
+        by_title = self.store.cache_path(title, settings.target_lang, translator)
+        return by_title if by_title.exists() else path
 
     def _on_start_worker_finished(self) -> None:
         """A start thread has ended (its result, queued before, has arrived):
@@ -467,10 +541,8 @@ class OverlayController(QObject):
         self._end_starting()
         try:
             self.hwnd, self.title, self.settings = prepared.hwnd, prepared.title, prepared.settings
-            self.translator, self.cache = prepared.translator, prepared.cache
             self.service = self._build_service(prepared.settings, prepared.translator, prepared.draft, prepared.cache)
-            if self.cache.load_error:
-                self._say(f"translation cache unreadable ({self.cache.load_error}): set aside as .bad, starting empty")
+            self._report_cache_problem(prepared.cache)
             self.overlay = OverlayWindow(
                 prepared.hwnd,
                 hide_when_unfocused=prepared.settings.hide_when_unfocused,
@@ -481,7 +553,7 @@ class OverlayController(QObject):
             worker.blocks_ready.connect(self.overlay.set_blocks)
             worker.status.connect(self._say)
             worker.resized.connect(self._on_frame_resized)
-            worker.finished.connect(lambda: self._on_worker_finished(worker))
+            worker.finished.connect(self._on_worker_finished)  # a lambda holding `worker` would keep it forever
             self.overlay.target_lost.connect(self._on_target_lost)
             self.worker = worker
             self.overlay.start()
@@ -495,6 +567,17 @@ class OverlayController(QObject):
             f"running on {self.title!r}: {prepared.settings.effective_source_lang} -> "
             f"{prepared.settings.target_lang} via {prepared.translator.name}"
         )
+
+    def _report_cache_problem(self, cache: TranslationCache) -> None:
+        """Say why the translation cache file could not be read, if it could not."""
+        if not cache.load_error:
+            return
+        if cache.set_aside:
+            self._say(f"translation cache unreadable ({cache.load_error}): set aside as .bad, starting empty")
+        else:
+            self._say(
+                f"could not read the translation cache ({cache.load_error}): this session's translations are not saved"
+            )
 
     def _on_start_failed(self, generation: int, message: str) -> None:
         if generation != self._generation:
@@ -517,12 +600,15 @@ class OverlayController(QObject):
         if service is not None:
             service.shutdown()
 
-    def _on_worker_finished(self, worker: PipelineThread) -> None:
-        """The pipeline thread ended on its own (capture closed, or an error
-        it has already reported): the session is over."""
-        if self.worker is worker:
+    def _on_worker_finished(self) -> None:
+        """A pipeline thread has ended. The session's own ended on its own
+        (capture closed, or an error it has already reported): the session
+        is over. Either way the last reference to the thread goes."""
+        worker = self.sender()
+        if worker is self.worker:
             self._say("pipeline stopped")
             self.stop()
+        self._retiring.discard(worker)  # type: ignore[arg-type]  # after stop(), which adds it
 
     def _build_service(
         self, settings: Settings, translator: Translator, draft: Translator | None, cache: TranslationCache
@@ -556,10 +642,12 @@ class OverlayController(QObject):
         self._generation += 1
         self._end_starting()
         worker = self.worker
-        if worker is not None:
+        if worker is not None:  # the service comes and goes with it
             worker.stop()
             worker.wait(3000)
-        if worker is not None:  # the service comes and goes with it
+            # Kept until its `finished` arrives: that is queued even when the wait saw the thread
+            # end, and a thread that outlived the wait must not be destroyed while it runs.
+            self._retiring.add(worker)
             self.last_stats = self.stats_text()  # the session's numbers, before they are let go
         self._release()
         self.running_changed.emit(False)
@@ -571,9 +659,11 @@ class OverlayController(QObject):
         filters, the timing and the look take effect at once; a change of
         window, language or translator restarts the session on them."""
         if self.starting:
-            # The handle the start was given still holds unless the edit names another window.
+            # The handle the start was given still holds unless the edit names another window,
+            # and so does what is left of the time it was given to wait for the window.
             same_window = settings.window_match == self._requested_match
-            self.start(settings, self._requested_hwnd if same_window else None)
+            wait = max(0.0, self._start_deadline - time.monotonic())
+            self.start(settings, self._requested_hwnd if same_window else None, wait)
             return
         if not self.running or self.settings is None:
             return
@@ -589,16 +679,21 @@ class OverlayController(QObject):
         except re.error as exc:
             self._say(f"invalid ignore pattern: {exc}")
             return
+        except ValueError as exc:
+            self._say(str(exc))
+            return
         self.worker.update_config(config)
         self.overlay.apply(settings.font, settings.hide_when_unfocused, settings.exclude_from_capture)
         self.settings = settings
 
-    def close(self, wait_ms: int = 5000) -> None:
-        """stop(), then let any start still being prepared run out, so the
-        process does not tear down a thread that is loading a model."""
+    def close(self) -> None:
+        """stop(), then let every thread still running run out, so the
+        process does not tear down a thread that is loading a model: a start
+        still being prepared (its wait for the window ends at once, a model
+        load or download does not), or a pipeline thread that outlived stop()."""
         self.stop()
-        for worker in list(self._start_workers):
-            worker.wait(wait_ms)
+        for worker in [*self._start_workers, *self._retiring]:
+            worker.wait()
 
     def toggle(self, settings: Settings) -> None:
         if self.running or self.starting:
@@ -620,21 +715,26 @@ class OverlayController(QObject):
 
     # -- area selection ------------------------------------------------------
 
-    def select_area(self, settings: Settings | None = None) -> bool:
+    def select_area(self, settings: Settings | None = None) -> None:
         """Open the drag-to-select layer over the game window. The result
-        becomes the only area read and translated; a running overlay
-        restarts on it. Uses the running window, else the one `settings`
-        names."""
+        becomes the only area read and translated; a running session takes
+        it up from the next frame. Uses the running window, else the one
+        `settings` names. A layer already open is brought to the front."""
         if self._selector is not None:
-            return True
+            self._selector.start()
+            return
         active = settings or self.settings or Settings()
         hwnd = self.hwnd
         if hwnd is None or not self.running:
             resolved = self.resolve_window(active)
             if resolved is None:
                 self._say("select area: no game window found; start the game or set its title first")
-                return False
+                return
             hwnd = resolved[0]
+        if is_minimized(hwnd):
+            # Windows reports a minimized window as a small box far off screen: the layer would open there, unseen.
+            self._say("select area: restore the game window first")
+            return
         frame, client = capture_area(hwnd, active.include_frame)
         self._selection = (hwnd, frame, client)
         ax0, _, ax1, _ = client or frame
@@ -647,7 +747,6 @@ class OverlayController(QObject):
         self._selector = selector
         selector.start()
         self._say("drag to select the area to translate (Esc cancels)")
-        return True
 
     def _forget_selector(self, selector: AreaSelector) -> None:
         if self._selector is selector:
@@ -664,6 +763,9 @@ class OverlayController(QObject):
         # settings in force may have changed meanwhile, or not exist yet.
         hwnd, frame, client = self._selection
         spec = rect_to_zone_spec(tuple(rect), client or frame)
+        if spec is None:  # dragged on the title bar or the frame alone: the area in force stays
+            self._say("area selection: the area lies outside the game's picture")
+            return
         self._say(f"area selected: {spec}; translating only that area")
         self._set_area(spec, hwnd)
 
@@ -675,7 +777,7 @@ class OverlayController(QObject):
         """Make `spec` the area of the session's settings and tell the
         owner; a running session reads the new area from the next frame."""
         if self.settings is not None:
-            self.settings.set_area(spec)
+            self.settings.roi = spec
         self.area_selected.emit(spec)
         if self.running and self.settings is not None and hwnd == self.hwnd:
             self.apply(self.settings)
@@ -690,26 +792,26 @@ class OverlayController(QObject):
             )
         if self.service:
             st = self.service.stats
-            cache_note = f"; cache {len(self.cache)} entries" if self.cache is not None else ""
             parts.append(
                 f"translation: {st['requests']} requests, {st['items']} items sent, {st['translated']} translated, "
-                f"{st['cache_hits']} cache hits, {st['errors']} errors{cache_note}"
+                f"{st['cache_hits']} cache hits, {st['errors']} errors; cache {len(self.service.cache)} entries"
             )
             if self.service.latencies_ms:
                 parts.append(f"request latency: {_spread(self.service.latencies_ms)}")
             if self.service.draft_latencies_ms:
                 parts.append(f"draft: {st['drafts']} items, latency {_spread(self.service.draft_latencies_ms)}")
-        totals = getattr(self.translator, "usage_totals", None)
-        calls = getattr(self.translator, "calls", 0)
-        if totals and calls and self.settings:
-            from ..translate.claude import estimate_cost_usd
+            translator = self.service.translator
+            totals = getattr(translator, "usage_totals", None)
+            calls = getattr(translator, "calls", 0)
+            if totals and calls and self.settings:
+                from ..translate.claude import estimate_cost_usd
 
-            cost = estimate_cost_usd(self.settings.model, totals)
-            cost_text = f" ~${cost:.5f}" if cost is not None else ""
-            parts.append(
-                f"tokens: {totals['input']} in, {totals['output']} out, {totals['cache_read']} cache read, "
-                f"{totals['cache_write']} cache write over {calls} calls{cost_text}"
-            )
+                cost = estimate_cost_usd(self.settings.model, totals)
+                cost_text = f" ~${cost:.5f}" if cost is not None else ""
+                parts.append(
+                    f"tokens: {totals['input']} in, {totals['output']} out, {totals['cache_read']} cache read, "
+                    f"{totals['cache_write']} cache write over {calls} calls{cost_text}"
+                )
         return "\n".join(parts)
 
 

@@ -6,16 +6,17 @@ same way. Lists hold one entry per line and the hotkeys are flattened to
 `hotkey_<name>`. Fields without a control (debug, dump_dir) are in the map
 too, so they go through untouched; `to_settings()` falls back on the
 settings last loaded only for a value that does not parse. Every edit goes
-out as `settings_changed` once the typing pauses, so a running overlay
-follows the window. What the window cannot do alone (run the overlay,
-select an area, wipe the data) goes out as a signal to the tray, which
-owns the controller.
+out as `settings_changed` once the typing pauses (a hotkey at once, as
+`hotkeys_changed`), so a running overlay follows the window. What the
+window cannot do alone (run the overlay, select an area, wipe the data)
+goes out as a signal to the tray, which owns the controller.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import re
+import threading
 import typing
 import warnings
 from pathlib import Path
@@ -29,8 +30,8 @@ from .. import APP_NAME, __version__
 from ..translate.claude import PRICES_PER_MTOK
 from .cleanup import describe_data
 from .config import BOTTOM_STRIP, DEFAULT_HOTKEYS, TRANSLATORS, ProfileStore, Settings, slug
-from .controller import parse_color
-from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, WindowsCredentialStore, key_status
+from .controller import parse_color, zone_problem
+from .credentials import ANTHROPIC_KEY, DEEPL_KEY, SecretStore, key_status, resolve_key
 from .hotkeys import MOD_ALT, MOD_CONTROL, MOD_WIN, NAMED_KEYS, parse_combo
 
 # fmt: off
@@ -155,9 +156,17 @@ _NAMED_QT_KEYS = {
 }
 
 
+def invalid_area(settings: Settings) -> str | None:
+    """One line naming the area or the first ignore zone the overlay would
+    refuse to start with (see zone_problem), or None."""
+    specs = [(settings.roi, "Area"), *((zone, "Ignore zone") for zone in settings.ignore_zones)]
+    return next((problem for spec, what in specs if (problem := zone_problem(spec, what))), None)
+
+
 def settings_problem(settings: Settings) -> str | None:
-    """Why `settings` cannot run (a bad ignore pattern or hotkey), or None."""
-    return invalid_pattern(settings.ignore_patterns) or invalid_hotkey(settings.hotkeys)
+    """Why `settings` cannot run (a bad ignore pattern, area, ignore zone or
+    hotkey), or None."""
+    return invalid_pattern(settings.ignore_patterns) or invalid_area(settings) or invalid_hotkey(settings.hotkeys)
 
 
 def combo_from_key(key: int, modifiers: int) -> str:
@@ -175,6 +184,8 @@ def combo_from_key(key: int, modifiers: int) -> str:
         parts.append("shift")
     if mods & Qt.KeyboardModifier.MetaModifier:
         parts.append("win")
+    if mods & Qt.KeyboardModifier.KeypadModifier and Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+        return ""  # a numpad digit is a key of its own (VK_NUMPAD0-9), not the digit above the letters
     if Qt.Key.Key_A <= key <= Qt.Key.Key_Z or Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
         name = chr(key).lower()
     elif Qt.Key.Key_F1 <= key <= Qt.Key.Key_F24:
@@ -191,28 +202,42 @@ class OfflineDownloadThread(QThread):
     """Fetches the offline translator's runtime and the model for a pair."""
 
     progress = Signal(str)
-    finished_ok = Signal(bool, str)
+    outcome = Signal(str)  # the line to show once it has ended: ready, failed or cancelled
 
     def __init__(self, source: str, target: str, store: ProfileStore, parent=None) -> None:
         super().__init__(parent)
         self.source, self.target, self.store = source, target, store
+        self._cancel = threading.Event()
+
+    def cancel(self) -> None:
+        """Stop at the next piece of the download; what it left is removed."""
+        self._cancel.set()
 
     def run(self) -> None:
-        from ..translate.offline import ensure_offline
+        from ..translate.offline import DownloadCancelled, ensure_offline, iso_pair
 
         try:
-            model_dir = ensure_offline(
-                self.source, self.target, self.store.models_dir, self.store.runtime_dir, self.progress.emit
+            ensure_offline(
+                self.source,
+                self.target,
+                self.store.models_dir,
+                self.store.runtime_dir,
+                self.progress.emit,
+                cancelled=self._cancel.is_set,
             )
-        except Exception as exc:  # reported in the window
-            self.finished_ok.emit(False, f"Download failed: {exc}")
+        except DownloadCancelled:
+            self.outcome.emit("Download cancelled.")
             return
-        self.finished_ok.emit(True, f"Offline translation ready ({model_dir.name}).")
+        except Exception as exc:  # reported in the window
+            self.outcome.emit(f"Download failed: {exc}")
+            return
+        source, target = iso_pair(self.source, self.target)
+        self.outcome.emit(f"Offline translation ready for {source} → {target}.")
 
 
 class SettingsBackend(QObject):
     # To the tray, which owns the controller.
-    applied = Signal(object, object)  # Settings, hwnd or None: run the overlay with these
+    start_requested = Signal(object, object)  # Settings, hwnd or None: run the overlay with these
     settings_changed = Signal(object)  # Settings: an edit, once the typing has paused; a running overlay follows it
     stop_requested = Signal()
     select_area_requested = Signal()
@@ -238,13 +263,13 @@ class SettingsBackend(QObject):
         self,
         settings: Settings,
         store: ProfileStore,
-        secrets: SecretStore | None = None,
+        secrets: SecretStore,
         profile_name: str | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.store = store
-        self.secrets: SecretStore = secrets if secrets is not None else WindowsCredentialStore()
+        self.secrets = secrets
         with warnings.catch_warnings():  # PySide6 6.12 flags the one public constructor as deprecated
             warnings.simplefilter("ignore", DeprecationWarning)
             self._map = QQmlPropertyMap()
@@ -269,13 +294,18 @@ class SettingsBackend(QObject):
 
     def load(self, settings: Settings) -> None:
         """Show `settings`; they become the base `to_settings()` builds on.
-        (Writes from Python do not count as edits: no hotkey registration.)"""
+        (Writes from Python do not count as edits: no hotkey registration.)
+        An edit still waiting to go out, the banner it raised and a finished
+        download's line belonged to the settings replaced, so they go too."""
+        self._edit_timer.stop()
+        self._clear_edit_problem()
         self._base = settings
         for name in _FIELDS:
             value = getattr(settings, name)
             self._map.insert(name, "\n".join(value) if name in LIST_FIELDS else value)
         for name in DEFAULT_HOTKEYS:
             self._map.insert(f"hotkey_{name}", settings.hotkeys.get(name, DEFAULT_HOTKEYS[name]))
+        self._forget_download_status()
         self._bump_preview()
 
     def to_settings(self, base: Settings | None = None) -> Settings:
@@ -289,11 +319,15 @@ class SettingsBackend(QObject):
                 setattr(s, name, _lines(raw))
             else:
                 setattr(s, name, _coerce(name, raw, getattr(s, name)))
-        s.hotkeys = {
+        s.hotkeys = self._hotkeys()
+        return s
+
+    def _hotkeys(self) -> dict[str, str]:
+        """The map's hotkeys; a blank one means the action's default."""
+        return {
             name: (str(self._map.value(f"hotkey_{name}") or "").strip() or DEFAULT_HOTKEYS[name])
             for name in DEFAULT_HOTKEYS
         }
-        return s
 
     def set(self, name: str, value: Any) -> None:
         """Change one entry as an edit from a page would: the same follow-up
@@ -302,8 +336,8 @@ class SettingsBackend(QObject):
         self._on_value_changed(name, value)
 
     def _on_value_changed(self, key: str, _value: Any) -> None:
-        if key in ("lang", "source_lang", "target_lang") and self._download_status and not self._get_downloading():
-            self._set_download_status("")  # it spoke of the old language pair
+        if key in ("lang", "source_lang", "target_lang"):
+            self._forget_download_status()
         if key.startswith("hotkey_"):
             self.hotkeys_changed.emit(self.to_settings())
         else:
@@ -317,16 +351,19 @@ class SettingsBackend(QObject):
     def _emit_edit(self) -> None:
         """The typing has paused: the settings go out if they are valid; a
         problem shows in the banner until the edit is corrected."""
-        settings = self.to_settings()
-        problem = settings_problem(settings)
-        if problem:
+        settings = self._checked_settings()
+        if settings is None:
             self._edit_problem = True
-            self.report_problem(problem)
             return
+        self._clear_edit_problem()
+        self.settings_changed.emit(settings)
+
+    def _clear_edit_problem(self) -> None:
+        """Take an edit's problem off the banner; one the tray reported (a
+        failed start) stays."""
         if self._edit_problem:
             self._edit_problem = False
             self.clearProblem()
-        self.settings_changed.emit(settings)
 
     def _checked_settings(self) -> Settings | None:
         """The map's settings when they can run, else None with the problem reported."""
@@ -396,10 +433,14 @@ class SettingsBackend(QObject):
 
     @Slot()
     def start(self) -> None:
-        """Validate, then ask the tray to run the overlay with the map's settings."""
+        """Validate, then ask the tray to run the overlay with the map's
+        settings. An edit still waiting to go out is in them: sent as well,
+        it would start the overlay a second time."""
         settings = self._checked_settings()
         if settings is not None:
-            self.applied.emit(settings, self.selected_hwnd())
+            self._edit_timer.stop()
+            self._clear_edit_problem()
+            self.start_requested.emit(settings, self.selected_hwnd())
 
     @Slot()
     def stop(self) -> None:
@@ -430,6 +471,16 @@ class SettingsBackend(QObject):
 
     @Slot()
     def selectArea(self) -> None:
+        """Ask the tray for a selection on screen. The tray takes up the
+        map's settings for it, so an edit that cannot run is reported in the
+        banner instead; only the area itself may be wrong, as the selection
+        replaces it."""
+        settings = self.to_settings()
+        settings.roi = ""
+        problem = settings_problem(settings)
+        if problem:
+            self.report_problem(problem)
+            return
         self.select_area_requested.emit()
 
     @Slot()
@@ -463,8 +514,12 @@ class SettingsBackend(QObject):
         if settings is None:
             return False
         name = slug(name.strip() or settings.game or settings.window_match or "game")
-        self.store.save(name, settings)
-        self.store.last_profile = name
+        try:
+            self.store.save(name, settings)
+            self.store.last_profile = name
+        except OSError as exc:
+            self.report_problem(f"Could not save profile {name}: {exc}")
+            return False
         self._base = settings
         self.set_profile_name(name)
         self.profilesChanged.emit()
@@ -475,11 +530,11 @@ class SettingsBackend(QObject):
     def loadProfile(self, name: str) -> None:
         try:
             settings = self.store.load(name)
+            self.store.last_profile = name
         except (OSError, ValueError) as exc:
             self.report_problem(f"Could not load profile {name}: {exc}")
             return
         self.load(settings)
-        self.store.last_profile = name
         self.set_profile_name(name)
         self.profile_loaded.emit(name, settings)
 
@@ -507,30 +562,44 @@ class SettingsBackend(QObject):
     def _anthropic_key_status(self) -> str:
         return key_status(ANTHROPIC_KEY, self.secrets)
 
+    def _deepl_key_set(self) -> bool:
+        return resolve_key(DEEPL_KEY, self.secrets) is not None
+
     deeplKeyStatus = Property(str, _deepl_key_status, notify=keyStatusChanged)
     anthropicKeyStatus = Property(str, _anthropic_key_status, notify=keyStatusChanged)
+    deeplKeySet = Property(bool, _deepl_key_set, notify=keyStatusChanged)  # Home asks for the key while false
 
-    @Slot(str, str)
-    def saveKey(self, name: str, value: str) -> None:
-        """Store a key; the field that held it is blanked by the page."""
+    @Slot(str, str, result=bool)
+    def saveKey(self, name: str, value: str) -> bool:
+        """Store a key; True once it is stored, and the page then blanks the
+        field that held it. A store that refuses it is reported in the banner."""
         value = value.strip()
         if name not in (DEEPL_KEY, ANTHROPIC_KEY) or not value:
-            return
-        self.secrets.set(name, value)
+            return False
+        try:
+            self.secrets.set(name, value)
+        except OSError as exc:
+            self.report_problem(f"Could not save the key: {exc}")
+            return False
         self.keyStatusChanged.emit()
+        return True
 
     @Slot(str)
     def clearKey(self, name: str) -> None:
-        if name in (DEEPL_KEY, ANTHROPIC_KEY):
+        if name not in (DEEPL_KEY, ANTHROPIC_KEY):
+            return
+        try:
             self.secrets.delete(name)
-            self.keyStatusChanged.emit()
+        except OSError as exc:
+            self.report_problem(f"Could not remove the key: {exc}")
+            return
+        self.keyStatusChanged.emit()
 
     # -- data ------------------------------------------------------------------------------------------
 
     @Slot()
     def openDataFolder(self) -> None:
-        self.store.root.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.store.root)))
+        open_data_folder(self.store.root)
 
     @Slot()
     def removeAllData(self) -> None:
@@ -558,7 +627,7 @@ class SettingsBackend(QObject):
         source, target = settings.effective_source_lang, settings.target_lang
         thread = OfflineDownloadThread(source, target, self.store, self)
         thread.progress.connect(self._set_download_status)
-        thread.finished_ok.connect(self._download_done)
+        thread.outcome.connect(self._set_download_status)
         thread.finished.connect(self._download_finished)
         self._download = thread
         thread.start()
@@ -567,6 +636,11 @@ class SettingsBackend(QObject):
     def _set_download_status(self, text: str) -> None:
         self._download_status = text
         self.downloadChanged.emit()
+
+    def _forget_download_status(self) -> None:
+        """A finished download's line spoke of the language pair it was for."""
+        if self._download_status and not self._get_downloading():
+            self._set_download_status("")
 
     def _download_finished(self) -> None:
         """The thread has ended: `downloading` turns false, and the thread
@@ -577,21 +651,15 @@ class SettingsBackend(QObject):
         if thread is not None:
             thread.deleteLater()
 
-    def _download_done(self, ok: bool, message: str) -> None:
-        # The new model becomes the draft, unless one is set or it is the translator already.
-        if ok and not self._map.value("draft") and str(self._map.value("translator")) != "offline":
-            self.set("draft", "offline")
-        self._set_download_status(message)
-
-    # -- glossary -----------------------------------------------------------------------------------------
-
-    @Slot()
-    def browseGlossary(self) -> None:
-        from PySide6.QtWidgets import QFileDialog
-
-        path, _ = QFileDialog.getOpenFileName(None, "Glossary JSON", "", "JSON (*.json)")
-        if path:
-            self.set("glossary_path", path)
+    def close(self) -> None:
+        """The window is going for good (Quit, Remove all data): a download
+        in progress stops, and this returns once its thread has ended, so the
+        process never tears down a running thread and nothing writes into the
+        data folder afterwards. Not capped: each step it waits on has its own
+        network timeout."""
+        if self._download is not None:
+            self._download.cancel()
+            self._download.wait()
 
     # -- hotkeys ------------------------------------------------------------------------------------------
 
@@ -599,14 +667,31 @@ class SettingsBackend(QObject):
     def comboFromKey(self, key: int, modifiers: int) -> str:
         return combo_from_key(key, modifiers)
 
+    @Slot(str, str, result=str)
+    def hotkeyTaken(self, key: str, combo: str) -> str:
+        """The label of the other action that already has `combo`, or ''.
+        Windows gives a combination to one registration only, so a second
+        action on it would never fire."""
+        wanted = _parsed_combo(combo)
+        if wanted is None:
+            return ""
+        for name, other in self._hotkeys().items():
+            if f"hotkey_{name}" != key and _parsed_combo(other) == wanted:
+                return HOTKEY_LABELS.get(name, name)
+        return ""
+
     @Slot(bool)
     def setHotkeyCapture(self, capturing: bool) -> None:
         self.hotkey_capture_changed.emit(capturing)
 
     @Slot()
     def resetHotkeys(self) -> None:
+        """Every hotkey back to its default, registered in one go: one at a
+        time, two actions that had swapped combinations would clash halfway,
+        and the failure would stay in the status line."""
         for name, combo in DEFAULT_HOTKEYS.items():
-            self.set(f"hotkey_{name}", combo)
+            self._map.insert(f"hotkey_{name}", combo)
+        self.hotkeys_changed.emit(self.to_settings())
 
     # -- problems ------------------------------------------------------------------------------------------
 
@@ -624,6 +709,21 @@ class SettingsBackend(QObject):
         if self._problem:
             self._problem = ""
             self.problemChanged.emit()
+
+
+def _parsed_combo(combo: str) -> tuple[int, int] | None:
+    """(modifiers, virtual key) of a hotkey, or None when it does not parse."""
+    try:
+        return parse_combo(combo)
+    except ValueError:
+        return None
+
+
+def open_data_folder(root: Path) -> None:
+    """Show the data folder in Explorer, made first: nothing may have
+    written to it yet (the console build, a new --data-dir)."""
+    root.mkdir(parents=True, exist_ok=True)
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
 
 
 def qml_dir() -> Path:

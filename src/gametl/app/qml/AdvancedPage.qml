@@ -29,8 +29,8 @@ ColumnLayout {
         }
         SettingRow {
             label: "Read the whole window every"
-            helper: "In place with an area set: also read the rest of the window now and then."
-            Stepper { key: "full_scan_every"; from: 0; to: 600; step: 10; suffix: " frames"; specialText: "never" }
+            helper: "In place with an area set: also read the rest of the window once every so many reads of the area."
+            Stepper { key: "full_scan_every"; from: 0; to: 600; step: 10; suffix: " reads"; specialText: "never" }
         }
     }
 

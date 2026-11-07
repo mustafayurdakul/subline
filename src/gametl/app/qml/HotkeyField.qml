@@ -1,5 +1,4 @@
 import QtQuick
-import "Format.js" as Format
 
 // Press-to-set, bound to `map[key]`: click, press the keys, done. Esc
 // leaves the field as it was, Backspace restores `fallback`, Tab moves on.
@@ -14,6 +13,13 @@ Rectangle {
     readonly property bool capturing: activeFocus
     property string refusal: ""  // why the last press was not taken, shown while recording
 
+    // "ctrl+shift+t" -> "Ctrl + Shift + T"
+    function shown(combo) {
+        return String(combo).split("+").map(function (part) {
+            return part.length ? part.charAt(0).toUpperCase() + part.slice(1) : part
+        }).join(" + ")
+    }
+
     implicitWidth: 200
     implicitHeight: Theme.controlHeight
     radius: Theme.radius
@@ -27,7 +33,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
-        text: !root.capturing ? Format.hotkey(root.combo) : root.refusal !== "" ? root.refusal : "press the keys"
+        text: !root.capturing ? root.shown(root.combo) : root.refusal !== "" ? root.refusal : "press the keys"
         color: root.capturing ? Theme.muted : Theme.text
     }
     Caption {
@@ -66,6 +72,12 @@ Rectangle {
         }
         var combo = backend.comboFromKey(event.key, event.modifiers)
         if (combo !== "") {
+            // Windows gives a combination to one action only: the other would never fire.
+            var owner = backend.hotkeyTaken(key, combo)
+            if (owner !== "") {
+                root.refusal = "used by " + owner
+                return
+            }
             map[key] = combo
             root.focus = false
         } else if ([Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta].indexOf(event.key) < 0) {

@@ -9,7 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from gametl.translate.base import TranslationError, TranslationRequest
-from gametl.translate.claude import ClaudeTranslator, TranslatedItem, TranslationBatch
+from gametl.translate.claude import (
+    ClaudeTranslator,
+    TranslatedItem,
+    TranslationBatch,
+    estimate_cost_usd,
+    supports_disabled_thinking,
+)
 from tests.helpers import text_response
 
 
@@ -175,16 +181,25 @@ def test_missing_or_blank_items_become_none() -> None:
 
 
 def test_disabled_thinking_is_not_sent_to_models_that_reject_it() -> None:
-    from gametl.translate.claude import supports_disabled_thinking
-
     assert supports_disabled_thinking("claude-haiku-5-5")
     assert supports_disabled_thinking("claude-opus-5")
+    assert supports_disabled_thinking("claude-sonnet-5")
     assert not supports_disabled_thinking("claude-opus-5-5")
     assert not supports_disabled_thinking("claude-sonnet-5-5")
     client = StubClient(response_with([(0, "x")]))
     translator = ClaudeTranslator(client=client, model="claude-opus-5-5", thinking="disabled", structured=True)
     translator.translate(TranslationRequest(["a"], target_lang="tr"))
     assert "thinking" not in client.messages.calls[0]
+
+
+def test_thinking_off_on_sonnet_5_5_is_its_own_off_switch() -> None:
+    request = TranslationRequest(["a"], target_lang="tr")
+    off = ClaudeTranslator(client=StubClient(None), model="claude-sonnet-5-5", thinking="disabled")
+    assert off.request_params(request)["thinking"] == {"type": "between_tools"}
+    adaptive = ClaudeTranslator(client=StubClient(None), model="claude-sonnet-5-5", thinking="adaptive")
+    assert "thinking" not in adaptive.request_params(request)
+    typed = ClaudeTranslator(client=StubClient(None), model="claude-sonnet-5", thinking="disabled")
+    assert typed.request_params(request)["thinking"] == {"type": "disabled"}
 
 
 def test_refusal_and_cutoff_raise() -> None:
@@ -195,6 +210,72 @@ def test_refusal_and_cutoff_raise() -> None:
         translator = ClaudeTranslator(client=StubClient(response_with([], stop_reason="max_tokens")), structured=mode)
         with pytest.raises(TranslationError):
             translator.translate(TranslationRequest(["a"], target_lang="tr"))
+
+
+class ScriptedMessages:
+    """Answers each create() with the next of `responses`."""
+
+    def __init__(self, responses) -> None:
+        self.responses = list(responses)
+        self.created: list[dict] = []
+
+    def create(self, **kwargs):
+        self.created.append(kwargs)
+        return self.responses.pop(0)
+
+
+def test_a_reply_cut_off_at_max_tokens_is_asked_again_in_halves() -> None:
+    """Too long to answer at once: each half fits, and the same batch is not
+    sent again and again only to be cut off each time."""
+    messages = ScriptedMessages(
+        [
+            text_response('{"items": ["Yakın', stop_reason="max_tokens"),
+            text_response('{"items": ["Yakın dur."]}'),
+            text_response('{"items": ["Nerede?"]}'),
+        ]
+    )
+    translator = ClaudeTranslator(client=SimpleNamespace(messages=messages))
+    request = TranslationRequest(["Stay close.", "Where?"], target_lang="tr", speakers=["Casey", ""])
+    assert translator.translate(request) == ["Yakın dur.", "Nerede?"]
+    first, second = (json.loads(call["messages"][0]["content"]) for call in messages.created[1:])
+    assert first["items"] == ["Stay close."] and first["speakers"] == ["Casey"]
+    assert second["items"] == ["Where?"] and "speakers" not in second
+    assert translator.calls == 3
+
+
+class RaisingMessages:
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+    def create(self, **kwargs):
+        raise self.exc
+
+    parse = create
+
+
+def test_api_errors_read_plainly_and_a_rejected_key_waits_a_minute() -> None:
+    import anthropic
+
+    def failure(exc: Exception) -> TranslationError:
+        translator = ClaudeTranslator(client=SimpleNamespace(messages=RaisingMessages(exc)))
+        with pytest.raises(TranslationError) as caught:
+            translator.translate(TranslationRequest(["a"], target_lang="tr"))
+        return caught.value
+
+    rejected = failure(anthropic.AuthenticationError.__new__(anthropic.AuthenticationError))
+    assert str(rejected) == "Anthropic rejected the key: check it on the Translation page"
+    assert rejected.retry_after == 60.0
+    busy = anthropic.RateLimitError.__new__(anthropic.RateLimitError)
+    busy.response = SimpleNamespace(headers={"retry-after": "7"})
+    assert str(failure(busy)) == "Claude is busy, retrying" and failure(busy).retry_after == 7.0
+    busy.response = SimpleNamespace(headers={})
+    assert failure(busy).retry_after == 0
+
+
+def test_cost_estimate() -> None:
+    totals = {"input": 1_000_000, "output": 0, "cache_read": 0, "cache_write": 0}
+    assert estimate_cost_usd("claude-haiku-5-5", totals) == pytest.approx(0.10)
+    assert estimate_cost_usd("unknown", totals) is None
 
 
 def test_malformed_plain_json_raises() -> None:

@@ -5,8 +5,8 @@ import "Icons.js" as Icons
 // A drop-down bound to `map[key]`: pick one of `options`, or, when
 // `editable`, type a value. With `values`, the options are labels and the
 // matching value is what gets written. `fontPreview` draws each option in
-// the font it names. `live: false` writes typed text only when the typing
-// is done (Enter, or leaving the field), as Field does.
+// the font it names. Typed text is written when the typing is done (Enter,
+// or leaving the field), as Field's `live: false` does.
 C.ComboBox {
     id: root
     property var options: []
@@ -14,7 +14,6 @@ C.ComboBox {
     property var map: backend.settings
     property string key: ""
     property bool fontPreview: false
-    property bool live: true
 
     editable: false
     model: options
@@ -51,8 +50,7 @@ C.ComboBox {
         verticalAlignment: Text.AlignVCenter
         clip: true
         autoScroll: true
-        onTextEdited: if (root.live) root.map[root.key] = text
-        onEditingFinished: if (!root.live && String(root.map[root.key] ?? "") !== text) root.map[root.key] = text
+        onEditingFinished: if (String(root.map[root.key] ?? "") !== text) root.map[root.key] = text
     }
     background: Rectangle {
         radius: Theme.radius

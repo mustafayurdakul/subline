@@ -3,9 +3,9 @@ languages including Turkish, free tier of 500k characters a month with an
 API key from deepl.com. Usable as the main translator or as the draft tier
 in front of Claude.
 
-Key: handed in by the app (settings window, Credential Manager) or the
-DEEPL_AUTH_KEY environment variable. Keys ending in ":fx" are free tier and
-go to the free endpoint.
+Key: handed in by the app (Credential Manager, else the DEEPL_AUTH_KEY
+environment variable: see app/credentials.resolve_key). Keys ending in ":fx"
+are free tier and go to the free endpoint.
 
 Each request carries the recent source lines as DeepL's `context`: text it
 reads but does not translate, so a name that was a person two lines ago
@@ -17,11 +17,10 @@ but tells DeepL who is talking.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from ..textutil import said_by
-from .base import TranslationError, TranslationRequest, language_code, single_line
+from ..textutil import said_by, single_line
+from .base import TranslationError, TranslationRequest, language_code
 
 FREE_URL = "https://api-free.deepl.com/v2/translate"
 PRO_URL = "https://api.deepl.com/v2/translate"
@@ -86,7 +85,7 @@ class DeepLTranslator:
     name = "deepl"
 
     def __init__(self, auth_key: str | None = None, timeout: float = 15.0, session: Any = None) -> None:
-        self.auth_key = auth_key or os.environ.get("DEEPL_AUTH_KEY") or ""
+        self.auth_key = auth_key or ""
         if not self.auth_key:
             raise TranslationError("Add your DeepL key on the Translation page")
         self.url = FREE_URL if self.auth_key.endswith(":fx") else PRO_URL
@@ -96,8 +95,6 @@ class DeepLTranslator:
 
             session = requests.Session()
         self._session = session
-        self.calls = 0
-        self.characters = 0
 
     def translate(self, request: TranslationRequest) -> list[str | None]:
         if not request.texts:
@@ -138,6 +135,4 @@ class DeepLTranslator:
         translations = data.get("translations") or []
         if len(translations) != len(request.texts):
             raise TranslationError(f"DeepL returned {len(translations)} translations for {len(request.texts)} texts")
-        self.calls += 1
-        self.characters += sum(len(t) for t in texts)
         return [(t.get("text") or None) for t in translations]

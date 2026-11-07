@@ -60,6 +60,4 @@ class OcrResult:
 class OcrEngine(Protocol):
     """Detect and recognise all text in a BGR image."""
 
-    name: str
-
     def recognize(self, image_bgr: np.ndarray) -> OcrResult: ...

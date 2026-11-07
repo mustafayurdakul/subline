@@ -16,7 +16,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from ..capture.base import Frame
-from ..capture.wgc import WgcWindowCapture
+from ..capture.wgc import OPTION_LABELS, WgcWindowCapture
 from ..geometry import RGB, Box
 from ..layout.colors import analyze_colors, bgr_to_rgb
 from ..layout.style import StyleMemory, ZoneStyle, line_height_of
@@ -32,9 +32,9 @@ from ..translate.service import TranslationService
 class PipelineConfig:
     frame_size: tuple[int, int] | None = None  # (width, height) the boxes below were worked out for; None = any
     area: Box | None = None  # frame pixels considered at all (the client area); None = whole frame
-    roi: Box | None = None  # frame pixels read and translated; None = the whole area every frame
+    roi: Box | None = None  # frame pixels read and translated; None = the whole client area every frame
     fps: float = 10.0  # capture cap
-    # In-place mode with a roi: also sweep the rest of the area every N OCR reads (0 = never). Subtitle
+    # In-place mode with a roi: also sweep the rest of the client area every N OCR reads (0 = never). Subtitle
     # mode never sweeps: it draws nothing outside the zone.
     full_scan_every: int = 0
     stable_frames: int = 1  # confirming frames before translating
@@ -99,19 +99,12 @@ class PipelineThread(QThread):
     status = Signal(str)
     resized = Signal()  # the frames no longer have cfg.frame_size: the boxes need working out again
 
-    def __init__(
-        self,
-        hwnd: int,
-        engine: OcrEngine,
-        service: TranslationService,
-        config: PipelineConfig | None = None,
-        parent=None,
-    ) -> None:
-        super().__init__(parent)
+    def __init__(self, hwnd: int, engine: OcrEngine, service: TranslationService, config: PipelineConfig) -> None:
+        super().__init__()
         self.hwnd = hwnd
         self.engine = engine
         self.service = service
-        self.cfg = config or PipelineConfig()
+        self.cfg = config
         self.paused = False  # keep capturing, show nothing, translate nothing
         self.style_memory = StyleMemory()
         self.zone_style = ZoneStyle()  # subtitle mode: one size and colour for the zone
@@ -157,7 +150,8 @@ class PipelineThread(QThread):
         interval = int(1000 / cfg.fps) if cfg.fps else None
         try:
             with WgcWindowCapture(self.hwnd, min_interval_ms=interval) as cap:
-                self.status.emit("capture started")
+                lacking = [OPTION_LABELS.get(name, name) for name in cap.dropped_options]
+                self.status.emit("capture started" + (f" (left to Windows: {', '.join(lacking)})" if lacking else ""))
                 was_paused = False
                 while not self._stop:
                     frame = cap.next_frame(timeout=0.5)
@@ -215,7 +209,7 @@ class PipelineThread(QThread):
                 self._dump(frame, lines, blocks)
         render = self.render_blocks(blocks, frame)
         if cfg.debug:
-            render += [RenderBlock(bbox=b.bbox, outline=True) for b in blocks]
+            render += [RenderBlock(bbox=b.bbox, debug_box=True) for b in blocks]
         return render
 
     def _check_size(self, frame: Frame) -> None:
@@ -231,13 +225,13 @@ class PipelineThread(QThread):
 
     # -- frame change ----------------------------------------------------------
 
-    def _area(self, frame: Frame) -> Box:
+    def _client_box(self, frame: Frame) -> Box:
         """The part of the frame that is read: the client area, or all of it."""
         return self.cfg.area or (0, 0, frame.width, frame.height)
 
     def _thumbnail(self, frame: Frame) -> np.ndarray:
-        """thumbnail() of the region read: the roi, or the whole area."""
-        x0, y0, x1, y1 = self.cfg.roi or self._area(frame)
+        """thumbnail() of the region read: the roi, or the whole client area."""
+        x0, y0, x1, y1 = self.cfg.roi or self._client_box(frame)
         return thumbnail(frame.image[y0:y1, x0:x1])
 
     def unchanged(self, frame: Frame) -> bool:
@@ -300,8 +294,8 @@ class PipelineThread(QThread):
         self._translate_ready(blocks, frame)
         live = {(b.id, b.text) for b in blocks}
         self._held = {key: held for key, held in self._held.items() if key in live}
-        area = self._area(frame)
-        return [self._to_render(b, blocks, area) for b in blocks if b.translation is not None and self.is_subtitle(b)]
+        client = self._client_box(frame)
+        return [self._to_render(b, blocks, client) for b in blocks if b.translation is not None and self.is_subtitle(b)]
 
     # -- subtitle zone ------------------------------------------------------------
 
@@ -331,16 +325,21 @@ class PipelineThread(QThread):
         locked = self.zone_style.line_height
         if tolerance <= 0 or locked is None:
             return True
-        return abs(line_height_of(block.bbox, len(block.line_texts)) - locked) <= tolerance * locked
+        return abs(line_height_of(block.bbox, block.n_lines) - locked) <= tolerance * locked
 
     def _ocr_region(self, frame: Frame, box: Box) -> list[TextLine]:
         x0, y0, x1, y1 = box
-        return self.engine.recognize(frame.image[y0:y1, x0:x1]).shifted(x0, y0).lines
+        crop = frame.image[y0:y1, x0:x1]
+        # A box worked out before a resize can lie outside a smaller frame (until `resized` is
+        # answered), and the OCR engine fails on an empty picture, which holds no text anyway.
+        if crop.size == 0:
+            return []
+        return self.engine.recognize(crop).shifted(x0, y0).lines
 
     def _ocr(self, frame: Frame) -> tuple[list[TextLine], Box]:
-        """OCR the roi (or the whole area), returning the lines and the
-        region that was read."""
-        full = self._area(frame)
+        """OCR the roi (or the whole client area), returning the lines and
+        the region that was read."""
+        full = self._client_box(frame)
         roi = self.cfg.roi
         if roi is None:
             return self._ocr_region(frame, full), full
@@ -393,14 +392,14 @@ class PipelineThread(QThread):
         block.colors = (sample.bg, sample.fg)
         block.busy = sample.busy
         block.contrast = sample.contrast
-        self.style_memory.observe(block.bbox, len(block.line_texts), sample.bg, sample.fg, sample.busy)
+        self.style_memory.observe(block.bbox, block.n_lines, sample.bg, sample.fg, sample.busy)
         if self.subtitle_mode and self._centered(block):
-            self.zone_style.observe(line_height_of(block.bbox, len(block.line_texts)), sample.fg)
+            self.zone_style.observe(line_height_of(block.bbox, block.n_lines), sample.fg)
 
-    def _room(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> tuple[int, int]:
+    def _room(self, block: TextBlock, blocks: list[TextBlock], client: Box) -> tuple[int, int]:
         """Free pixels below and above a block before the next block that
-        overlaps it horizontally, or the edge of the area."""
-        _, ay0, _, ay1 = area
+        overlaps it horizontally, or the edge of the client area."""
+        _, ay0, _, ay1 = client
         x0, y0, x1, y1 = block.bbox
         below, above = ay1 - y1, y0 - ay0
         margin = self.cfg.grow_margin
@@ -430,9 +429,9 @@ class PipelineThread(QThread):
             cv2.putText(image, f"#{block.id}", (x0, max(10, y0 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
         cv2.imwrite(os.path.join(dump_dir, f"frame_{self.frames:04d}.png"), image)
 
-    def _to_render(self, block: TextBlock, blocks: list[TextBlock], area: Box) -> RenderBlock:
+    def _to_render(self, block: TextBlock, blocks: list[TextBlock], client: Box) -> RenderBlock:
         assert block.translation is not None
-        n_lines = len(block.line_texts)
+        n_lines = block.n_lines
         memory = self.style_memory
         lines = block.translation.split("\n")
         speaker, _ = self._spoken(block)
@@ -472,7 +471,7 @@ class PipelineThread(QThread):
         if style == "auto":
             busy = memory.busy(block.bbox, default=block.busy)
             style = "pill" if busy or block.contrast < 60 else "patch"
-        below, above = self._room(block, blocks, area)
+        below, above = self._room(block, blocks, client)
         return RenderBlock(
             bbox=block.bbox,
             lines=lines,

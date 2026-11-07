@@ -77,8 +77,8 @@ class _DaemonPool:
                 future.set_exception(exc)
 
     def shutdown(self) -> None:
-        """Let each worker finish its current item and exit; queued items
-        after that are dropped."""
+        """Let each worker finish the items queued before this call and
+        exit; an item whose future was cancelled is skipped."""
         for _ in self._threads:
             self._queue.put(None)
 
@@ -112,8 +112,10 @@ class TranslationService:
         self.autosave_seconds = autosave_seconds
         self.max_drafts = max_drafts
 
-        workers += 1 if draft_translator else 0
         self._pool = _DaemonPool(workers, "translate")
+        # Drafts get a worker of their own: behind slow final requests in one
+        # queue, the fast tier would wait as long as the slow one.
+        self._draft_pool = _DaemonPool(1, "translate-draft") if draft_translator else None
         self._lock = threading.Lock()
         # Final tier. A failed request holds back the whole tier for a while
         # (`_backoff_until`): per-text cooldowns would not stop a ticking
@@ -220,8 +222,9 @@ class TranslationService:
                     self._speakers[key] = speaker_by_key[key]  # until the answer is in and remembered with its name
             # One request per tier. The draft goes without context: speed over consistency.
             if draft_batch:
+                assert self._draft_pool is not None  # a draft is only due with a draft translator
                 speakers_for = self._speakers_for(speaker_by_key, draft_batch)
-                self._futures.append(self._pool.submit(self._run, "draft", draft_batch, [], speakers_for))
+                self._futures.append(self._draft_pool.submit(self._run, "draft", draft_batch, [], speakers_for))
             if batch:
                 self.stats["requests"] += 1
                 self.stats["items"] += len(batch)
@@ -365,9 +368,17 @@ class TranslationService:
             return len(self._inflight)
 
     def shutdown(self) -> None:
-        """Fold in what has already arrived, stop the workers and save the cache."""
+        """Fold in what has already arrived, drop the requests not yet sent,
+        stop the workers and save the cache."""
         self.drain()  # answers that came in after the last frame would otherwise be asked for again next session
+        with self._lock:
+            # A queued request is never sent: its text would go out and be paid
+            # for after the user pressed stop, and its answer thrown away. One
+            # already running cannot be cancelled; it stays, for a later drain().
+            self._futures = [future for future in self._futures if not future.cancel()]
         self._pool.shutdown()
+        if self._draft_pool is not None:
+            self._draft_pool.shutdown()
         self._autosave(force=True)
 
     # -- worker side -----------------------------------------------------------

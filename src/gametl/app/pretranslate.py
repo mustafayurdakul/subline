@@ -6,6 +6,8 @@ gametl-pretranslate --resume JOBFILE                         # collect a batch s
 
 The lines land in the game's Claude cache, which the overlay reads only
 while its translator is Claude: run the overlay with Claude to see them.
+--game must name the game as the overlay does: the profile's Game name, or
+else its Game window text.
 """
 
 from __future__ import annotations
@@ -20,6 +22,9 @@ from gametl.app.credentials import anthropic_api_key, has_anthropic_credentials
 from gametl.translate.cache import TranslationCache
 from gametl.translate.claude import ClaudeTranslator
 from gametl.translate.pretranslate import BatchJob, load_lines, pretranslate_sync, submit_batch, wait_for_batch
+
+# The packaged build has no gametl-pretranslate: its console program runs this as a subcommand.
+RESUME = "gametl-cli pretranslate --resume" if getattr(sys, "frozen", False) else "gametl-pretranslate --resume"
 
 
 def say(text: str) -> None:
@@ -47,13 +52,38 @@ def anthropic_client():
     return anthropic.Anthropic(api_key=anthropic_api_key())
 
 
-def main(argv: list[str] | None = None) -> int:
-    from gametl.app.main import utf8_console
+def open_cache(path: Path) -> TranslationCache | None:
+    """The cache at `path`, or None (and why, said) when the file is there
+    but cannot be read: results collected into it could not be saved."""
+    cache = TranslationCache(path)
+    if cache.load_error and not cache.set_aside:
+        say(
+            f"cannot read the translation cache {path} ({cache.load_error}): close any program using it, then try again"
+        )
+        return None
+    return cache
 
-    utf8_console()
+
+def finish(job_path: Path, added: int, failed: int, cache: TranslationCache) -> None:
+    """Report a collected batch. Its job file goes once every chunk is in the
+    cache; with a chunk failed it stays, for --resume."""
+    say(f"collected {added} lines ({failed} chunks failed); cache now {len(cache)} entries")
+    if failed:
+        say(f"job file kept: {job_path}")
+        return
+    job_path.unlink(missing_ok=True)
+    say("job file removed")
+
+
+def main(argv: list[str] | None = None) -> int:
+    from gametl.app.main import data_dir_arg, utf8_console
+
+    utf8_console(ProfileStore(data_dir_arg(argv)).root)  # the log goes to the data folder in use
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("script", nargs="?", help="script file: .txt (one line per entry), .srt, .json or .csv")
-    p.add_argument("--game", help="game name (must match the one used when running the overlay)")
+    p.add_argument(
+        "--game", help="the game as the overlay names it: the profile's Game name, or else its Game window text"
+    )
     p.add_argument("--source-lang", default="en")
     p.add_argument("--target-lang", default="tr")
     p.add_argument("--model", default="claude-opus-5-5", help="quality model by default; batches cost half")
@@ -78,18 +108,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.resume:
         job = BatchJob.load(Path(args.resume))
         game = job.game or Path(args.resume).stem.split(".")[0]  # job files from before 0.1.4 carry no game
-        cache = TranslationCache(store.cache_path(game, job.target_lang, ClaudeTranslator.name))
+        cache = open_cache(store.cache_path(game, job.target_lang, ClaudeTranslator.name))
+        if cache is None:
+            return 2
         ended, added, failed = wait_for_batch(job, cache, args.wait, client=anthropic_client(), say=say)
         if not ended:
             say("batch still running; run --resume again later")
             return 3
-        say(f"collected {added} lines ({failed} chunks failed); cache now {len(cache)} entries")
+        finish(Path(args.resume), added, failed, cache)
         return 0
 
     glossary = json.loads(Path(args.glossary).read_text(encoding="utf-8")) if args.glossary else None
     lines = load_lines(args.script)
-    cache_path = store.cache_path(args.game, args.target_lang, "claude")
-    cache = TranslationCache(cache_path)
+    cache_path = store.cache_path(args.game, args.target_lang, ClaudeTranslator.name)
+    cache = open_cache(cache_path)
+    if cache is None:
+        return 2
+    # A chunk of script lines, and Opus's thinking with it, needs more room and
+    # time than the overlay's few lines a frame (2048 tokens, 20 s).
     translator = ClaudeTranslator(
         model=args.model,
         effort=args.effort,
@@ -97,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         glossary=glossary,
         tone=args.tone,
         source_lang=args.source_lang,
+        max_tokens=16000,
+        timeout=300.0,
         api_key=anthropic_api_key(),
     )
     say(f"{len(lines)} lines from {args.script}; cache {cache_path} ({len(cache)} entries)")
@@ -108,8 +146,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"added {added} lines; tokens {totals['input']} in / {totals['output']} out over {translator.calls} calls")
         return 0
 
-    client = translator.client  # carries the app's key; the batch calls reuse it
-    job = submit_batch(lines, translator, cache, args.target_lang, args.chunk_size, client=client, game=args.game)
+    client = translator.client  # carries the app's key; collecting the batch reuses it
+    job = submit_batch(lines, translator, cache, args.target_lang, args.chunk_size, game=args.game)
     if job is None:
         say("every line is already in the cache")
         return 0
@@ -117,13 +155,13 @@ def main(argv: list[str] | None = None) -> int:
     job.save(job_path)
     say(f"batch {job.batch_id} submitted with {len(job.chunks)} chunks; job saved to {job_path}")
     if args.wait <= 0:
-        say(f'collect later with: gametl-pretranslate --resume "{job_path}"')
+        say(f'collect later with: {RESUME} "{job_path}"')
         return 0
     ended, added, failed = wait_for_batch(job, cache, args.wait, client=client, say=say)
     if not ended:
-        say(f'still running after {args.wait:.0f}s; collect later with: gametl-pretranslate --resume "{job_path}"')
+        say(f'still running after {args.wait:.0f}s; collect later with: {RESUME} "{job_path}"')
         return 3
-    say(f"collected {added} lines ({failed} chunks failed); cache now {len(cache)} entries")
+    finish(job_path, added, failed, cache)
     return 0
 
 

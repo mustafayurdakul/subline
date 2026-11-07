@@ -57,7 +57,6 @@
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
-  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
 </svg>
 
@@ -153,13 +152,13 @@
         <li class="step">
           <div class="step__art" aria-hidden="true">
             <div class="mini mini--game">
-              <span class="mini__sel"><span class="mini__line mini__line--en">I didn't think you'd come back.</span></span>
+              <span class="mini__sel"><span class="mini__line">I didn't think you'd come back.</span></span>
               <span class="keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></span>
             </div>
           </div>
           <span class="step__num">2</span>
           <h3>Mark where the subtitles are</h3>
-          <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> in the game and drag a box over the subtitles. Subline remembers it for that game, even when you change resolution.</p>
+          <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> in the game and drag a box over the subtitles. Then save your setup as a profile (<strong>Save current as</strong>): when Subline next starts with that game open, it loads the profile, area included, and starts on its own, even at another resolution.</p>
         </li>
         <li class="step">
           <div class="step__art" aria-hidden="true">
@@ -196,7 +195,7 @@
         <article class="card">
           <svg class="i card__icon"><use href="#i-chat"/></svg>
           <h3>Understands the scene</h3>
-          <p>Translators see the recent lines, so names, pronouns and tone stay consistent. Speaker names like “Casey:” stay as the game printed them.</p>
+          <p>DeepL and Claude see the recent lines, so names, pronouns and tone stay consistent. Speaker names like “Casey:” stay as the game printed them.</p>
         </article>
         <article class="card">
           <svg class="i card__icon"><use href="#i-bolt"/></svg>
@@ -206,7 +205,7 @@
         <article class="card">
           <svg class="i card__icon"><use href="#i-gauge"/></svg>
           <h3>Light on your PC</h3>
-          <p>Text is read only when something in the subtitle area changes, so a still scene costs nothing. A subtitle strip takes about 50&nbsp;ms on the CPU.</p>
+          <p>Text is read only when something in the subtitle area changes, so a still scene is read only once every couple of seconds. A subtitle strip takes about 50&nbsp;ms on the CPU.</p>
         </article>
         <article class="card">
           <svg class="i card__icon"><use href="#i-keyboard"/></svg>
@@ -258,7 +257,7 @@
       </header>
       <div class="tour">
         <div class="tabs" role="tablist" aria-label="Settings pages">
-          <button type="button" role="tab" id="tab-home" aria-controls="panel-tour" aria-selected="true" data-src="ui/home.png" data-caption="Pick a language and a game, press Start. Everything a player needs is on one page." data-alt="The Home page: the target language, the Start button and three subtitle settings">Home</button>
+          <button type="button" role="tab" id="tab-home" aria-controls="panel-tour" aria-selected="true" data-src="ui/home.png" data-caption="Pick a language and a game, press Start. Everything a player needs is on one page." data-alt="The Home page: the target language, the Start button, the game window and three subtitle settings">Home</button>
           <button type="button" role="tab" id="tab-game" aria-controls="panel-tour" aria-selected="false" tabindex="-1" data-src="ui/game.png" data-caption="Choose the window and the area to read, and anything to ignore, such as HUD text." data-alt="The Game page: the game window, the area to read and what to ignore">Game</button>
           <button type="button" role="tab" id="tab-translation" aria-controls="panel-tour" aria-selected="false" tabindex="-1" data-src="ui/translation.png" data-caption="Languages, the translator, a fast draft and your keys." data-alt="The Translation page: languages, translator, draft and keys">Translation</button>
           <button type="button" role="tab" id="tab-appearance" aria-controls="panel-tour" aria-selected="false" tabindex="-1" data-src="ui/appearance.png" data-caption="Size, colour, font and background, with a live preview drawn by the overlay itself." data-alt="The Appearance page: subtitle size, colour, font and background with a live preview">Appearance</button>
@@ -267,8 +266,8 @@
         <div class="tour__panel" id="panel-tour" role="tabpanel" aria-labelledby="tab-home">
           <div class="window">
             <div class="window__bar" aria-hidden="true"><img src="assets/icon.svg" width="14" height="14" alt=""><span class="window__title">Subline</span><span class="window__ctl"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9"/></svg><svg viewBox="0 0 10 10"><path d="m0 0 10 10M10 0 0 10"/></svg></span></div>
-            <div class="window__body">
-              <img id="tour-img" src="ui/home.png" width="1000" height="680" alt="The Home page: the target language, the Start button and three subtitle settings" loading="lazy">
+            <div class="window__body" tabindex="0">
+              <img id="tour-img" src="ui/home.png" width="1000" height="680" alt="The Home page: the target language, the Start button, the game window and three subtitle settings" loading="lazy">
             </div>
           </div>
           <p class="tour__caption" id="tour-caption">Pick a language and a game, press Start. Everything a player needs is on one page.</p>
@@ -318,19 +317,19 @@
         <article class="card card--list">
           <h3>What leaves your PC</h3>
           <ul class="ticks">
-            <li><svg class="i"><use href="#i-check"/></svg><span>Only subtitle text, and only to the translator you chose (DeepL or Anthropic), with your own key.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Only subtitle text (with Claude, also the game's name and your glossary and tone notes), and only to the translators you chose (DeepL, Anthropic, or both with a DeepL draft), with your own key.</span></li>
             <li><svg class="i"><use href="#i-check"/></svg><span>Never images of your screen. Text recognition runs on your PC.</span></li>
             <li><svg class="i"><use href="#i-check"/></svg><span>With the offline translator, nothing at all.</span></li>
             <li><svg class="i"><use href="#i-check"/></svg><span>No analytics, no telemetry, no account.</span></li>
           </ul>
-          <p class="fine">Subline downloads its text-recognition models on first run (about 20&nbsp;MB), and the offline model if you choose it.</p>
+          <p class="fine">Subline downloads its text-recognition models from modelscope.cn on first run (about 20&nbsp;MB; Korean, Cyrillic and Arabic text need one more). The offline translator downloads its runtime from PyPI and its model through the Argos Translate package index. These downloads send no game text and no images.</p>
         </article>
         <article class="card card--list">
           <h3>What stays, and how to remove it</h3>
           <ul class="ticks">
-            <li><svg class="i"><use href="#i-check"/></svg><span>Settings, profiles and translation caches live in one folder: <code>%APPDATA%\gametl</code>.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Settings, profiles, translation caches and downloaded models live in one folder: <code>%APPDATA%\gametl</code>.</span></li>
             <li><svg class="i"><use href="#i-check"/></svg><span>API keys live in Windows Credential Manager, protected by your Windows account.</span></li>
-            <li><svg class="i"><use href="#i-check"/></svg><span><strong>Advanced &rsaquo; Remove all data and quit</strong> deletes the folder and the keys.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span><strong>Advanced &rsaquo; Remove all data and quit</strong> deletes the folder and the keys. The uninstaller offers to do the same.</span></li>
             <li><svg class="i"><use href="#i-check"/></svg><span>Then uninstall from <strong>Settings &rsaquo; Apps</strong>, or delete the portable folder. That's everything Subline keeps.</span></li>
           </ul>
         </article>
@@ -346,7 +345,7 @@
         <h2>Get Subline. It's free.</h2>
         <p class="section__sub"><span data-release="version">The latest release</span>, built from the public source by GitHub Actions.</p>
       </header>
-      <div class="grid grid--2 downloads">
+      <div class="grid grid--2">
         <article class="card dl">
           <div class="tr__head"><h3>Installer</h3><span class="badge">Recommended</span></div>
           <p>Installs for your user only, with no administrator prompt. Adds a Start menu entry and an uninstaller.</p>
@@ -368,9 +367,9 @@
         <div>
           <h3>Requirements</h3>
           <ul class="ticks">
-            <li><svg class="i"><use href="#i-check"/></svg><span>Windows 10 (version 1903 or later) or Windows 11, 64-bit.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>Windows 10 (version 1903 or later) or Windows 11, 64-bit. On Windows 10, Windows draws a yellow border around the game while Subline reads it.</span></li>
             <li><svg class="i"><use href="#i-check"/></svg><span>The game in windowed or borderless-window mode.</span></li>
-            <li><svg class="i"><use href="#i-check"/></svg><span>For DeepL or Claude, an internet connection and an API key. The offline translator needs neither.</span></li>
+            <li><svg class="i"><use href="#i-check"/></svg><span>An internet connection on first run, to download the text-recognition models (about 20&nbsp;MB). DeepL and Claude also need a connection and an API key while you play; the offline translator needs one more download (its runtime and the model for your language pair) and then neither.</span></li>
           </ul>
         </div>
         <div class="callout">
@@ -407,7 +406,7 @@
         </details>
         <details>
           <summary>Will it slow my game down?<svg class="i"><use href="#i-chevron"/></svg></summary>
-          <p>Hardly. Subline reads the screen only when something in the subtitle area changes, so a still scene costs nothing, and reading a subtitle strip takes about 50&nbsp;ms on a desktop CPU. Translation happens on a separate thread and never holds anything up.</p>
+          <p>Hardly. Subline reads the screen only when something in the subtitle area changes, so a still scene is read only once every couple of seconds, and reading a subtitle strip takes about 50&nbsp;ms on a desktop CPU. Translation happens on a separate thread and never holds anything up.</p>
         </details>
         <details>
           <summary>Is my API key safe?<svg class="i"><use href="#i-chevron"/></svg></summary>
@@ -415,7 +414,7 @@
         </details>
         <details>
           <summary>How do I remove everything?<svg class="i"><use href="#i-chevron"/></svg></summary>
-          <p>On the Advanced page, choose <strong>Remove all data and quit</strong>. That deletes Subline's folder and its saved keys. Then uninstall it from <strong>Settings &rsaquo; Apps &rsaquo; Subline</strong>, or delete the portable folder. That's everything Subline keeps.</p>
+          <p>Quit Subline from its tray icon, uninstall it from <strong>Settings &rsaquo; Apps &rsaquo; Subline</strong>, and answer <strong>Yes</strong> when the uninstaller asks whether to remove your settings, translation caches, downloaded models and saved keys too. With the portable build, choose <strong>Remove all data and quit</strong> on the Advanced page, then delete the folder. That's everything Subline keeps.</p>
         </details>
         <details>
           <summary>Where do I report a problem or suggest something?<svg class="i"><use href="#i-chevron"/></svg></summary>

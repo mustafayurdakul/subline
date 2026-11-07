@@ -1,12 +1,15 @@
 import QtQuick
 
 // A number with minus and plus buttons, bound to `map[key]`; `specialText`
-// shows for `from`. Tab reaches it; the arrow keys step it.
+// shows for `from`. The first step up from that goes to `start` when it is
+// set: a sensible value, where `from` plus one step is not. Tab reaches it;
+// the arrow keys step it.
 Rectangle {
     id: root
     property int from: 0
     property int to: 100
     property int step: 1
+    property int start: from
     property string suffix: ""
     property string specialText: ""
     property var map: backend.settings
@@ -22,6 +25,10 @@ Rectangle {
     activeFocusOnTab: true
 
     function change(delta) {
+        if (delta > 0 && root.specialText !== "" && Math.round(root.value) === root.from && root.start > root.from) {
+            map[key] = root.start
+            return
+        }
         map[key] = Math.min(root.to, Math.max(root.from, Math.round(root.value) + delta))
     }
 

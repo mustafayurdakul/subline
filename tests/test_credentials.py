@@ -3,6 +3,8 @@ a test prefix into the real Credential Manager and deletes it again."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from gametl.app.credentials import (
@@ -45,9 +47,17 @@ def test_store_wins_over_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_anthropic_credentials_from_store(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-    monkeypatch.setattr("gametl.app.credentials.user_environment_variable", lambda name: None)
-    monkeypatch.setattr("pathlib.Path.exists", lambda self: False)
     secrets = MemorySecretStore()
     assert has_anthropic_credentials(secrets) is False
     secrets.set("ANTHROPIC_API_KEY", "sk-test")
     assert has_anthropic_credentials(secrets) is True
+
+
+def test_an_auth_token_counts_and_a_config_folder_does_not(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    (tmp_path / ".config" / "anthropic").mkdir(parents=True)  # where the SDK keeps its profiles off Windows
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert has_anthropic_credentials(MemorySecretStore()) is False
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "token")
+    assert has_anthropic_credentials(MemorySecretStore()) is True

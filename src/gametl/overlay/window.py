@@ -48,7 +48,7 @@ class OverlayWindow(QWidget):
         self,
         target_hwnd: int,
         hide_when_unfocused: bool = True,
-        exclude_from_capture: bool = True,
+        exclude_from_capture: bool = False,
         font_family: str = "Segoe UI",
     ) -> None:
         super().__init__(
@@ -59,8 +59,8 @@ class OverlayWindow(QWidget):
             | Qt.WindowType.WindowTransparentForInput
             | Qt.WindowType.WindowDoesNotAcceptFocus,
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # translucency also drops the system background
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # also drops the system background
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)  # showing never takes focus from the game
 
         self.target_hwnd = target_hwnd
         self.hide_when_unfocused = hide_when_unfocused
@@ -77,10 +77,15 @@ class OverlayWindow(QWidget):
     # -- lifecycle -----------------------------------------------------------
 
     def start(self) -> None:
+        """Show the overlay over the game and follow it. A game window that
+        is already gone is reported by the first poll, once the caller is
+        done starting, never from inside this call."""
+        self._timer.start(_POLL_MS)
+        if not is_window(self.target_hwnd):
+            return
         self._follow()
         self.show()
         self._apply_native_styles()
-        self._timer.start(_POLL_MS)
 
     def _apply_native_styles(self) -> None:
         """Make sure the Win32 extended styles say click-through, no

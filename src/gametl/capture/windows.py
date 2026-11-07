@@ -12,7 +12,7 @@ import os
 from ctypes import wintypes
 from dataclasses import dataclass
 
-from .base import Rect
+from ..geometry import Box
 
 _user32 = ctypes.windll.user32
 _dwmapi = ctypes.windll.dwmapi
@@ -72,7 +72,7 @@ class WindowInfo:
     hwnd: int
     title: str
     class_name: str
-    rect: Rect  # extended frame bounds, physical pixels
+    rect: Box  # extended frame bounds, physical pixels
 
     @property
     def width(self) -> int:
@@ -106,7 +106,7 @@ def is_cloaked(hwnd: int) -> bool:
     return hr == 0 and cloaked.value != 0
 
 
-def window_rect(hwnd: int) -> Rect:
+def window_rect(hwnd: int) -> Box:
     """Visible bounds of the window (excludes the invisible resize border that
     GetWindowRect includes on Windows 10+)."""
     rect = wintypes.RECT()
@@ -116,7 +116,7 @@ def window_rect(hwnd: int) -> Rect:
     return (rect.left, rect.top, rect.right, rect.bottom)
 
 
-def client_rect_on_screen(hwnd: int) -> Rect:
+def client_rect_on_screen(hwnd: int) -> Box:
     """The client area (what a game draws into) in screen coordinates."""
     rect = wintypes.RECT()
     _user32.GetClientRect(hwnd, ctypes.byref(rect))
@@ -161,10 +161,12 @@ def list_windows(min_size: int = 64, include_own: bool = False) -> list[WindowIn
     def _enum(hwnd: int, _lparam: int) -> bool:
         if not _user32.IsWindowVisible(hwnd):
             return True
+        # Before the title: reading the title of a window of this process
+        # waits for the thread that owns it to answer.
+        if not include_own and window_process_id(hwnd) == own_pid:
+            return True
         title = window_title(hwnd)
         if not title:
-            return True
-        if not include_own and window_process_id(hwnd) == own_pid:
             return True
         if is_cloaked(hwnd):
             return True

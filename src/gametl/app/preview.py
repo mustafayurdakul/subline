@@ -20,7 +20,7 @@ from .controller import parse_color
 from .settings_backend import SettingsBackend
 
 PROVIDER = "overlay"  # the image:// scheme's host
-LINE = "Nereye gidiyorsun? Işıklar söndüğünde buradaydın."
+TRANSLATED_LINE = "Nereye gidiyorsun? Işıklar söndüğünde buradaydın."
 SOURCE_LINE = "Where are you going? You were here when the lights went out."
 SOURCE_COLOR = (226, 226, 226)  # the game's own subtitle: a light grey with a shadow, as many games draw it
 REFERENCE_WIDTH = 1920  # the game the preview frame stands for: 1080p
@@ -53,7 +53,7 @@ def preview_blocks(settings: Settings, width: int, height: int, painter: BlockPa
     )
     translation = RenderBlock(
         bbox=bbox,
-        lines=[LINE],
+        lines=[TRANSLATED_LINE],
         fg=parse_color(settings.subtitle_color) if settings.subtitle_color.strip() else DEFAULT_COLOR,
         style="subtitle",
         font_px=font_px,
@@ -75,12 +75,12 @@ def render_preview(settings: Settings, width: int, height: int) -> QImage:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     try:
-        blocks = BlockPainter(settings.font)
-        game_line, translation = preview_blocks(settings, width, height, blocks)
+        block_painter = BlockPainter(settings.font)
+        game_line, translation = preview_blocks(settings, width, height, block_painter)
         # Two calls: within one, every text goes on after every background, and the
         # game's line must lie under the translation's band, as it does in the game.
-        blocks.paint_blocks(painter, [game_line])
-        blocks.paint_blocks(painter, [translation])
+        block_painter.paint_blocks(painter, [game_line])
+        block_painter.paint_blocks(painter, [translation])
     finally:
         painter.end()
     return image

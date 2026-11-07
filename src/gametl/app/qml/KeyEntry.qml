@@ -10,6 +10,6 @@ RowLayout {
     property bool clearable: true
     spacing: Theme.space
     Field { id: field; placeholderText: "paste the key"; secret: true; implicitWidth: 240; onAccepted: save.clicked() }
-    SecondaryButton { id: save; text: "Save"; onClicked: { backend.saveKey(root.name, field.text); field.text = "" } }
+    SecondaryButton { id: save; text: "Save"; onClicked: if (backend.saveKey(root.name, field.text)) field.text = "" }
     SecondaryButton { visible: root.clearable; text: "Clear"; onClicked: { backend.clearKey(root.name); field.text = "" } }
 }

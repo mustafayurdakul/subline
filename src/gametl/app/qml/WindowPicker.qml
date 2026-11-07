@@ -9,6 +9,6 @@ import "Icons.js" as Icons
 RowLayout {
     spacing: Theme.space
     Component.onCompleted: backend.refreshWindows()
-    Combo { key: "window_match"; options: backend.windows; editable: true; live: false }
+    Combo { key: "window_match"; options: backend.windows; editable: true }
     SecondaryButton { text: "Refresh"; icon_: Icons.refresh; onClicked: backend.refreshWindows() }
 }

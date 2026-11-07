@@ -12,6 +12,7 @@ the result.
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import shutil
 import subprocess
@@ -20,6 +21,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ISCC_DEFAULT = Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")  # where the Inno Setup installer puts it
+# The sizes Windows picks from for the taskbar, Explorer views, shortcuts at
+# any display scale and the Apps list; ascending, the largest last.
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
 def find_iscc() -> str | None:
@@ -55,16 +59,30 @@ def build_installer(dist: Path, version: str, icon: Path) -> Path:
 
 
 def make_ico(path: Path) -> None:
+    """The app icon at every size in ICO_SIZES, each drawn at its own size
+    so the small ones stay sharp. Qt's ICO writer stores one image only;
+    Pillow puts them together."""
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
+    from PIL import Image
+    from PySide6.QtCore import QBuffer, QIODevice
     from PySide6.QtWidgets import QApplication
 
     from gametl.app.icon import make_icon
 
     app = QApplication.instance() or QApplication([])  # noqa: F841 (needed for QPixmap)
-    icon = make_icon(False)
+    images = []
+    for size in ICO_SIZES:
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not make_icon(False, size=size).pixmap(size, size).save(buffer, "PNG"):
+            raise SystemExit(f"could not draw the {size} px icon")
+        images.append(Image.open(io.BytesIO(bytes(buffer.data()))))
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not icon.pixmap(256, 256).save(str(path), "ICO"):
-        raise SystemExit(f"could not write {path}")
+    largest = images[-1]
+    try:
+        largest.save(path, format="ICO", sizes=[image.size for image in images], append_images=images[:-1])
+    except OSError as exc:
+        raise SystemExit(f"could not write {path}: {exc}") from exc
 
 
 def relocate_licences(dist: Path) -> None:

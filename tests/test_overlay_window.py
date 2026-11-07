@@ -1,16 +1,12 @@
 """Overlay window: native styles (click-through, no activation, topmost),
 following the target window, and painting every style in a shown window.
-Needs a desktop session; the painting rules themselves are pinned offscreen
-in test_subtitle_paint.py, which CI runs."""
+Needs a desktop session and a run of this file on its own (in a full run
+the tests skip); the painting rules themselves are pinned offscreen in
+test_subtitle_paint.py, which CI runs."""
 
 from __future__ import annotations
 
-import os
-
 import pytest
-
-os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
-
 from PySide6.QtWidgets import QApplication, QWidget
 
 from gametl.capture.windows import enable_per_monitor_dpi_awareness, find_window, list_windows, window_rect
@@ -29,6 +25,11 @@ from gametl.overlay.window import (
 def qapp() -> QApplication:
     enable_per_monitor_dpi_awareness()
     app = QApplication.instance() or QApplication([])
+    # One process has one Qt platform, and the other Qt test modules pick
+    # offscreen when they are collected: native window handles exist only on
+    # the desktop platform.
+    if app.platformName() != "windows":
+        pytest.skip("needs the Windows desktop platform: run this file on its own")
     return app  # type: ignore[return-value]
 
 

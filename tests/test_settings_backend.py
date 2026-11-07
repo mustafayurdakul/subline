@@ -12,11 +12,11 @@ from gametl.app.config import DEFAULT_HOTKEYS, ProfileStore, Settings
 from gametl.app.credentials import DEEPL_KEY, MemorySecretStore
 from gametl.app.settings_backend import (
     BOTTOM_STRIP,
-    EMPTY_DEFAULTS,
     SettingsBackend,
     combo_from_key,
     invalid_hotkey,
     invalid_pattern,
+    settings_problem,
 )
 
 
@@ -71,8 +71,8 @@ def test_untouched_fields_survive_and_qml_values_are_coerced(tmp_path: Path) -> 
     # stable_frames and the like have controls but are not touched here; debug has no control at all.
     loaded = Settings(window_match="Fake Game", stable_frames=3, max_missing=7, full_scan_every=5, debug=True)
     backend = backend_for(tmp_path, loaded)
-    applied: list = []
-    backend.applied.connect(lambda s, hwnd: applied.append((s, hwnd)))
+    started: list = []
+    backend.start_requested.connect(lambda s, hwnd: started.append((s, hwnd)))
     s = backend.settings
     s.insert("target_lang", "de")
     s.insert("fps", "24")  # a text field writes strings
@@ -83,7 +83,7 @@ def test_untouched_fields_survive_and_qml_values_are_coerced(tmp_path: Path) -> 
     s.insert("lang", "")  # an emptied field means the default
     s.insert("translator", "")
     backend.start()
-    ((result, hwnd),) = applied
+    ((result, hwnd),) = started
     assert hwnd is None
     assert result.target_lang == "de" and result.fps == 24.0 and result.subtitle_font_px == 28
     assert result.change_threshold == 20.0 and result.subtitle_color == "" and result.lang == "en"
@@ -96,21 +96,17 @@ def test_untouched_fields_survive_and_qml_values_are_coerced(tmp_path: Path) -> 
     assert backend.to_settings().stable_frames == 1
 
 
-def test_an_emptied_control_means_the_settings_default() -> None:
-    assert {name: getattr(Settings(), name) for name in EMPTY_DEFAULTS} == EMPTY_DEFAULTS
-
-
 def test_invalid_pattern_or_hotkey_is_reported_and_blocks_start_and_save(tmp_path: Path) -> None:
     assert invalid_pattern(["^a$", r"\d+"]) is None
     problem = invalid_pattern(["^a$", "(unclosed"])
     assert problem is not None and "(unclosed" in problem
     assert invalid_hotkey(dict(DEFAULT_HOTKEYS)) is None
     backend = backend_for(tmp_path)
-    applied: list = []
-    backend.applied.connect(lambda s, hwnd: applied.append(s))
+    started: list = []
+    backend.start_requested.connect(lambda s, hwnd: started.append(s))
     backend.settings.insert("ignore_patterns", "^\\d+$\n(unclosed")
     backend.start()
-    assert applied == [] and "(unclosed" in backend.problem
+    assert started == [] and "(unclosed" in backend.problem
     backend.clearProblem()
     assert backend.saveProfile("x") is False  # the popup stays open with the name
     assert "(unclosed" in backend.problem and ProfileStore(tmp_path).list() == []
@@ -118,11 +114,27 @@ def test_invalid_pattern_or_hotkey_is_reported_and_blocks_start_and_save(tmp_pat
     backend.settings.insert("hotkey_toggle", "ctrl+")
     backend.clearProblem()
     backend.start()
-    assert applied == [] and "Start / stop overlay" in backend.problem
+    assert started == [] and "Start / stop overlay" in backend.problem
     backend.settings.insert("hotkey_toggle", "t")  # a hand-edited profile: a bare letter
     backend.clearProblem()
     backend.start()
-    assert applied == [] and "needs Ctrl, Alt or Win" in backend.problem
+    assert started == [] and "needs Ctrl, Alt or Win" in backend.problem
+
+
+def test_an_area_or_zone_that_is_not_a_rectangle_is_refused(tmp_path: Path) -> None:
+    """The overlay would refuse to start with it: the window says why at once, in the same words."""
+    assert settings_problem(Settings()) is None and settings_problem(Settings(roi="")) is None
+    assert settings_problem(Settings(roi="0,800,1920,280", ignore_zones=["0,0,0.2,0.2"])) is None  # pixels too
+    for roi in ("0,0.75,1", "0;0.75;1;0.25", "0,0.75,1,0", "0,0.75,0,0.25"):
+        assert (settings_problem(Settings(roi=roi)) or "").startswith(f"Area {roi!r}: "), roi
+    problem = settings_problem(Settings(ignore_zones=["0,0,0.2,0.2", "minimap"]))
+    assert problem is not None and "Ignore zone 'minimap'" in problem
+    backend = backend_for(tmp_path)
+    started: list = []
+    backend.start_requested.connect(lambda s, hwnd: started.append(s))
+    backend.settings.insert("roi", "0,0.75,1")
+    backend.start()
+    assert started == [] and "'0,0.75,1'" in backend.problem
 
 
 def test_a_hotkey_needs_a_modifier_unless_no_program_types_its_key() -> None:
@@ -158,6 +170,22 @@ def test_area_presets_and_window_handle(tmp_path: Path, monkeypatch: pytest.Monk
     assert backend.selected_hwnd() is None  # a substring is matched by title instead
     backend.set("roi", "0.1,0.2,0.3,0.4")  # the tray, after a drag on screen
     assert backend.settings.value("roi") == "0.1,0.2,0.3,0.4"
+
+
+def test_select_on_screen_refuses_settings_that_cannot_run(tmp_path: Path) -> None:
+    """The tray takes the window's settings up for the selection and saves
+    the area with them; only the area itself may be wrong, as it is replaced."""
+    backend = backend_for(tmp_path)
+    asked: list[int] = []
+    backend.select_area_requested.connect(lambda: asked.append(1))
+    backend.settings.insert("ignore_patterns", "(unclosed")
+    backend.selectArea()
+    assert asked == [] and "(unclosed" in backend.problem
+    backend.settings.insert("ignore_patterns", "")
+    backend.settings.insert("roi", "0,0.75,1")
+    backend.clearProblem()
+    backend.selectArea()
+    assert asked == [1] and backend.problem == ""
 
 
 def test_profiles_save_and_load(tmp_path: Path) -> None:
@@ -198,18 +226,44 @@ def test_deleting_a_profile_forgets_it_everywhere(tmp_path: Path) -> None:
 def test_keys_go_to_the_secret_store_not_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # This machine may have real keys in its environment: hide them from the test.
     monkeypatch.delenv(DEEPL_KEY, raising=False)
-    monkeypatch.setattr("gametl.app.credentials.user_environment_variable", lambda name: None)
     secrets = MemorySecretStore()
     backend = backend_for(tmp_path, secrets=secrets)
-    assert backend.deeplKeyStatus == "not set"
-    backend.saveKey(DEEPL_KEY, "  abc:fx ")
+    assert backend.deeplKeyStatus == "not set" and not backend.deeplKeySet
+    assert backend.saveKey(DEEPL_KEY, "  abc:fx ") is True  # the page blanks the field
     assert secrets.get(DEEPL_KEY) == "abc:fx"
-    assert backend.deeplKeyStatus == "set (memory)"
+    assert backend.deeplKeyStatus == "set (memory)" and backend.deeplKeySet
     assert "abc:fx" not in str(backend.to_settings().to_dict())
-    backend.saveKey("SOMETHING_ELSE", "x")
+    assert backend.saveKey("SOMETHING_ELSE", "x") is False
     assert secrets.get("SOMETHING_ELSE") is None  # only the two known keys
+    assert backend.saveKey(DEEPL_KEY, "   ") is False and secrets.get(DEEPL_KEY) == "abc:fx"
     backend.clearKey(DEEPL_KEY)
     assert secrets.get(DEEPL_KEY) is None and backend.deeplKeyStatus == "not set"
+
+
+class RefusingStore(MemorySecretStore):
+    """A credential store that refuses every change, as the Credential Manager does under some policies."""
+
+    def set(self, name: str, value: str) -> None:
+        raise OSError("vault refused")
+
+    def delete(self, name: str) -> None:
+        raise OSError("vault refused")
+
+
+def test_a_store_that_refuses_shows_in_the_banner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not only in the log: the key stays in its field and the profile popup stays open."""
+    backend = backend_for(tmp_path, secrets=RefusingStore())
+    assert backend.saveKey(DEEPL_KEY, "abc:fx") is False
+    assert backend.problem == "Could not save the key: vault refused"
+    backend.clearKey(DEEPL_KEY)
+    assert backend.problem == "Could not remove the key: vault refused"
+
+    def refuse(name: str, settings: Settings) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(backend.store, "save", refuse)
+    assert backend.saveProfile("Fake Game") is False
+    assert backend.problem == "Could not save profile fake-game: disk full" and backend.profileName == ""
 
 
 def test_remove_all_data_only_asks_the_owner(tmp_path: Path) -> None:
@@ -235,11 +289,35 @@ def test_hotkey_edits_apply_at_once_but_not_while_loading(tmp_path: Path) -> Non
     assert changed[-1].hotkeys["pause"] == DEFAULT_HOTKEYS["pause"]
     backend.resetHotkeys()
     assert backend.to_settings().hotkeys == DEFAULT_HOTKEYS
+    assert changed[-1].hotkeys == DEFAULT_HOTKEYS
     captures: list[bool] = []
     backend.hotkey_capture_changed.connect(captures.append)
     backend.setHotkeyCapture(True)
     backend.setHotkeyCapture(False)
     assert captures == [True, False]
+
+
+def test_reset_registers_the_defaults_in_one_go(tmp_path: Path) -> None:
+    """One at a time, two actions that had swapped combinations would clash
+    halfway, and that failure would stay in the status line."""
+    swapped = {**DEFAULT_HOTKEYS, "toggle": DEFAULT_HOTKEYS["select"], "select": DEFAULT_HOTKEYS["toggle"]}
+    backend = backend_for(tmp_path, Settings(hotkeys=swapped))
+    changed: list[Settings] = []
+    backend.hotkeys_changed.connect(changed.append)
+    backend.resetHotkeys()
+    assert [s.hotkeys for s in changed] == [DEFAULT_HOTKEYS]
+
+
+def test_a_combination_another_action_holds_is_named(tmp_path: Path) -> None:
+    backend = backend_for(tmp_path)
+    assert backend.hotkeyTaken("hotkey_toggle", DEFAULT_HOTKEYS["pause"]) == "Pause / resume"
+    assert backend.hotkeyTaken("hotkey_toggle", "shift+ctrl+p") == "Pause / resume"  # the same keys in another order
+    assert backend.hotkeyTaken("hotkey_toggle", DEFAULT_HOTKEYS["toggle"]) == ""  # its own
+    assert backend.hotkeyTaken("hotkey_toggle", "ctrl+alt+f9") == ""
+    backend.settings.insert("hotkey_pause", "")  # blank: the default, which is taken all the same
+    assert backend.hotkeyTaken("hotkey_toggle", DEFAULT_HOTKEYS["pause"]) == "Pause / resume"
+    backend.settings.insert("hotkey_pause", "ctrl+")  # a hand-edited profile: matches nothing
+    assert backend.hotkeyTaken("hotkey_toggle", "ctrl+shift+p") == ""
 
 
 def test_edits_go_out_once_the_typing_pauses_and_only_when_valid(qapp, tmp_path: Path) -> None:
@@ -263,6 +341,35 @@ def test_edits_go_out_once_the_typing_pauses_and_only_when_valid(qapp, tmp_path:
     assert backend.problem == "" and changed[1].ignore_patterns == ["(closed)"]  # corrected: banner gone
     backend.load(Settings(target_lang="fr"))  # loading is not an edit
     assert not wait_until(lambda: len(changed) > 2, timeout=0.8, tick=qapp.processEvents)
+
+
+def test_start_takes_an_edit_still_waiting_to_go_out(qapp, tmp_path: Path) -> None:
+    """Sent again once the pause is over, it would start the overlay twice."""
+    from tests.helpers import wait_until
+
+    backend = backend_for(tmp_path)
+    changed: list[Settings] = []
+    started: list[Settings] = []
+    backend.settings_changed.connect(changed.append)
+    backend.start_requested.connect(lambda s, hwnd: started.append(s))
+    backend.set("window_match", "Typed Game")  # a field left by the click on Start
+    backend.start()
+    assert [s.window_match for s in started] == ["Typed Game"]
+    assert not wait_until(lambda: bool(changed), timeout=0.8, tick=qapp.processEvents)
+
+
+def test_loading_takes_down_the_problem_of_the_edit_it_replaces(qapp, tmp_path: Path) -> None:
+    from tests.helpers import wait_until
+
+    backend = backend_for(tmp_path)
+    ProfileStore(tmp_path).save("other", Settings(window_match="Other"))
+    backend.set("ignore_patterns", "(unclosed")
+    assert wait_until(lambda: bool(backend.problem), tick=qapp.processEvents)
+    backend.loadProfile("other")
+    assert backend.problem == "" and backend.to_settings().window_match == "Other"
+    backend.report_problem("no visible window matching 'Other'")  # the tray's, from a failed start
+    backend.load(Settings())
+    assert backend.problem == "no visible window matching 'Other'"  # not an edit's: it stays
 
 
 def test_font_families_are_the_computers(qapp, tmp_path: Path) -> None:
@@ -326,10 +433,10 @@ def test_offline_download_can_run_again(qapp, tmp_path: Path, monkeypatch: pytes
 
     pairs: list[tuple[str, str]] = []
 
-    def fake_ensure_offline(source, target, models_dir, runtime_dir, progress):
+    def fake_ensure_offline(source, target, models_dir, runtime_dir, progress, cancelled):
         pairs.append((source, target))
         progress("fetching")
-        return models_dir / f"{source}-{target}"
+        return models_dir / f"argos-{source}_{target}" / "model"  # where an Argos package keeps model.bin
 
     monkeypatch.setattr("gametl.translate.offline.ensure_offline", fake_ensure_offline)
 
@@ -337,22 +444,50 @@ def test_offline_download_can_run_again(qapp, tmp_path: Path, monkeypatch: pytes
         qapp.processEvents()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)  # what the event loop does
 
-    backend = backend_for(tmp_path, Settings(lang="en", target_lang="tr", draft="deepl"))
+    backend = backend_for(tmp_path, Settings(lang="japan", target_lang="tr", translator="offline"))
     backend.downloadOffline()
     assert backend.downloading
     assert wait_until(lambda: not backend.downloading, tick=tick)
-    assert backend.downloadStatus == "Offline translation ready (en-tr)."
-    assert backend.to_settings().draft == "deepl"  # a draft already set is kept
+    assert backend.downloadStatus == "Offline translation ready for ja → tr."  # the pair, as ISO codes
     backend.set("target_lang", "de")
     assert backend.downloadStatus == ""  # it spoke of the old pair
     backend.downloadOffline()
     assert wait_until(lambda: not backend.downloading, tick=tick)
-    assert pairs == [("en", "tr"), ("en", "de")]
-    # With the offline model as the translator, the download does not also make it the draft.
-    offline = backend_for(tmp_path, Settings(lang="en", target_lang="tr", translator="offline"))
-    offline.downloadOffline()
-    assert wait_until(lambda: not offline.downloading, tick=tick)
-    assert offline.to_settings().draft == ""
+    assert pairs == [("japan", "tr"), ("japan", "de")]
+    backend.load(Settings(lang="en", target_lang="fr"))  # another profile: the line goes too
+    assert backend.downloadStatus == ""
+
+
+def test_closing_stops_a_download_in_progress(qapp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quit and Remove all data wait for the thread: torn down while it
+    runs, Qt aborts the process, and a download going on would write into
+    the folder just wiped."""
+    import threading
+    import time
+
+    from gametl.translate.offline import DownloadCancelled
+    from tests.helpers import wait_until
+
+    began, ended = threading.Event(), threading.Event()
+
+    def fake_ensure_offline(source, target, models_dir, runtime_dir, progress, cancelled):
+        began.set()
+        try:
+            while not cancelled():
+                time.sleep(0.01)
+            raise DownloadCancelled("download cancelled")
+        finally:
+            ended.set()
+
+    monkeypatch.setattr("gametl.translate.offline.ensure_offline", fake_ensure_offline)
+    backend = backend_for(tmp_path)
+    backend.close()  # nothing to stop
+    backend.downloadOffline()
+    assert began.wait(5)
+    backend.close()
+    assert ended.is_set()  # returned only once the download had stopped
+    assert wait_until(lambda: not backend.downloading, tick=qapp.processEvents)
+    assert backend.downloadStatus == "Download cancelled."
 
 
 def test_combo_from_key_press(tmp_path: Path) -> None:
@@ -375,6 +510,9 @@ def test_combo_from_key_press(tmp_path: Path) -> None:
     assert combo_from_key(Qt.Key.Key_Return, Qt.KeyboardModifier.MetaModifier.value) == "win+enter"
     assert combo_from_key(Qt.Key.Key_Control, ctrl.value) == ""  # a modifier alone is not a hotkey
     assert combo_from_key(Qt.Key.Key_Udiaeresis, ctrl.value) == ""  # keys the registrar cannot name
+    # A numpad digit is a key of its own: bound as the digit above the letters, it would never fire.
+    assert combo_from_key(Qt.Key.Key_5, (ctrl | Qt.KeyboardModifier.KeypadModifier).value) == ""
+    assert combo_from_key(Qt.Key.Key_5, ctrl.value) == "ctrl+5"
     # Through the slot, as QML calls it.
     assert backend_for(tmp_path).comboFromKey(int(Qt.Key.Key_A), (ctrl | alt).value) == "ctrl+alt+a"
 

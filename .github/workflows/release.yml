@@ -1,19 +1,24 @@
-# Build the packaged folder on a Windows runner and publish it.
+# Test, then build the packaged folder and its installer on a Windows
+# runner and publish both.
 #
 # Three ways to cut a release; all must agree with __version__ in
 # src/gametl/__init__.py (pyproject.toml reads the version from there):
 #
 #   a merge to main that carries a version no tag exists for yet
 #       releases that version: the tag v<version> is created at the merge
-#       commit and the zip attached to its release (a merge whose version is
-#       already tagged builds nothing)
+#       commit and the installer and the zip attached to its release (a
+#       merge whose version is already tagged builds nothing)
 #   git tag v0.2.0 && git push origin v0.2.0
 #       the same for an explicit tag (a tag with a dash, v0.2.0-beta1,
 #       becomes a pre-release)
 #   Actions > Release > Run workflow
 #       with a tag name: the same, from the Actions tab; with the tag left
-#       empty: builds without releasing and keeps the zip as an artifact,
-#       to try the build first
+#       empty: builds without releasing and keeps the installer and the
+#       zip as artifacts, to try the build first
+#
+# Every run that builds runs CI's lint and tests first, so a tag pushed by
+# hand, a run from the Actions tab or a merge released before CI finishes
+# does not ship a red build.
 #
 # The executables are not code-signed here: Windows shows "unknown
 # publisher" for them until a signing step (a cloud signing service) is added.
@@ -27,18 +32,20 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create at this commit, e.g. v0.2.0 (empty: build only, keep the zip as an artifact)"
+        description: "Release tag to create at this commit, e.g. v0.2.0 (empty: build only, keep the installer and the zip as artifacts)"
         required: false
         default: ""
 
+# Read-only by default; only the build job, which creates the release, may write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   decide:
     # Cheap and first: which tag (if any) this run releases, and whether to build at all.
     runs-on: ubuntu-latest
     outputs:
+      version: ${{ steps.tag.outputs.version }}
       tag: ${{ steps.tag.outputs.tag }}
       build: ${{ steps.tag.outputs.build }}
     steps:
@@ -69,18 +76,50 @@ jobs:
             exit 1
           fi
           echo "version $version, tag '${tag}', build $build"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
-  build:
+  test:
+    # The same lint and tests as ci.yml's test job.
     needs: decide
     if: needs.decide.outputs.build == 'true'
     runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --locked
+      - name: Lint and format
+        run: |
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+      - name: Tests
+        # The overlay window and hotkey-registration tests need an interactive
+        # desktop session, which hosted runners do not provide.
+        run: >
+          uv run pytest -q
+          --ignore=tests/test_overlay_window.py
+          --ignore=tests/test_hotkeys.py
+
+  build:
+    needs: [decide, test]
+    if: needs.decide.outputs.build == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write # creates the tag and the release
     env:
       QT_QPA_PLATFORM: offscreen # the app icon is rendered with Qt during the build
       RELEASE_TAG: ${{ needs.decide.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.decide.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false # the build runs third-party code; only the publish step gets the token
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
@@ -93,8 +132,7 @@ jobs:
         run: |
           $label = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "${{ github.sha }}".Substring(0, 7) }
           "zip=gametl-$label-win64.zip" >> $env:GITHUB_OUTPUT
-          $version = (Select-String -Path src/gametl/__init__.py -Pattern '^__version__ = "(.*)"').Matches[0].Groups[1].Value
-          "setup=Subline-v$version-setup.exe" >> $env:GITHUB_OUTPUT
+          "setup=Subline-v${env:RELEASE_VERSION}-setup.exe" >> $env:GITHUB_OUTPUT
 
       - name: Build
         # The portable folder, then the installer around it (Inno Setup 6 is
@@ -102,8 +140,7 @@ jobs:
         run: uv run --group build python scripts/build.py --clean --installer
 
       - name: Settings window in the frozen app
-        # The same check as CI's build job, on the folder that ships: a tag
-        # pushed by hand or a run from the Actions tab gets no other check.
+        # The same check as CI's build job, on the folder that ships.
         run: dist\gametl\gametl-cli.exe --check-ui
 
       - name: Zip

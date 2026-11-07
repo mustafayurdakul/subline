@@ -4,13 +4,13 @@ Pure functions: text measurement is injected (`measure(text, font_px) ->
 width`), so the algorithm is testable without a GUI toolkit.
 
 Preference order when the translation is longer than the source:
-1. with `prefer_grow` (what the overlay always uses): keep the source font
-   size and wrap, letting the box grow into the free space the caller
-   reports as `max_height`, so every line renders at the same size;
-2. shrink the font a little (down to `shrink_floor` of the source size) so
-   it still fits the source box, wrapping as needed;
-3. keep the font size and let the box grow (without `prefer_grow` this
-   comes after the small shrink);
+1. keep the source font size and wrap, letting the box grow into the free
+   space the caller reports as `max_height`, so every line renders at one
+   size;
+2. shrink the font one pixel at a time, down to `shrink_floor` of the
+   source size, until it fits the source box, wrapping as needed;
+3. otherwise grow the box at the largest of those sizes that fits
+   `max_height`;
 4. shrink further, down to `min_px`;
 5. truncate with an ellipsis.
 """
@@ -34,10 +34,27 @@ class TextLayout:
     truncated: bool
 
 
+def _break(word: str, max_width: float, width_of: Callable[[str], float]) -> list[str]:
+    """`word` as pieces no wider than `max_width`, cut between characters;
+    a single character wider than that stands alone."""
+    if width_of(word) <= max_width:
+        return [word]
+    pieces: list[str] = []
+    current = ""
+    for char in word:
+        if current and width_of(current + char) > max_width:
+            pieces.append(current)
+            current = char
+        else:
+            current += char
+    return [*pieces, current]
+
+
 def wrap_words(text: str, max_width: float, width_of: Callable[[str], float]) -> list[str]:
-    """Greedy word wrap. A single word wider than `max_width` gets its own
-    line and overflows rather than being split."""
-    words = text.split()
+    """Greedy word wrap. A word wider than `max_width` is cut between
+    characters: text without spaces, as Japanese and Chinese are written, is
+    one word, and would otherwise run past both sides of the box."""
+    words = [piece for word in text.split() for piece in _break(word, max_width, width_of)]
     if not words:
         return [""]
     lines: list[str] = []
@@ -70,7 +87,6 @@ def fit_text(
     min_px: int = 10,
     shrink_floor: float = 0.72,
     line_spacing: float = 1.15,
-    prefer_grow: bool = False,
 ) -> TextLayout:
     """Lay `text` out in a box `width` wide and `height` tall, starting from
     font size `base_px` (the source text's size). Explicit newlines are kept
@@ -88,16 +104,15 @@ def fit_text(
         return lines, line_h, len(lines) * line_h
 
     # 1. Keep the size and wrap, when the box may grow enough to hold the lines.
-    if prefer_grow:
-        lines, line_h, total = layout_at(base_px)
-        if total <= limit:
-            return TextLayout(lines, base_px, line_h, math.ceil(total), total > height, False)
+    lines, line_h, total = layout_at(base_px)
+    if total <= limit:
+        return TextLayout(lines, base_px, line_h, math.ceil(total), total > height, False)
 
-    # 2. Shrink a little, one pixel at a time (base_px itself was just tried
-    #    when growing was preferred); remember the largest size that would
-    #    fit if the box grew.
+    # 2. Shrink a little, one pixel at a time below the size step 1 tried,
+    #    until the text fits the source box; remember the largest size that
+    #    would fit if the box grew.
     grow: tuple[list[str], int, float, float] | None = None
-    for px in range(base_px - 1 if prefer_grow else base_px, floor_px - 1, -1):
+    for px in range(base_px - 1, floor_px - 1, -1):
         lines, line_h, total = layout_at(px)
         if total <= height:
             return TextLayout(lines, px, line_h, math.ceil(total), False, False)

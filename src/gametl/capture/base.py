@@ -6,11 +6,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..geometry import Box
-
-Rect = Box
-"""A screen rectangle in physical pixels: (left, top, right, bottom)."""
-
 
 @dataclass(slots=True)
 class Frame:

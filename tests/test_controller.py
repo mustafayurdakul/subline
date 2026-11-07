@@ -4,6 +4,7 @@ selection, a pipeline that dies, and starts that cannot go ahead."""
 
 from __future__ import annotations
 
+import gc
 import os
 import threading
 import time
@@ -13,7 +14,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -21,15 +21,18 @@ from PySide6.QtWidgets import QApplication
 
 from gametl.app import controller as controller_module
 from gametl.app import pipeline as pipeline_module
-from gametl.app.config import ProfileStore, Settings
+from gametl.app.config import BOTTOM_STRIP, ProfileStore, Settings
 from gametl.app.controller import (
     CLAUDE_FIELDS,
     SESSION_FIELDS,
     OverlayController,
     StartError,
+    build_claude_translator,
     build_translator,
+    parse_zone,
     pipeline_config,
     restart_fields,
+    zone_problem,
 )
 from gametl.app.credentials import MemorySecretStore
 from gametl.capture.base import Frame
@@ -50,7 +53,6 @@ def wait_for(qapp: QApplication, predicate, timeout: float = 5.0) -> None:
 
 
 class FakeEngine:
-    name = "fake"
     created: list[FakeEngine] = []
     delay = 0.0  # seconds the "model load" takes
 
@@ -63,6 +65,8 @@ class FakeEngine:
         return 0.0
 
     def recognize(self, image_bgr: np.ndarray) -> OcrResult:
+        if image_bgr.size == 0:
+            raise ZeroDivisionError("float division by zero")  # as RapidOCR does on an empty picture
         self.calls += 1
         quad = np.array([[300, 500], [700, 500], [700, 540], [300, 540]], dtype=np.float32)
         return OcrResult(lines=[TextLine("Stay close.", quad, 0.95)])
@@ -80,6 +84,7 @@ class FakeCapture:
     def __init__(self, hwnd: int, min_interval_ms: int | None = None) -> None:
         self.hwnd = hwnd
         self.closed = False
+        self.dropped_options: list[str] = []
 
     def __enter__(self) -> FakeCapture:
         return self
@@ -107,6 +112,7 @@ class FakeOverlay(QObject):
         self.hwnd = hwnd
         self.font_family = font_family
         self.blocks: list = []
+        self.history: list[list] = []  # every list of blocks it was given, in order
         self.started = self.closed = False
         self.target_rect = FRAME
         FakeOverlay.instances.append(self)
@@ -123,6 +129,21 @@ class FakeOverlay(QObject):
     @Slot(list)
     def set_blocks(self, blocks: list) -> None:
         self.blocks = list(blocks)
+        self.history.append(self.blocks)
+
+
+class FakeSelector(QObject):
+    """The drag-to-select layer, counting how often it was brought up."""
+
+    selected = Signal(tuple)
+    cancelled = Signal()
+
+    def __init__(self, target_rect, mirror_x: bool = False, center_x: int | None = None) -> None:
+        super().__init__()
+        self.shown = 0
+
+    def start(self) -> None:
+        self.shown += 1
 
 
 @pytest.fixture
@@ -137,13 +158,15 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     def find_window(needle: str) -> WindowInfo | None:
         return info if needle.casefold() in TITLE.casefold() else None
 
-    # No key from the environment or an SDK config on the test machine.
+    # No key from the environment on the test machine, and nothing from the developer's home folder.
     for name in ("DEEPL_AUTH_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     monkeypatch.setattr(controller_module, "find_window", find_window)
     monkeypatch.setattr(controller_module, "is_window", lambda hwnd: hwnd == HWND)  # the game's window only
+    monkeypatch.setattr(controller_module, "is_minimized", lambda hwnd: False)
     monkeypatch.setattr(controller_module, "window_title", lambda hwnd: TITLE)
+    monkeypatch.setattr(controller_module, "window_rect", lambda hwnd: FRAME)
     monkeypatch.setattr(controller_module, "capture_area", lambda hwnd, include_frame: (FRAME, CLIENT))
     monkeypatch.setattr(controller_module, "RapidOcrEngine", FakeEngine)
     monkeypatch.setattr(controller_module, "OverlayWindow", FakeOverlay)
@@ -388,7 +411,7 @@ def test_the_cache_is_read_on_the_start_thread(qapp, controller, monkeypatch: py
     controller.start(settings(use_cache_file=True))
     wait_for(qapp, lambda: controller.running)
     assert threads and threads[0] is not threading.main_thread()  # the UI thread never parses the file
-    assert controller.cache is not None and controller.cache.get("Stay close.", "tr") == "Yakın dur."
+    assert controller.service is not None and controller.service.cache.get("Stay close.", "tr") == "Yakın dur."
 
 
 def test_the_area_follows_a_resized_window(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,3 +449,212 @@ def test_finished_start_threads_are_let_go(qapp, controller) -> None:
         wait_for(qapp, lambda lang=lang: controller.running and controller.settings.target_lang == lang)
     wait_for(qapp, lambda: not controller._start_workers)
     assert all(ref() is None for ref in threads)  # nothing keeps a finished start's thread object
+
+
+def test_stopped_sessions_are_let_go(qapp, controller) -> None:
+    refs = []
+    for lang in ("de", "tr", "fr"):
+        controller.start(settings(target_lang=lang))
+        wait_for(qapp, lambda lang=lang: controller.running and controller.settings.target_lang == lang)
+        service = controller.service
+        refs += [weakref.ref(controller.worker), weakref.ref(service), weakref.ref(service.translator)]
+        del service
+    controller.stop()
+    wait_for(qapp, lambda: not controller._retiring)
+    gc.collect()
+    assert all(ref() is None for ref in refs)  # threads, services, translators and caches go with their session
+
+
+def test_an_area_below_a_smaller_frame_keeps_the_session_running(
+    qapp, controller, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller.start(settings(roi=BOTTOM_STRIP))
+    wait_for(qapp, lambda: controller.running)
+    worker, (engine,) = controller.worker, FakeEngine.created
+    wait_for(qapp, lambda: engine.calls > 0)
+    # The game went to a smaller resolution: the old bottom quarter lies below the new frames.
+    frame, client = (0, 0, 800, 400), (0, 30, 800, 400)
+    monkeypatch.setattr(controller_module, "capture_area", lambda hwnd, include_frame: (frame, client))
+    FakeCapture.size = (800, 400)
+    expected = pipeline_config(controller.settings, frame, client)
+    wait_for(qapp, lambda: worker.cfg.roi == expected.roi)
+    calls = engine.calls
+    wait_for(qapp, lambda: engine.calls > calls)  # read again, in the new area
+    assert controller.running and controller.worker is worker
+    assert not any(m.startswith("pipeline error") for m in controller.messages)
+
+
+def test_a_selection_on_the_title_bar_alone_keeps_the_area(qapp, controller) -> None:
+    controller.start(settings(roi=BOTTOM_STRIP))
+    wait_for(qapp, lambda: controller.running)
+    specs: list[str] = []
+    controller.area_selected.connect(specs.append)
+    controller._selection = (HWND, FRAME, CLIENT)  # as select_area() leaves it
+    controller._apply_selected_area((100, 5, 700, 25))  # the client area starts 30 px down
+    assert controller.messages[-1] == "area selection: the area lies outside the game's picture"
+    assert specs == [] and controller.settings is not None and controller.settings.roi == BOTTOM_STRIP
+
+
+def test_zones_that_cannot_be_read() -> None:
+    assert parse_zone("0,0.75,1,0.25", 800, 600) == (0, 450, 800, 600)
+    assert parse_zone("1,0.75,0.2,0.25", 1920, 1050) is None  # starts at the right edge: nothing inside
+    assert parse_zone("0,700,800,100", 800, 600) is None  # pixels below a smaller window
+    assert parse_zone("0,0.75,1", 800, 600) is None and parse_zone("nan,0,1,1", 800, 600) is None
+    assert zone_problem("") is None and zone_problem("0,0.75,1,0.25") is None
+    assert zone_problem("0,0.75,1") == "area '0,0.75,1': expected x,y,w,h"
+    assert zone_problem("0;0.75;1;0.25", "ignore zone") == "ignore zone '0;0.75;1;0.25': expected x,y,w,h"
+    assert zone_problem("0,0.75,0,0.25") == "area '0,0.75,0,0.25': the width and the height must be above 0"
+    with pytest.raises(ValueError, match="ignore zone '0,0,1': expected x,y,w,h"):
+        pipeline_config(settings(ignore_zones=["0,0,1"]), FRAME, CLIENT)
+    with pytest.raises(ValueError, match="lies outside the game's picture"):
+        pipeline_config(settings(roi="1,0.75,0.2,0.25"), FRAME, CLIENT)
+    assert pipeline_config(settings(roi=" "), FRAME, CLIENT).roi is None  # blank: the whole window
+
+
+def test_a_malformed_area_is_refused_not_read_as_the_whole_window(qapp, controller) -> None:
+    controller.start(settings(roi="0,0.75,1,0.25,"))
+    wait_for(qapp, lambda: controller.failures)
+    assert controller.failures == ["area '0,0.75,1,0.25,': expected x,y,w,h"]
+
+    controller.start(settings(roi=BOTTOM_STRIP))
+    wait_for(qapp, lambda: controller.running)
+    worker, roi = controller.worker, controller.worker.cfg.roi
+    controller.apply(settings(roi="0,0.75,1"))  # typed half-way on the Game page
+    assert controller.messages[-1] == "area '0,0.75,1': expected x,y,w,h"
+    assert controller.settings is not None and controller.settings.roi == BOTTOM_STRIP
+    assert worker._next_cfg is None and worker.cfg.roi == roi  # the area in force stays
+
+
+def test_select_area_needs_a_visible_window_and_brings_an_open_layer_up(
+    qapp, controller, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    minimized = [True]
+    monkeypatch.setattr(controller_module, "is_minimized", lambda hwnd: minimized[0])
+    monkeypatch.setattr(controller_module, "AreaSelector", FakeSelector)
+    controller.select_area(settings())
+    assert controller.messages[-1] == "select area: restore the game window first"
+    assert controller._selector is None  # nothing opened off screen to block the next try
+
+    minimized[0] = False
+    controller.select_area(settings())
+    selector = controller._selector
+    assert isinstance(selector, FakeSelector) and selector.shown == 1
+    controller.select_area(settings())  # asked again while it is open (behind the settings window, say)
+    assert controller._selector is selector and selector.shown == 2
+    selector.cancelled.emit()
+    assert controller._selector is None and controller.messages[-1] == "area selection cancelled"
+
+
+def test_closing_ends_a_wait_for_the_window_at_once(qapp, controller) -> None:
+    controller.start(settings(window_match="Not Open Yet"), wait=30.0)
+    began = time.monotonic()
+    controller.close()  # as quitting does: waits for the start thread to run out
+    assert time.monotonic() - began < 2.0
+    assert all(not worker.isRunning() for worker in controller._start_workers)
+
+
+def test_an_edit_while_waiting_for_the_window_keeps_waiting(qapp, controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    opened: list[bool] = []
+    info = WindowInfo(HWND, TITLE, "FakeClass", FRAME)
+    monkeypatch.setattr(controller_module, "find_window", lambda needle: info if opened else None)
+    controller.start(settings(), wait=10.0)  # `gametl --tray --window ...` before the game is launched
+    controller.apply(settings(target_lang="de"))  # an edit during the wait restarts the start...
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert controller.starting and controller.failures == []  # ...which keeps waiting for the window
+    opened.append(True)
+    wait_for(qapp, lambda: controller.running)
+    assert controller.settings is not None and controller.settings.target_lang == "de"
+    assert controller.failures == []
+
+
+def test_without_a_game_name_the_cache_is_named_after_the_window_text(
+    qapp, controller, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths: list[Path | None] = []
+
+    def recording_cache(cache_path):
+        paths.append(cache_path)
+        return TranslationCache(cache_path)
+
+    monkeypatch.setattr(controller_module, "TranslationCache", recording_cache)
+    for title in ("Emu | FPS 59", "Emu | FPS 60"):  # a title that changes while the game runs
+        info = WindowInfo(HWND, title, "FakeClass", FRAME)
+        monkeypatch.setattr(controller_module, "find_window", lambda needle, info=info: info)
+        controller.start(settings(window_match="Emu", use_cache_file=True))
+        wait_for(qapp, lambda title=title: controller.running and controller.title == title)
+    assert paths == [controller.store.cache_path("Emu", "tr", "uppercase")] * 2
+
+
+def test_a_cache_named_after_the_window_title_is_still_used(qapp, controller) -> None:
+    path = controller.store.cache_path(TITLE, "tr", "uppercase")
+    stored = TranslationCache(path)
+    stored.put("Stay close.", "tr", "Yakın dur.")
+    stored.save()
+    controller.start(settings(window_match="Fake", use_cache_file=True))  # no cache under "Fake" yet
+    wait_for(qapp, lambda: controller.running)
+    assert controller.service is not None and controller.service.cache.path == path
+    assert controller.service.cache.get("Stay close.", "tr") == "Yakın dur."
+
+
+def test_a_cache_that_cannot_be_read_is_reported(qapp, controller) -> None:
+    path = controller.store.cache_path(TITLE, "tr", "uppercase")
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json", encoding="utf-8")
+    controller.start(settings(use_cache_file=True))
+    wait_for(qapp, lambda: controller.running)
+    assert any(m.endswith("set aside as .bad, starting empty") for m in controller.messages)
+    controller.stop()
+
+    path.unlink(missing_ok=True)  # saved by the session that just ended
+    path.mkdir()  # a folder in the file's place: it cannot be read at all, nor set aside
+    controller.start(settings(use_cache_file=True))
+    wait_for(qapp, lambda: controller.running)
+    message = controller.messages[-2]  # just before "running on ..."
+    assert message.startswith("could not read the translation cache (")
+    assert message.endswith("): this session's translations are not saved")
+
+
+def test_pause_resume_rescan_and_clear_area(qapp, controller) -> None:
+    # The whole client area as the area (the fake's line lies low in it), in place: the line is off centre.
+    controller.start(settings(roi="0,0,1,1", render="inplace"))
+    wait_for(qapp, lambda: controller.running)
+    (overlay,), (engine,) = FakeOverlay.instances, FakeEngine.created
+    wait_for(qapp, lambda: bool(overlay.blocks))
+
+    controller.set_paused(True)
+    assert controller.paused and controller.messages[-1] == "paused"
+    wait_for(qapp, lambda: overlay.blocks == [])
+    calls = engine.calls
+    deadline = time.monotonic() + 0.2
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert overlay.blocks == [] and engine.calls == calls  # nothing shown, nothing read
+
+    controller.set_paused(False)
+    assert not controller.paused and controller.messages[-1] == "resumed"
+    wait_for(qapp, lambda: bool(overlay.blocks))
+
+    shown = len(overlay.history)
+    controller.rescan()
+    assert controller.messages[-1] == "rescanning"
+    wait_for(qapp, lambda: [] in overlay.history[shown:] and bool(overlay.blocks))  # forgotten, then read afresh
+
+    worker = controller.worker
+    controller.clear_area()
+    assert controller.settings is not None and controller.settings.roi == ""
+    wait_for(qapp, lambda: worker.cfg.roi is None)
+    assert controller.worker is worker  # taken up on the fly
+
+
+def test_a_glossary_path_pasted_in_quotes_is_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    glossary = tmp_path / "glossary.json"
+    glossary.write_text('{"Casey": "Casey"}', encoding="utf-8")
+    made: list[dict] = []
+    monkeypatch.setattr("gametl.translate.claude.ClaudeTranslator", lambda **kwargs: made.append(kwargs))
+    path = f' "{glossary}" '  # Explorer's "Copy as path", pasted with a space
+    build_claude_translator(settings(translator="claude", glossary_path=path), "game", MemorySecretStore())
+    assert made[0]["glossary"] == {"Casey": "Casey"}

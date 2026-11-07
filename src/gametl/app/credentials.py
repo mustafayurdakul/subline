@@ -13,7 +13,6 @@ from __future__ import annotations
 import ctypes
 import os
 from ctypes import wintypes
-from pathlib import Path
 from typing import Protocol
 
 DEEPL_KEY = "DEEPL_AUTH_KEY"
@@ -188,8 +187,6 @@ def anthropic_api_key(secrets: SecretStore | None = None) -> str | None:
 
 
 def has_anthropic_credentials(secrets: SecretStore | None = None) -> bool:
-    """True when the Anthropic SDK will be able to authenticate: a key from
-    the store or the environment, an auth token, or the SDK's own config."""
-    if anthropic_api_key(secrets) or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
-        return True
-    return (Path.home() / ".config" / "anthropic").exists()
+    """True when there is an Anthropic key (Credential Manager or
+    environment) or an ANTHROPIC_AUTH_TOKEN."""
+    return bool(anthropic_api_key(secrets) or os.environ.get("ANTHROPIC_AUTH_TOKEN"))

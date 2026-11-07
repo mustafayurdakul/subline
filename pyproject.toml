@@ -29,6 +29,7 @@ dependencies = [
     "pyside6-essentials>=6.8",  # Core, Gui, Widgets, Qml, Quick; not the add-ons (3D, WebEngine, ...)
     # translation backends: Claude, DeepL (requests); the offline one is an extra, below
     "anthropic",
+    "pydantic>=2",  # Claude's reply schema (translate/claude.py)
     "requests>=2.31",
 ]
 
@@ -84,5 +85,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["E402"]  # Qt env setup before the PySide6 imports
 "src/gametl/app/settings_backend.py" = ["N815"]  # Qt properties and signals carry the camelCase names QML reads

@@ -1,21 +1,11 @@
+"""Registering real hotkeys with Windows. RegisterHotKey needs an
+interactive desktop session, which CI's hosted runners do not have, so CI
+leaves this module out; run it on a Windows desktop. The parsing and
+message tests are in test_hotkeys_headless.py."""
+
 from __future__ import annotations
 
-import pytest
-
-from gametl.app.hotkeys import MOD_ALT, MOD_CONTROL, MOD_SHIFT, GlobalHotkeys, parse_combo
-
-
-def test_parse_combo_letters_function_and_named_keys() -> None:
-    assert parse_combo("ctrl+shift+t") == (MOD_CONTROL | MOD_SHIFT, ord("T"))
-    assert parse_combo("Alt + F5") == (MOD_ALT, 0x74)
-    assert parse_combo("ctrl+space") == (MOD_CONTROL, 0x20)
-    assert parse_combo("f12") == (0, 0x7B)
-
-
-@pytest.mark.parametrize("bad", ["", "ctrl+", "ctrl+shift", "meta+x", "ctrl+hyper", "ctrl+f99", "ctrl+ş", "alt+٣"])
-def test_parse_combo_rejects_nonsense(bad: str) -> None:
-    with pytest.raises(ValueError):
-        parse_combo(bad)
+from gametl.app.hotkeys import GlobalHotkeys
 
 
 def test_register_and_unregister_round_trip() -> None:

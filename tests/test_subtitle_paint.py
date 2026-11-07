@@ -1,8 +1,9 @@
 """Overlay painting into an image: subtitle placement and stacking, line
 heights from the font's metrics so descenders fit, the three backgrounds,
 the band over the source line, pill opacity, weights, the in-place layout,
-and the overlay window repainting only when its blocks change. Runs
-offscreen, so CI runs it."""
+and the overlay window repainting only when its blocks change and
+starting over a game window that is already gone. Runs offscreen, so CI
+runs it."""
 
 from __future__ import annotations
 
@@ -12,13 +13,13 @@ from itertools import pairwise
 import numpy as np
 import pytest
 
-os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtGui import QFont, QFontDatabase, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from gametl.layout.style import font_px_for
+from gametl.overlay import window as window_module
 from gametl.overlay.paint import BlockPainter, RenderBlock, subtitle_rect
 from gametl.overlay.window import OverlayWindow
 
@@ -91,6 +92,15 @@ def test_in_place_layout_fits_the_width(overlay: BlockPainter) -> None:
     assert overlay.layout_for(block) is layout  # cached
     short = overlay.layout_for(RenderBlock((0, 0, 1000, 50), ["Hi"], font_px=font_px_for(50)))
     assert short.font_px == font_px_for(50) == int(50 * 0.8)  # room to spare: the caller's size, kept
+
+
+def test_a_subtitle_without_spaces_wraps_inside_the_zone(overlay: BlockPainter) -> None:
+    line = "あなたがここまで来てくれるなんて本当に信じられない" * 2  # Japanese has no spaces to wrap at
+    placed = overlay.place_subtitle(subtitle([line]))
+    measure = overlay.measurer("regular")
+    assert len(placed.layout.lines) > 1 and "".join(placed.layout.lines) == line
+    assert all(measure(text, placed.layout.font_px) <= placed.text.width() for text in placed.layout.lines)
+    assert ZONE[0] <= placed.text.left() and placed.text.right() < ZONE[2]
 
 
 def test_a_new_font_drops_the_cached_layouts(overlay: BlockPainter) -> None:
@@ -295,4 +305,19 @@ def test_the_overlay_repaints_only_when_the_blocks_change(qapp: QApplication) ->
     window.set_blocks([])
     window.set_blocks([])
     assert len(repaints) == 2
+    window.deleteLater()
+
+
+def test_starting_over_a_closed_game_reports_it_from_the_first_poll(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(window_module, "is_window", lambda _hwnd: False)
+    window = OverlayWindow(0)
+    lost: list[int] = []
+    window.target_lost.connect(lambda: lost.append(1))
+    window.start()
+    # Nothing is reported or shown from inside start(): the caller is not done starting yet.
+    assert lost == [] and not window.isVisible() and window._timer.isActive()
+    window._follow()  # the first poll
+    assert lost == [1] and not window._timer.isActive() and not window.isVisible()
     window.deleteLater()
