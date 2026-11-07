@@ -29,6 +29,7 @@ from a recording by an earlier build (see
 - [Architecture](#architecture)
 - [Development](#development)
 - [Releases](#releases)
+- [Website](#website)
 - [Acknowledgements](#acknowledgements)
 - [Licensing](#licensing)
 
@@ -499,6 +500,29 @@ only; to share builds publicly, make the repository public or publish
 the files elsewhere. The executables are not
 code-signed, so Windows warns about an unknown publisher until a signing
 step is added.
+
+## Website
+
+`docs/index.html` is the project's website, at
+<https://subline.yurdakul.dev>: one static page, its styles, script and
+images in `docs/assets`, and the settings-page renders from `docs/ui`.
+There is nothing to build. GitHub Pages serves it (Settings > Pages >
+Deploy from a branch, `main`, folder `/docs`, Enforce HTTPS; on a free
+plan the repository must be public). `docs/CNAME` names the domain, and
+a DNS `CNAME` record points `subline` in the `yurdakul.dev` zone at
+`mustafayurdakul.github.io`. The address is also in the page's canonical
+and `og:` tags; to move the site, change those and `docs/CNAME`.
+
+The download buttons link to the latest release and, once the page has
+asked the GitHub API, straight to its installer and zip, so a release
+needs no change to the page. The demo clip is `docs/demo.gif` without its
+labels:
+
+```
+F='[0:v]split[a][b];[a]crop=760:218:0:56,pad=760:222:0:0:color=0x0b0b0e[t];[b]crop=760:218:0:334[u];[t][u]vstack,format=yuv420p'
+ffmpeg -i docs/demo.gif -filter_complex "$F" -c:v libx264 -crf 22 -movflags +faststart -an docs/assets/demo.mp4
+ffmpeg -i docs/demo.gif -filter_complex "$F" -c:v libvpx-vp9 -crf 34 -b:v 0 -an docs/assets/demo.webm
+```
 
 ## Acknowledgements
 
