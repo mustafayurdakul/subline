@@ -506,12 +506,18 @@ step is added.
 `docs/index.html` is the project's website, at
 <https://subline.yurdakul.dev>: one static page, its styles, script and
 images in `docs/assets`, and the settings-page renders from `docs/ui`.
-There is nothing to build. GitHub Pages serves it (Settings > Pages >
-Deploy from a branch, `main`, folder `/docs`, Enforce HTTPS; on a free
-plan the repository must be public). `docs/CNAME` names the domain, and
-a DNS `CNAME` record points `subline` in the `yurdakul.dev` zone at
-`mustafayurdakul.github.io`. The address is also in the page's canonical
-and `og:` tags; to move the site, change those and `docs/CNAME`.
+There is nothing to build. It is hosted on Hostinger, in the folder of
+the `subline` subdomain of `yurdakul.dev` (hPanel > Domains > Subdomains,
+usually `public_html/subline`), with Hostinger's free SSL certificate:
+`.dev` sites open only over HTTPS. To publish a change, pack the page
+
+```
+cd docs && zip -r ../subline-site.zip index.html assets ui
+```
+
+and extract the zip in that folder with the File Manager, so that
+`index.html` sits directly in it. The address is also in the page's
+canonical, `og:` and JSON-LD tags; change those if the site moves.
 
 The download buttons link to the latest release and, once the page has
 asked the GitHub API, straight to its installer and zip, so a release

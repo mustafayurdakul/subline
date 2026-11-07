@@ -11,3 +11,4 @@ build/
 *.spec.bak
 *.log
 *.pem
+/subline-site.zip
